@@ -31,7 +31,7 @@ public class KazumiCommand {
                 .then(SearchCommands.buildPage(ruleManager, searchManager))
                 .then(SearchCommands.buildSearchRule(ruleManager, searchManager))
                 .then(ScreenCommands.build())
-                .then(PlayCommands.build())
+                .then(PlayCommands.build(ruleManager, searchManager))
         );
     }
 }

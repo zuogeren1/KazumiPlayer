@@ -5,6 +5,10 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import me.zuogeren.kazumiplayer.network.packet.PlayStartPacket;
 import me.zuogeren.kazumiplayer.network.packet.SyncStatePacket;
+import me.zuogeren.kazumiplayer.rule.Rule;
+import me.zuogeren.kazumiplayer.rule.RuleManager;
+import me.zuogeren.kazumiplayer.rule.dto.Road;
+import me.zuogeren.kazumiplayer.search.SearchManager;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -17,7 +21,10 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 public class PlayCommands {
 
-    public static LiteralArgumentBuilder<CommandSourceStack> build() {
+    public static LiteralArgumentBuilder<CommandSourceStack> build(
+            RuleManager ruleManager, SearchManager searchManager) {
+
+        // /kazumi play <rule> <resultId> <episode>
         var play = Commands.literal("play")
             .then(Commands.argument("rule", StringArgumentType.string())
                 .then(Commands.argument("resultId", StringArgumentType.string())
@@ -33,12 +40,50 @@ public class PlayCommands {
                                 ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
                                 return 0;
                             }
-                            // Phase 5: 发送播放请求到客户端
-                            ctx.getSource().sendSystemMessage(Component.literal(
-                                "正在准备播放... (Phase 5: " + ruleName + " ep" + episode + ")"));
+
+                            Rule rule = ruleManager.get(ruleName);
+                            if (rule == null) {
+                                ctx.getSource().sendFailure(Component.literal("规则不存在: " + ruleName));
+                                return 0;
+                            }
+
+                            // 从缓存查找搜索结果
+                            var entry = searchManager.getCache().lookup(resultId);
+                            if (entry == null) {
+                                ctx.getSource().sendFailure(Component.literal("搜索结果已过期，请重新搜索"));
+                                return 0;
+                            }
+
+                            String source = entry.item().src();
+                            ctx.getSource().sendSystemMessage(Component.literal("正在获取剧集列表..."));
+
+                            // 异步查询章节 + 发送播放包
+                            ruleManager.getEngine().queryChapters(rule, source)
+                                .thenAccept(result -> {
+                                    if (result.roads().isEmpty()) {
+                                        ctx.getSource().sendFailure(Component.literal("未找到剧集列表"));
+                                        return;
+                                    }
+                                    Road road = result.roads().get(0);
+                                    int idx = Math.max(0, Math.min(episode - 1, road.data().size() - 1));
+                                    String epUrl = road.data().get(idx);
+
+                                    SyncGroupManager.get().onPlayStart(player, screenPos, epUrl);
+                                    PacketDistributor.sendToPlayer(player, new PlayStartPacket(
+                                        screenPos, epUrl, ruleName, System.currentTimeMillis()));
+                                    ctx.getSource().sendSystemMessage(Component.literal(
+                                        "正在播放: " + road.identifier().get(idx) + " (第" + episode + "集)"));
+                                })
+                                .exceptionally(e -> {
+                                    ctx.getSource().sendFailure(Component.literal(
+                                        "获取剧集失败: " + e.getMessage()));
+                                    return null;
+                                });
+
                             return 1;
                         }))));
 
+        // /kazumi play-url <url>
         var playUrl = Commands.literal("play-url")
             .then(Commands.argument("url", StringArgumentType.greedyString())
                 .executes(ctx -> {
@@ -51,7 +96,6 @@ public class PlayCommands {
                         return 0;
                     }
 
-                    // 创建同步组 + 通知客户端播放
                     SyncGroupManager.get().onPlayStart(player, screenPos, url);
                     PacketDistributor.sendToPlayer(player, new PlayStartPacket(
                         screenPos, url, "direct", System.currentTimeMillis()));
@@ -59,6 +103,7 @@ public class PlayCommands {
                     return 1;
                 }));
 
+        // /kazumi join
         var join = Commands.literal("join")
             .executes(ctx -> {
                 ServerPlayer player = ctx.getSource().getPlayerOrException();
@@ -67,14 +112,12 @@ public class PlayCommands {
                     ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
                     return 0;
                 }
-                SyncGroupManager mgr = SyncGroupManager.get();
-                SyncGroupManager.SyncGroup group = mgr.getGroup(screenPos);
+                var group = SyncGroupManager.get().getGroup(screenPos);
                 if (group == null) {
                     ctx.getSource().sendFailure(Component.literal("该屏幕未在播放"));
                     return 0;
                 }
-                mgr.join(player, screenPos, group.videoUrl);
-                // 发送当前同步状态给新加入的玩家
+                SyncGroupManager.get().join(player, screenPos, group.videoUrl);
                 PacketDistributor.sendToPlayer(player, new SyncStatePacket(
                     screenPos, group.videoUrl, group.positionMs, group.paused, group.serverTimestamp));
                 ctx.getSource().sendSystemMessage(Component.literal("已加入同步播放"));
