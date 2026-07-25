@@ -187,12 +187,8 @@ public class XPathRuleStrategy {
      */
     public CompletableFuture<RuleSearchResult> search(RuleExecutionConfig config, String keyword) {
         PreparedRuleRequest req = prepareSearchRequest(config, keyword);
-        LOGGER.info("[Search] {} URL: {}", config.pluginName(), req.url());
         return HttpUtil.fetch(req.url(), req.method(), req.headers(), req.query())
                 .thenApply(raw -> {
-                    LOGGER.info("[Search] {} response: {} bytes", config.pluginName(), raw.length());
-                    LOGGER.debug("[Search] {} raw (first 500): {}", config.pluginName(),
-                            raw.length() > 500 ? raw.substring(0, 500) : raw);
                     int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
                     if (raw.length() > maxBytes) {
                         raw = raw.substring(0, maxBytes);
@@ -209,12 +205,8 @@ public class XPathRuleStrategy {
      */
     public CompletableFuture<RuleChapterResult> queryChapters(RuleExecutionConfig config, String source) {
         PreparedRuleRequest req = prepareChapterRequest(config, source);
-        LOGGER.info("[Chapter] {} URL: {}", config.pluginName(), req.url());
         return HttpUtil.fetch(req.url())
                 .thenApply(raw -> {
-                    LOGGER.info("[Chapter] {} response: {} bytes", config.pluginName(), raw.length());
-                    LOGGER.debug("[Chapter] {} raw (first 500): {}", config.pluginName(),
-                            raw.length() > 500 ? raw.substring(0, 500) : raw);
                     int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
                     if (raw.length() > maxBytes) {
                         raw = raw.substring(0, maxBytes);

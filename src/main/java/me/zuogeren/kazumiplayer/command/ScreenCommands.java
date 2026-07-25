@@ -1,13 +1,18 @@
 package me.zuogeren.kazumiplayer.command;
 
 import com.mojang.brigadier.arguments.FloatArgumentType;
-import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import me.zuogeren.kazumiplayer.screen.VideoScreenBlock;
+import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
+import me.zuogeren.kazumiplayer.screen.VideoScreenRegistration;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -17,19 +22,73 @@ public class ScreenCommands {
         return Commands.literal("screen")
             .then(Commands.literal("create")
                 .then(Commands.argument("pos", BlockPosArgument.blockPos())
-                    .then(Commands.argument("width", FloatArgumentType.floatArg(0.5f, 10f))
-                        .then(Commands.argument("height", FloatArgumentType.floatArg(0.5f, 10f))
-                            .executes(ctx -> {
-                                // TODO Phase 4: 完整屏幕创建逻辑
-                                BlockPos pos = BlockPosArgument.getBlockPos(ctx, "pos");
-                                float w = FloatArgumentType.getFloat(ctx, "width");
-                                float h = FloatArgumentType.getFloat(ctx, "height");
-                                ServerPlayer player = ctx.getSource().getPlayerOrException();
+                .then(Commands.argument("width", FloatArgumentType.floatArg(0.5f, 20f))
+                .then(Commands.argument("height", FloatArgumentType.floatArg(0.5f, 20f))
+                .then(Commands.argument("facing", StringArgumentType.string())
+                    .suggests((ctx, builder) -> {
+                        builder.suggest("north");
+                        builder.suggest("south");
+                        builder.suggest("east");
+                        builder.suggest("west");
+                        return builder.buildFuture();
+                    })
+                    .executes(ctx -> createScreen(ctx.getSource(),
+                        BlockPosArgument.getBlockPos(ctx, "pos"),
+                        FloatArgumentType.getFloat(ctx, "width"),
+                        FloatArgumentType.getFloat(ctx, "height"),
+                        StringArgumentType.getString(ctx, "facing"))))
+                .executes(ctx -> {
+                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                    Direction facing = player.getDirection();
+                    // 四舍五入到东西南北
+                    facing = roundToCardinal(facing);
+                    return createScreen(ctx.getSource(),
+                        BlockPosArgument.getBlockPos(ctx, "pos"),
+                        FloatArgumentType.getFloat(ctx, "width"),
+                        FloatArgumentType.getFloat(ctx, "height"),
+                        facing.getName());
+                })))));
+    }
 
-                                player.sendSystemMessage(Component.literal(
-                                    "屏幕创建功能将在 Phase 4 实现。位置: " + pos.toShortString()
-                                    + ", 尺寸: " + w + "x" + h));
-                                return 1;
-                            })))));
+    private static int createScreen(CommandSourceStack src, BlockPos pos,
+                                     float width, float height, String facingName) {
+        ServerLevel level = src.getLevel();
+        Direction facing = Direction.byName(facingName);
+        if (facing == null) {
+            src.sendFailure(Component.literal("无效方向: " + facingName + " (可用: north/south/east/west)"));
+            return 0;
+        }
+
+        BlockState state = VideoScreenRegistration.VIDEO_SCREEN_BLOCK.get()
+                .defaultBlockState()
+                .setValue(VideoScreenBlock.FACING, facing);
+
+        level.setBlock(pos, state, 3);
+
+        if (level.getBlockEntity(pos) instanceof VideoScreenBlockEntity be) {
+            be.setScreenSize(width, height);
+            be.setFacing(facing);
+            src.sendSuccess(() -> Component.literal(
+                "屏幕已创建: " + pos.toShortString() + " (" + width + "x" + height + " 面向 " + facing + ")"), true);
+        }
+        return 1;
+    }
+
+    private static Direction roundToCardinal(Direction dir) {
+        return switch (dir) {
+            case NORTH, SOUTH, EAST, WEST -> dir;
+            default -> {
+                double yaw = Math.toRadians(dir.toYRot());
+                double angle = Math.atan2(-Math.sin(yaw), Math.cos(yaw));
+                int octant = (int) Math.round(4 * angle / Math.PI) & 7;
+                yield switch (octant) {
+                    case 0 -> Direction.SOUTH;
+                    case 1, 2 -> Direction.WEST;
+                    case 3, 4 -> Direction.NORTH;
+                    case 5, 6 -> Direction.EAST;
+                    default -> Direction.SOUTH;
+                };
+            }
+        };
     }
 }
