@@ -7,6 +7,7 @@ import me.zuogeren.kazumiplayer.rule.dto.RuleSearchResult;
 import me.zuogeren.kazumiplayer.util.HttpUtil;
 import org.slf4j.Logger;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -19,19 +20,28 @@ public class RuleEngine {
     private final ApiRuleStrategy apiStrategy = new ApiRuleStrategy();
 
     public CompletableFuture<RuleSearchResult> search(Rule rule, String keyword) {
+        LOGGER.info("[RuleEngine] search '{}' via {} (mode: {})", keyword, rule.getName(), rule.getSearchMode());
         if (!rule.isXPathSearch()) {
             // API 模式
             PreparedRuleRequest req = apiStrategy.prepareSearchRequest(rule, keyword);
-            LOGGER.debug("[API Search] {} URL: {}", rule.getName(), req.url());
+            LOGGER.info("[RuleEngine] API URL: {}", req.url());
             return HttpUtil.fetch(req.url(), req.method(), req.headers(), req.query())
                 .thenApply(raw -> {
-                    LOGGER.debug("[API Search] {} response: {} bytes", rule.getName(), raw.length());
+                    LOGGER.info("[RuleEngine] API response: {} bytes", raw.length());
                     return apiStrategy.parseSearch(raw, rule);
+                })
+                .exceptionally(e -> {
+                    LOGGER.error("[RuleEngine] API search FAILED: {}", e.getMessage());
+                    return new RuleSearchResult(rule.getName(), List.of(), "", List.of(e.getMessage()));
                 });
         }
         // XPath 模式
         RuleExecutionConfig config = RuleExecutionConfig.from(rule);
-        return xpathStrategy.search(config, keyword);
+        return xpathStrategy.search(config, keyword)
+            .exceptionally(e -> {
+                LOGGER.error("[RuleEngine] XPath search FAILED: {}", e.getMessage());
+                return new RuleSearchResult(rule.getName(), List.of(), "", List.of(e.getMessage()));
+            });
     }
 
     public CompletableFuture<RuleChapterResult> queryChapters(Rule rule, String source) {

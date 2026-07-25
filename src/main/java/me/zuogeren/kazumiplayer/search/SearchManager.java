@@ -37,8 +37,10 @@ public class SearchManager {
         Map<String, List<SearchResultEntry>> results = new ConcurrentHashMap<>();
         long timeoutMs = Config.CONFIG.searchTimeoutMs.get();
 
+        LOGGER.info("[SearchManager] searching '{}' across {} rules", keyword, rules.size());
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         for (Rule rule : rules.values()) {
+            LOGGER.info("[SearchManager] dispatching rule: {}", rule.getName());
             futures.add(engine.search(rule, keyword)
                 .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
                 .thenAccept(result -> {
