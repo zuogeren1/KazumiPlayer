@@ -8,6 +8,7 @@ import me.zuogeren.kazumiplayer.rule.RuleEngine;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
 import me.zuogeren.kazumiplayer.screen.VideoScreenRegistration;
 import me.zuogeren.kazumiplayer.search.SearchManager;
+import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -36,6 +37,10 @@ public class KazumiPlayer {
         RuleManager ruleManager = new RuleManager(FMLPaths.CONFIGDIR.get());
         ruleManager.loadAll();
         SearchManager searchManager = new SearchManager(ruleEngine);
+
+        // 同步组管理
+        SyncGroupManager.init();
+        NeoForge.EVENT_BUS.register(SyncGroupManager.get());
 
         // 初始化命令系统
         KazumiCommand.init(ruleManager, searchManager);
