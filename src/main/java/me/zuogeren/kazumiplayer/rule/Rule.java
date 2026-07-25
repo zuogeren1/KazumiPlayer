@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.rule;
 
 import com.google.gson.annotations.SerializedName;
+import java.util.Map;
 
 /**
  * Kazumi 规则 JSON 完整映射。
@@ -36,7 +37,10 @@ public class Rule {
     private boolean useLegacyParser;
     private boolean adBlocker;
 
-    // Phase 2: API 模式和反爬虫暂不处理
+    // API 模式配置
+    private ApiSearchConfig searchApiConfig;
+    private ApiChapterConfig chapterApiConfig;
+
     private boolean deprecated;
 
     // --- Getters ---
@@ -59,7 +63,43 @@ public class Rule {
     public boolean isUsePost() { return usePost; }
     public boolean isUseLegacyParser() { return useLegacyParser; }
     public boolean isAdBlocker() { return adBlocker; }
+    public ApiSearchConfig getSearchApiConfig() { return searchApiConfig; }
+    public ApiChapterConfig getChapterApiConfig() { return chapterApiConfig; }
     public boolean isDeprecated() { return deprecated; }
+
+    // --- API 配置内部类 ---
+
+    public static class ApiRequestConfig {
+        String method = "GET";
+        String url = "";
+        Map<String, String> headers = Map.of();
+        Map<String, String> query = Map.of();
+        String bodyType = "none";
+    }
+
+    public static class ApiSearchConfig {
+        ApiRequestConfig request = new ApiRequestConfig();
+        String listPath = "$.data[*]";
+        String namePath = "$.name";
+        String sourcePath = "$.url";
+    }
+
+    public static class ApiChapterConfig {
+        ApiRequestConfig request = new ApiRequestConfig();
+        String format = "nested";
+        String roadsPath = "$.data.roads[*]";
+        String roadNamePath = "$.name";
+        String episodesPath = "$.episodes[*]";
+        String episodeNamePath = "$.name";
+        String episodeUrlPath = "$.url";
+        Map<String, String> variables = Map.of();
+        ApiEpisodePageConfig episodePage;
+    }
+
+    public static class ApiEpisodePageConfig {
+        String url = "";
+        Map<String, String> query = Map.of();
+    }
 
     /**
      * 规则名称只能包含字母数字下划线

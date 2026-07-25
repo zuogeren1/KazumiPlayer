@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.rule.dto.PreparedRuleRequest;
 import me.zuogeren.kazumiplayer.rule.dto.RuleChapterResult;
 import me.zuogeren.kazumiplayer.rule.dto.RuleSearchResult;
+import me.zuogeren.kazumiplayer.util.HttpUtil;
 import org.slf4j.Logger;
 
 import java.util.concurrent.CompletableFuture;
@@ -17,34 +18,35 @@ public class RuleEngine {
     private final XPathRuleStrategy xpathStrategy = new XPathRuleStrategy();
     private final ApiRuleStrategy apiStrategy = new ApiRuleStrategy();
 
-    /**
-     * 执行搜索
-     */
     public CompletableFuture<RuleSearchResult> search(Rule rule, String keyword) {
-        RuleExecutionConfig config = RuleExecutionConfig.from(rule);
-
-        if (rule.isXPathSearch()) {
-            return xpathStrategy.search(config, keyword);
-        } else {
-            // API 模式 (Phase 2 暂不完整实现)
-            PreparedRuleRequest req = apiStrategy.prepareSearchRequest(config, keyword);
-            return me.zuogeren.kazumiplayer.util.HttpUtil.fetch(req.url())
-                    .thenApply(raw -> apiStrategy.parseSearch(raw, config));
+        if (!rule.isXPathSearch()) {
+            // API 模式
+            PreparedRuleRequest req = apiStrategy.prepareSearchRequest(rule, keyword);
+            LOGGER.debug("[API Search] {} URL: {}", rule.getName(), req.url());
+            return HttpUtil.fetch(req.url(), req.method(), req.headers(), req.query())
+                .thenApply(raw -> {
+                    LOGGER.debug("[API Search] {} response: {} bytes", rule.getName(), raw.length());
+                    return apiStrategy.parseSearch(raw, rule);
+                });
         }
+        // XPath 模式
+        RuleExecutionConfig config = RuleExecutionConfig.from(rule);
+        return xpathStrategy.search(config, keyword);
     }
 
-    /**
-     * 查询剧集列表
-     */
     public CompletableFuture<RuleChapterResult> queryChapters(Rule rule, String source) {
-        RuleExecutionConfig config = RuleExecutionConfig.from(rule);
-
-        if (rule.isXPathChapter()) {
-            return xpathStrategy.queryChapters(config, source);
-        } else {
-            PreparedRuleRequest req = apiStrategy.prepareChapterRequest(config, source);
-            return me.zuogeren.kazumiplayer.util.HttpUtil.fetch(req.url())
-                    .thenApply(raw -> apiStrategy.parseChapters(raw, config, source, rule.getBaseUrl()));
+        if (!rule.isXPathChapter()) {
+            // API 模式
+            PreparedRuleRequest req = apiStrategy.prepareChapterRequest(rule, source);
+            LOGGER.debug("[API Chapter] {} URL: {}", rule.getName(), req.url());
+            return HttpUtil.fetch(req.url(), req.method(), req.headers(), req.query())
+                .thenApply(raw -> {
+                    LOGGER.debug("[API Chapter] {} response: {} bytes", rule.getName(), raw.length());
+                    return apiStrategy.parseChapters(raw, rule, source);
+                });
         }
+        // XPath 模式
+        RuleExecutionConfig config = RuleExecutionConfig.from(rule);
+        return xpathStrategy.queryChapters(config, source);
     }
 }
