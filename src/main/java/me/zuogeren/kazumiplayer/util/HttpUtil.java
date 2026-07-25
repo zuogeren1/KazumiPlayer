@@ -67,8 +67,8 @@ public class HttpUtil {
 
         CompletableFuture.runAsync(() -> {
             try {
-                // SSRF 检查
                 URI uri = URI.create(urlString);
+                LOGGER.debug("HTTP {} {} (host: {})", method, urlString, uri.getHost());
                 checkSsrf(uri);
 
                 // 构建 URL (添加 query params)
@@ -103,9 +103,19 @@ public class HttpUtil {
                 future.complete(body);
             } catch (SsrfBlockedException e) {
                 future.completeExceptionally(e);
+            } catch (java.net.UnknownHostException e) {
+                LOGGER.error("DNS failed for {}: {}", urlString, e.getMessage());
+                future.completeExceptionally(new RuntimeException("DNS解析失败: " + e.getMessage(), e));
+            } catch (java.net.http.HttpTimeoutException e) {
+                LOGGER.warn("HTTP timeout: {}", urlString);
+                future.completeExceptionally(new RuntimeException("请求超时", e));
+            } catch (java.net.ConnectException e) {
+                LOGGER.warn("Connection refused: {} ({})", urlString, e.getMessage());
+                future.completeExceptionally(new RuntimeException("连接失败: " + e.getMessage(), e));
             } catch (Exception e) {
-                LOGGER.warn("HTTP request failed: {}", e.getMessage());
-                future.completeExceptionally(e);
+                LOGGER.warn("HTTP request failed for {}: {} {}", urlString,
+                        e.getClass().getSimpleName(), e.getMessage());
+                future.completeExceptionally(new RuntimeException(e.getMessage(), e));
             }
         });
 
