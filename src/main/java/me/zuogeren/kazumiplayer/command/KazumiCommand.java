@@ -28,6 +28,7 @@ public class KazumiCommand {
             Commands.literal("kazumi")
                 .then(RuleCommands.build(ruleManager, searchManager))
                 .then(SearchCommands.buildSearch(ruleManager, searchManager))
+                .then(SearchCommands.buildPage(ruleManager, searchManager))
                 .then(SearchCommands.buildSearchRule(ruleManager, searchManager))
                 .then(ScreenCommands.build())
                 .then(PlayCommands.build())

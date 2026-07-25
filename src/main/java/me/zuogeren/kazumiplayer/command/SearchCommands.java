@@ -7,6 +7,7 @@ import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
 import me.zuogeren.kazumiplayer.search.BangumiApi;
 import me.zuogeren.kazumiplayer.search.SearchManager;
+import me.zuogeren.kazumiplayer.search.SearchSessionCache;
 import me.zuogeren.kazumiplayer.util.ChatComponentUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -18,64 +19,87 @@ import java.util.Map;
 
 public class SearchCommands {
     private static final BangumiApi bangumiApi = new BangumiApi();
+    private static final SearchSessionCache sessionCache = new SearchSessionCache();
     private static final int PAGE_SIZE = 8;
 
-    // /kazumi search <keyword> [page] - 搜索 bgm.tv, 8条/页
+    // /kazumi search <keyword> - 搜索 bgm.tv (创建会话，缓存全量结果)
     public static LiteralArgumentBuilder<CommandSourceStack> buildSearch(
             RuleManager ruleManager, SearchManager searchManager) {
         return Commands.literal("search")
             .then(Commands.argument("keyword", StringArgumentType.greedyString())
-                .then(Commands.argument("page", IntegerArgumentType.integer(1))
-                    .executes(ctx -> doBangumiSearch(ctx.getSource(), ruleManager,
-                        StringArgumentType.getString(ctx, "keyword"),
-                        IntegerArgumentType.getInteger(ctx, "page"))))
-                .executes(ctx -> doBangumiSearch(ctx.getSource(), ruleManager,
-                    StringArgumentType.getString(ctx, "keyword"), 1)));
+                .executes(ctx -> {
+                    String keyword = StringArgumentType.getString(ctx, "keyword");
+                    CommandSourceStack src = ctx.getSource();
+                    String sessionId = sessionCache.createSession(keyword);
+
+                    src.sendSystemMessage(Component.literal("正在搜索: " + keyword + " ..."));
+                    // 首次拉取 20 条，后续翻页从缓存读取
+                    bangumiApi.search(keyword, 20, 0).thenAccept(subjects -> {
+                        sessionCache.addResults(sessionId, subjects);
+                        var page = sessionCache.getPage(sessionId, 1, PAGE_SIZE);
+                        if (page == null) return;
+                        showBangumiPage(src, page, ruleManager);
+                    }).exceptionally(e -> {
+                        src.sendSystemMessage(Component.literal("搜索失败: " + e.getMessage()));
+                        return null;
+                    });
+                    return 1;
+                }));
     }
 
-    private static int doBangumiSearch(CommandSourceStack src, RuleManager ruleManager,
-                                        String keyword, int page) {
-        int offset = (page - 1) * PAGE_SIZE;
-        src.sendSystemMessage(Component.literal("正在搜索: " + keyword + " (第 " + page + " 页) ..."));
-        bangumiApi.search(keyword, PAGE_SIZE, offset).thenAccept(subjects -> {
-            if (subjects.isEmpty()) {
-                src.sendSystemMessage(Component.literal("未找到 '" + keyword + "' 的结果"));
-                return;
-            }
-            src.sendSystemMessage(Component.literal(
-                "=== 搜索: " + keyword + " (第 " + page + " 页, " + subjects.size() + " 个) ==="));
-            for (int i = 0; i < subjects.size(); i++) {
-                var s = subjects.get(i);
-                String name = s.getDisplayName();
-                String date = s.getDate() != null ? " (" + s.getDate() + ")" : "";
-                src.sendSystemMessage(Component.literal((offset + i + 1) + ". " + name + date));
-                if (!ruleManager.getRules().isEmpty()) {
-                    src.sendSystemMessage(ChatComponentUtil.clickable(
-                        "   [查源]", "/kazumi search-rule all " + name,
-                        "在所有规则中搜索: " + name));
-                }
-            }
-            // 下一页按钮
-            if (subjects.size() >= PAGE_SIZE) {
-                int next = page + 1;
+    // /kazumi page <sessionId> <page> - 翻页（从缓存读取）
+    public static LiteralArgumentBuilder<CommandSourceStack> buildPage(
+            RuleManager ruleManager, SearchManager searchManager) {
+        return Commands.literal("page")
+            .then(Commands.argument("sessionId", StringArgumentType.string())
+                .then(Commands.argument("page", IntegerArgumentType.integer(1))
+                    .executes(ctx -> {
+                        String sessionId = StringArgumentType.getString(ctx, "sessionId");
+                        int page = IntegerArgumentType.getInteger(ctx, "page");
+                        CommandSourceStack src = ctx.getSource();
+                        var result = sessionCache.getPage(sessionId, page, PAGE_SIZE);
+                        if (result == null) {
+                            src.sendFailure(Component.literal("会话已过期，请重新搜索"));
+                            return 0;
+                        }
+                        showBangumiPage(src, result, ruleManager);
+                        return 1;
+                    })));
+    }
+
+    private static void showBangumiPage(CommandSourceStack src,
+                                         SearchSessionCache.PageResult page, RuleManager ruleManager) {
+        if (!page.hasResults() || page.items().isEmpty()) {
+            src.sendSystemMessage(Component.literal("未找到 '" + page.keyword() + "' 的结果"));
+            return;
+        }
+        src.sendSystemMessage(Component.literal(
+            "=== 搜索: " + page.keyword() + " (第 " + page.page() + "/" + page.totalPages() + " 页, 共 " + page.total() + " 个) ==="));
+        int base = (page.page() - 1) * PAGE_SIZE;
+        for (int i = 0; i < page.items().size(); i++) {
+            var s = page.items().get(i);
+            String name = s.getDisplayName();
+            String date = s.getDate() != null ? " (" + s.getDate() + ")" : "";
+            src.sendSystemMessage(Component.literal((base + i + 1) + ". " + name + date));
+            if (!ruleManager.getRules().isEmpty()) {
                 src.sendSystemMessage(ChatComponentUtil.clickable(
-                    ">>> 下一页 (第 " + next + " 页)",
-                    "/kazumi search " + keyword + " " + next,
-                    "切换第 " + next + " 页"));
+                    "   [查源]", "/kazumi search-rule all " + name,
+                    "在所有规则中搜索: " + name));
             }
-        }).exceptionally(e -> {
-            src.sendSystemMessage(Component.literal("搜索失败: " + e.getMessage()));
-            return null;
-        });
-        return 1;
+        }
+        if (page.hasNext()) {
+            int next = page.page() + 1;
+            src.sendSystemMessage(ChatComponentUtil.clickable(
+                ">>> 下一页 (第 " + next + " 页)",
+                "/kazumi page " + page.sessionId() + " " + next,
+                "切换到第 " + next + " 页"));
+        }
     }
 
     // /kazumi search-rule all <name> [page] - 在所有规则中搜索
     // /kazumi search-rule <rule> <name> [page] - 在指定规则中搜索
     public static LiteralArgumentBuilder<CommandSourceStack> buildSearchRule(
             RuleManager ruleManager, SearchManager searchManager) {
-
-        // search-rule all <name> [page]
         var all = Commands.literal("all")
             .then(Commands.argument("name", StringArgumentType.greedyString())
                 .then(Commands.argument("page", IntegerArgumentType.integer(1))
@@ -85,7 +109,6 @@ public class SearchCommands {
                 .executes(ctx -> doRuleSearch(ctx.getSource(), ruleManager, searchManager,
                     null, StringArgumentType.getString(ctx, "name"), 1)));
 
-        // search-rule <rule> <name> [page]
         var one = Commands.argument("rule", StringArgumentType.string())
             .suggests((ctx, builder) -> {
                 ruleManager.listAll().forEach(builder::suggest);
@@ -120,46 +143,38 @@ public class SearchCommands {
             rules = Map.of(ruleName, rule);
             src.sendSystemMessage(Component.literal("正在 " + ruleName + " 中搜索: " + keyword + " ..."));
         }
-
         int p = Math.max(1, page);
         searchManager.searchAll(rules, keyword)
-            .thenAccept(data -> showPage(src, data, p))
+            .thenAccept(data -> showRulePage(src, data, p))
             .exceptionally(e -> { src.sendSystemMessage(Component.literal("搜索出错")); return null; });
         return 1;
     }
 
-    private static void showPage(CommandSourceStack src,
-                                  SearchManager.SearchResultData data, int page) {
+    private static void showRulePage(CommandSourceStack src,
+                                      SearchManager.SearchResultData data, int page) {
         List<ResultEntry> all = new ArrayList<>();
         for (var entry : data.results().entrySet()) {
             for (var item : entry.getValue()) {
                 all.add(new ResultEntry(entry.getKey(), item));
             }
         }
-        if (all.isEmpty()) {
-            src.sendSystemMessage(Component.literal("未找到结果"));
-            return;
-        }
+        if (all.isEmpty()) { src.sendSystemMessage(Component.literal("未找到结果")); return; }
         int totalPages = (all.size() + PAGE_SIZE - 1) / PAGE_SIZE;
         final int cp = page > totalPages ? totalPages : page;
-
         src.sendSystemMessage(ChatComponentUtil.header(
             "=== 搜索结果 第 " + cp + "/" + totalPages + " 页 (共 " + all.size() + " 个) ==="));
-
         int start = (cp - 1) * PAGE_SIZE;
         int end = Math.min(start + PAGE_SIZE, all.size());
         for (int i = start; i < end; i++) {
             var e = all.get(i);
             src.sendSystemMessage(ChatComponentUtil.clickable(
                 (i + 1) + ". [" + e.ruleName + "] " + e.entry.item().name(),
-                "/kazumi play " + e.ruleName + " " + e.entry.id() + " 1",
-                "点击播放"));
+                "/kazumi play " + e.ruleName + " " + e.entry.id() + " 1", "点击播放"));
         }
         if (cp < totalPages) {
             int next = cp + 1;
             src.sendSystemMessage(ChatComponentUtil.clickable(
-                ">>> 下一页 (第 " + next + " 页)",
-                "/kazumi search-rule all 翻页 " + next,
+                ">>> 下一页 (第 " + next + " 页)", "/kazumi search-rule all 翻页 " + next,
                 "切换到第 " + next + " 页"));
         }
     }
