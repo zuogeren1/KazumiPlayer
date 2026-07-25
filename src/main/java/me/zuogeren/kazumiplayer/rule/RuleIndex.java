@@ -4,12 +4,12 @@ package me.zuogeren.kazumiplayer.rule;
  * KazumiRules index.json 目录条目
  */
 public class RuleIndex {
-    private String name;
-    private String version;
-    private boolean useNativePlayer;
-    private boolean antiCrawlerEnabled;
-    private String author;
-    private long lastUpdate;
+    String name;
+    String version;
+    boolean useNativePlayer;
+    boolean antiCrawlerEnabled;
+    String author;
+    long lastUpdate;
 
     public String getName() { return name; }
     public String getVersion() { return version; }

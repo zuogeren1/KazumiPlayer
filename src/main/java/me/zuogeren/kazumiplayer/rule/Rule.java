@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.rule;
 
 import com.google.gson.annotations.SerializedName;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -8,40 +9,40 @@ import java.util.Map;
  * 字段名保持与 JSON key 一致 (如 baseURL 而非 baseUrl)。
  */
 public class Rule {
-    private String api = "1";
-    private String type = "anime";
-    private String name = "";
-    private String version = "";
-    private boolean muliSources = true;
+    String api = "1";
+    String type = "anime";
+    String name = "";
+    String version = "";
+    boolean muliSources = true;
 
     @SerializedName("baseURL")
-    private String baseUrl = "";
-    private String referer = "";
-    private String userAgent = "";
+    String baseUrl = "";
+    String referer = "";
+    String userAgent = "";
 
     // XPath 搜索字段
     @SerializedName("searchURL")
-    private String searchUrl = "";
-    private String searchList = "";
-    private String searchName = "";
-    private String searchResult = "";
-    private String searchMode = "xpath";
+    String searchUrl = "";
+    String searchList = "";
+    String searchName = "";
+    String searchResult = "";
+    String searchMode = "xpath";
 
     // XPath 章节字段
-    private String chapterRoads = "";
-    private String chapterResult = "";
-    private String chapterMode = "xpath";
+    String chapterRoads = "";
+    String chapterResult = "";
+    String chapterMode = "xpath";
 
     // HTTP 相关
-    private boolean usePost;
-    private boolean useLegacyParser;
-    private boolean adBlocker;
+    boolean usePost;
+    boolean useLegacyParser;
+    boolean adBlocker;
 
     // API 模式配置
-    private ApiSearchConfig searchApiConfig;
-    private ApiChapterConfig chapterApiConfig;
+    ApiSearchConfig searchApiConfig;
+    ApiChapterConfig chapterApiConfig;
 
-    private boolean deprecated;
+    boolean deprecated;
 
     // --- Getters ---
     public String getApi() { return api; }
@@ -67,38 +68,38 @@ public class Rule {
     public ApiChapterConfig getChapterApiConfig() { return chapterApiConfig; }
     public boolean isDeprecated() { return deprecated; }
 
-    // --- API 配置内部类 ---
+    // --- API 配置内部类 (字段 public，Gson 需要直接访问) ---
 
     public static class ApiRequestConfig {
-        String method = "GET";
-        String url = "";
-        Map<String, String> headers = Map.of();
-        Map<String, String> query = Map.of();
-        String bodyType = "none";
+        public String method = "GET";
+        public String url = "";
+        public Map<String, String> headers = new LinkedHashMap<>();
+        public Map<String, String> query = new LinkedHashMap<>();
+        public String bodyType = "none";
     }
 
     public static class ApiSearchConfig {
-        ApiRequestConfig request = new ApiRequestConfig();
-        String listPath = "$.data[*]";
-        String namePath = "$.name";
-        String sourcePath = "$.url";
+        public ApiRequestConfig request = new ApiRequestConfig();
+        public String listPath = "$.data[*]";
+        public String namePath = "$.name";
+        public String sourcePath = "$.url";
     }
 
     public static class ApiChapterConfig {
-        ApiRequestConfig request = new ApiRequestConfig();
-        String format = "nested";
-        String roadsPath = "$.data.roads[*]";
-        String roadNamePath = "$.name";
-        String episodesPath = "$.episodes[*]";
-        String episodeNamePath = "$.name";
-        String episodeUrlPath = "$.url";
-        Map<String, String> variables = Map.of();
-        ApiEpisodePageConfig episodePage;
+        public ApiRequestConfig request = new ApiRequestConfig();
+        public String format = "nested";
+        public String roadsPath = "$.data.roads[*]";
+        public String roadNamePath = "$.name";
+        public String episodesPath = "$.episodes[*]";
+        public String episodeNamePath = "$.name";
+        public String episodeUrlPath = "$.url";
+        public Map<String, String> variables = new LinkedHashMap<>();
+        public ApiEpisodePageConfig episodePage;
     }
 
     public static class ApiEpisodePageConfig {
-        String url = "";
-        Map<String, String> query = Map.of();
+        public String url = "";
+        public Map<String, String> query = new LinkedHashMap<>();
     }
 
     /**
