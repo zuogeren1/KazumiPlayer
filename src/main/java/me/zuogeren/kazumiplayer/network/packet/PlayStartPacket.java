@@ -1,6 +1,9 @@
 package me.zuogeren.kazumiplayer.network.packet;
 
 import me.zuogeren.kazumiplayer.KazumiPlayer;
+import me.zuogeren.kazumiplayer.playback.PlaybackManager;
+import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
@@ -9,9 +12,6 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-/**
- * 服务端 -> 客户端: 通知客户端开始播放
- */
 public record PlayStartPacket(
         BlockPos screenPos,
         String episodeUrl,
@@ -30,13 +30,17 @@ public record PlayStartPacket(
                     PlayStartPacket::new);
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
-    }
+    public Type<? extends CustomPacketPayload> type() { return TYPE; }
+
+    private static final PlaybackManager playback = new PlaybackManager();
 
     public static void handle(PlayStartPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
-            // Phase 5: 启动 MCEF 嗅探 + WaterMedia 播放
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.level == null) return;
+            if (mc.level.getBlockEntity(packet.screenPos) instanceof VideoScreenBlockEntity screen) {
+                playback.playUrl(screen, packet.episodeUrl);
+            }
         });
     }
 }
