@@ -9,60 +9,49 @@ import me.zuogeren.kazumiplayer.screen.VideoState;
 import net.minecraft.client.Minecraft;
 import org.slf4j.Logger;
 
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
  * 客户端播放流程编排
- * 搜索缓存条目 -> 查询章节 -> 获取剧集URL -> MCEF嗅探 -> WaterMedia播放
+ * 接收 URL → MCEF 嗅探(如需要) → WaterMedia 播放
  */
 public class PlaybackManager {
     private static final Logger LOGGER = LogUtils.getLogger();
     private final WaterMediaPlayer waterMedia = new WaterMediaPlayer();
+    private final VideoSniffer sniffer = new VideoSniffer();
 
     /**
-     * 通过规则和源URL直接播放 (Phase 5: 跳过嗅探，直接播放URL)
+     * 播放 URL（自动判断是否需要 MCEF 嗅探）
      */
-    public CompletableFuture<Void> playUrl(VideoScreenBlockEntity screen, String videoUrl) {
+    public CompletableFuture<Void> playUrl(VideoScreenBlockEntity screen, String url) {
         screen.setVideoState(VideoState.LOADING);
-        return CompletableFuture.runAsync(() -> {
+
+        // 判断是否需要嗅探：本地文件/已知视频直链直接播，HTML 页面先嗅探
+        if (isDirectVideoUrl(url)) {
             Minecraft.getInstance().execute(() -> {
-                waterMedia.play(videoUrl);
+                waterMedia.play(url);
                 screen.setVideoState(VideoState.PLAYING);
             });
-        });
-    }
+            return CompletableFuture.completedFuture(null);
+        }
 
-    /**
-     * 通过规则引擎搜索并播放
-     * 1. 查询章节 -> 获取剧集URL列表
-     * 2. 选择指定集数的URL
-     * 3. Phase 5: 直接播放URL (Phase 5.1将加入MCEF嗅探)
-     */
-    public CompletableFuture<Void> play(RuleEngine engine, Rule rule, String source,
-                                         VideoScreenBlockEntity screen, int episode) {
-        screen.setVideoState(VideoState.LOADING);
-        return engine.queryChapters(rule, source)
-            .thenCompose(result -> {
-                if (result.roads().isEmpty()) {
-                    screen.setVideoState(VideoState.ERROR);
-                    LOGGER.warn("No roads found for {} via {}", source, rule.getName());
-                    return CompletableFuture.failedFuture(
-                            new RuntimeException("未找到剧集列表"));
-                }
-                // 使用第一条线路
-                Road road = result.roads().get(0);
-                int idx = Math.max(0, Math.min(episode - 1, road.data().size() - 1));
-                String episodeUrl = road.data().get(idx);
-                LOGGER.info("Playing episode {} from {}: {}", episode, rule.getName(), episodeUrl);
-
-                // Phase 5: 直接播放URL (后续Phase加入MCEF嗅探)
+        // 用 MCEF 嗅探视频直链
+        LOGGER.info("Sniffing video URL from: {}", url);
+        return sniffer.sniff(url)
+            .thenAccept(videoUrl -> {
                 Minecraft.getInstance().execute(() -> {
-                    waterMedia.play(episodeUrl);
+                    waterMedia.play(videoUrl);
                     screen.setVideoState(VideoState.PLAYING);
                 });
-                return CompletableFuture.<Void>completedFuture(null);
+            })
+            .exceptionally(e -> {
+                // 嗅探失败，尝试直接播放
+                LOGGER.warn("Sniff failed, trying direct play: {}", e.getMessage());
+                Minecraft.getInstance().execute(() -> {
+                    waterMedia.play(url);
+                    screen.setVideoState(VideoState.PLAYING);
+                });
+                return null;
             });
     }
 
@@ -72,4 +61,15 @@ public class PlaybackManager {
     }
 
     public WaterMediaPlayer getWaterMedia() { return waterMedia; }
+
+    private static boolean isDirectVideoUrl(String url) {
+        String lower = url.toLowerCase();
+        return lower.startsWith("file://")
+            || lower.endsWith(".mp4")
+            || lower.endsWith(".mkv")
+            || lower.endsWith(".m3u8")
+            || lower.endsWith(".avi")
+            || lower.endsWith(".webm")
+            || lower.endsWith(".mov");
+    }
 }
