@@ -34,7 +34,7 @@ public class WaterMediaPlayer {
         try {
             player = MediaAPI.createPlayer(mrl,
                 () -> MediaAPI.glEngine(Thread.currentThread(), mc),
-                null);
+                () -> MediaAPI.jsEngine());
             if (player == null) {
                 LOGGER.error("Failed to create player for: {}", mrl.uri);
                 return;
