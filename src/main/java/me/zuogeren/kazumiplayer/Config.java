@@ -9,20 +9,12 @@ public class Config {
     public static final Config CONFIG;
     public static final ModConfigSpec SPEC;
 
-    // MCEF 浏览器生命周期策略
-    public final ModConfigSpec.EnumValue<McefLifecycle> mcefLifecycle;
     // GitHub KazumiRules 仓库地址
     public final ModConfigSpec.ConfigValue<String> githubRulesRepoUrl;
     // 最大同时搜索的规则数
     public final ModConfigSpec.IntValue maxConcurrentSearches;
     // 单个规则搜索超时 (ms)
     public final ModConfigSpec.IntValue searchTimeoutMs;
-    // 最大同时嗅探数
-    public final ModConfigSpec.IntValue maxConcurrentSniffs;
-    // 每个客户端最大同时播放数
-    public final ModConfigSpec.IntValue maxConcurrentPlays;
-    // 嗅探超时 (秒)
-    public final ModConfigSpec.IntValue sniffTimeoutSeconds;
     // 每规则最大搜索结果数
     public final ModConfigSpec.IntValue maxSearchResultsPerRule;
     // 搜索响应最大字节数
@@ -30,19 +22,8 @@ public class Config {
     // SSRF 域名白名单 (为空时仅允许公网地址)
     public final ModConfigSpec.ConfigValue<List<? extends String>> ssrfWhitelist;
 
-    public enum McefLifecycle {
-        ON_DEMAND,
-        PERSISTENT
-    }
-
     private Config(ModConfigSpec.Builder builder) {
         builder.push("general");
-
-        mcefLifecycle = builder
-                .comment("MCEF 浏览器生命周期策略",
-                        "ON_DEMAND - 每次播放创建浏览器，嗅探完成后释放",
-                        "PERSISTENT - 保持单个浏览器实例复用")
-                .defineEnum("mcefLifecycle", McefLifecycle.ON_DEMAND);
 
         githubRulesRepoUrl = builder
                 .comment("KazumiRules 仓库 raw URL")
@@ -59,18 +40,6 @@ public class Config {
         searchTimeoutMs = builder
                 .comment("单个规则搜索超时时间 (毫秒)")
                 .defineInRange("searchTimeoutMs", 30000, 5000, 120000);
-
-        maxConcurrentSniffs = builder
-                .comment("客户端最大同时嗅探数")
-                .defineInRange("maxConcurrentSniffs", 3, 1, 10);
-
-        maxConcurrentPlays = builder
-                .comment("每个客户端最大同时播放屏幕数")
-                .defineInRange("maxConcurrentPlays", 3, 1, 10);
-
-        sniffTimeoutSeconds = builder
-                .comment("视频嗅探超时时间 (秒)")
-                .defineInRange("sniffTimeoutSeconds", 30, 5, 120);
 
         maxSearchResultsPerRule = builder
                 .comment("每规则最大搜索结果数")
