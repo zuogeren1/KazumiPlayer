@@ -15,14 +15,28 @@ public class WaterMediaPlayer {
     private MediaPlayer player;
 
     public void play(String videoUrl) {
+        Minecraft mc = Minecraft.getInstance();
+        // 在渲染线程外启动 MRL 异步加载和重试
+        new Thread(() -> {
+            for (int retry = 0; retry < 10; retry++) {
+                MRL mrl = MediaAPI.mrl(videoUrl);
+                if (mrl.source(0) != null) {
+                    mc.execute(() -> createAndStart(mrl, mc));
+                    return;
+                }
+                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+            }
+            LOGGER.error("MRL loading timeout: {}", videoUrl);
+        }, "KazumiPlayer-MRL-Loader").start();
+    }
+
+    private void createAndStart(MRL mrl, Minecraft mc) {
         try {
-            MRL mrl = MediaAPI.mrl(videoUrl);
-            Minecraft mc = Minecraft.getInstance();
             player = MediaAPI.createPlayer(mrl,
                 () -> MediaAPI.glEngine(Thread.currentThread(), mc),
-                null);  // 暂不处理音频
+                null);
             if (player == null) {
-                LOGGER.error("Failed to create player for: {}", videoUrl);
+                LOGGER.error("Failed to create player for: {}", mrl.uri);
                 return;
             }
             player.start();
