@@ -27,7 +27,8 @@ public class KazumiCommand {
         dispatcher.register(
             Commands.literal("kazumi")
                 .then(RuleCommands.build(ruleManager, searchManager))
-                .then(SearchCommands.build(ruleManager, searchManager))
+                .then(SearchCommands.buildSearch(ruleManager, searchManager))
+                .then(SearchCommands.buildSearchRule(ruleManager, searchManager))
                 .then(ScreenCommands.build())
                 .then(PlayCommands.build())
         );
