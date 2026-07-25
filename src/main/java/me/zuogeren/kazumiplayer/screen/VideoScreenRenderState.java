@@ -9,4 +9,5 @@ public class VideoScreenRenderState extends net.minecraft.client.renderer.blocke
     public float screenHeight = 2.0f;
     public net.minecraft.core.Direction facing = net.minecraft.core.Direction.NORTH;
     public VideoState videoState = VideoState.IDLE;
+    public me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
 }

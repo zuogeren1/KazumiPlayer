@@ -18,6 +18,8 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private float screenHeight = 2.0f;
     private Direction facing = Direction.NORTH;
     private VideoState videoState = VideoState.IDLE;
+    // 客户端暂存，不持久化
+    public transient me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
 
     public VideoScreenBlockEntity(BlockPos pos, BlockState blockState) {
         super(VideoScreenRegistration.VIDEO_SCREEN_BLOCK_ENTITY.get(), pos, blockState);

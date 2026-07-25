@@ -40,6 +40,8 @@ public record PlayStartPacket(
             if (mc.level == null) return;
             if (mc.level.getBlockEntity(packet.screenPos) instanceof VideoScreenBlockEntity screen) {
                 playback.playUrl(screen, packet.episodeUrl);
+                // 将播放器引用存到 BE 供渲染器使用
+                screen.player = playback.getWaterMedia();
             }
         });
     }
