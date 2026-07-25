@@ -175,9 +175,19 @@ public class PlayCommands {
         return play.then(playUrl).then(join).then(playStop).then(playLeave);
     }
 
-    /** 顶层命令：next/prev/time/episodes，单独注册到 /kazumi 下 */
+    /** 顶层命令：next/prev/time/episodes/pause/resume，单独注册到 /kazumi 下 */
     public static void registerTopLevel(CommandDispatcher<CommandSourceStack> dispatcher,
                                          RuleManager ruleManager, SearchManager searchManager) {
+        // /kazumi pause - 暂停
+        dispatcher.register(Commands.literal("kazumi")
+            .then(Commands.literal("pause")
+                .executes(ctx -> togglePause(ctx.getSource(), true))));
+
+        // /kazumi resume - 恢复
+        dispatcher.register(Commands.literal("kazumi")
+            .then(Commands.literal("resume")
+                .executes(ctx -> togglePause(ctx.getSource(), false))));
+
         // /kazumi next
         dispatcher.register(Commands.literal("kazumi")
             .then(Commands.literal("next")
@@ -377,6 +387,29 @@ public class PlayCommands {
         if (g != null) {
             SyncGroupManager.get().updateState(screenPos, newPos, g.paused);
         }
+    }
+
+    private static int togglePause(CommandSourceStack src, boolean pause) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = src.getPlayerOrException();
+        BlockPos pos = getTargetScreen(player);
+        if (pos == null) { src.sendFailure(Component.literal("请瞄准一个屏幕!")); return 0; }
+        var g = SyncGroupManager.get().getGroup(pos);
+        if (g == null) { src.sendFailure(Component.literal("该屏幕未在播放")); return 0; }
+        long cur;
+        if (g != null) {
+            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+            cur = g.positionMs + elapsed;
+        } else {
+            cur = 0;
+        }
+        SyncGroupManager.get().updateState(pos, cur, pause);
+        var be = player.level().getBlockEntity(pos);
+        if (be instanceof VideoScreenBlockEntity screen) {
+            screen.updateSyncPosition(cur);
+            screen.setPlaybackPaused(pause);
+        }
+        src.sendSystemMessage(Component.literal(pause ? "已暂停" : "已恢复"));
+        return 1;
     }
 
     private static String formatMs(long ms) {

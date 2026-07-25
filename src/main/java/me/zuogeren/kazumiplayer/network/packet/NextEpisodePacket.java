@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.KazumiPlayer;
 import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
+import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -55,6 +56,7 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
             String nextUrl = road.data().get(idx - 1);
             String allData = JsonUtil.GSON.toJson(roads);
             screen.setPlaybackFull(nextUrl, 0, idx, allData);
+            SyncGroupManager.get().onPlayStart(sp, packet.screenPos, nextUrl);
             LOGGER.info("Auto next episode {}: {}", idx, nextUrl);
         });
     }

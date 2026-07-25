@@ -123,7 +123,15 @@ public class ClientDisconnectHandler {
                 if (screen.player != null && screen.player.hasPendingSeek() && screen.player.isPlaying()) {
                     screen.player.applyPendingSeek();
                 }
-                // NBT 位置变化 → seek（仅当位置真正改变了才 seek）
+                // 暂停/恢复
+                if (screen.player != null) {
+                    if (screen.isPlaybackPaused()) {
+                        screen.player.pause();
+                    } else {
+                        screen.player.resume();
+                    }
+                }
+                // NBT 位置变化 → seek
                 if (screen.player != null && screen.player.isPlaying()) {
                     long nbtPos = screen.getSyncPositionMs();
                     if (nbtPos >= 0 && nbtPos != screen.lastAppliedPosition) {

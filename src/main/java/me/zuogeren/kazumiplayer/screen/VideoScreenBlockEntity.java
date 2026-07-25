@@ -31,6 +31,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private int episodeIndex = 1;          // 当前集数 (1-based)
     private String episodeData = "";       // Road JSON（所有集的名称+URL）
     private String watchingPlayers = "";   // 观看者 UUID 列表，逗号分隔
+    private boolean playbackPaused;
 
     // 客户端暂存，不持久化
     public transient me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
@@ -52,6 +53,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public int getEpisodeIndex() { return episodeIndex; }
     public String getEpisodeData() { return episodeData; }
     public String getWatchingPlayers() { return watchingPlayers; }
+    public boolean isPlaybackPaused() { return playbackPaused; }
     /** 客户端：检测 episodeUrl 是否刚发生变化（用于检测切换集数） */
     public boolean justChanged(String url) { return !url.equals(lastEpisodeUrl); }
     public void markSeen(String url) { this.lastEpisodeUrl = url; }
@@ -116,6 +118,11 @@ public class VideoScreenBlockEntity extends BlockEntity {
         markDirty();
     }
 
+    public void setPlaybackPaused(boolean paused) {
+        this.playbackPaused = paused;
+        markDirty();
+    }
+
     private void markDirty() {
         setChanged();
         if (level != null) {
@@ -134,6 +141,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.episodeIndex = input.getIntOr("EpisodeIndex", 1);
         this.episodeData = input.getString("EpisodeData").orElse("");
         this.watchingPlayers = input.getString("WatchingPlayers").orElse("");
+        this.playbackPaused = input.getBooleanOr("PlaybackPaused", false);
 
         if (level != null && level.isClientSide() && episodeUrl.isEmpty() && player != null) {
             player.stop();
@@ -152,6 +160,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putInt("EpisodeIndex", episodeIndex);
         output.putString("EpisodeData", episodeData);
         output.putString("WatchingPlayers", watchingPlayers);
+        output.putBoolean("PlaybackPaused", playbackPaused);
     }
 
     @Override
@@ -166,6 +175,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putInt("EpisodeIndex", episodeIndex);
         tag.putString("EpisodeData", episodeData);
         tag.putString("WatchingPlayers", watchingPlayers);
+        tag.putBoolean("PlaybackPaused", playbackPaused);
         return tag;
     }
 
