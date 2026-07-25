@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.network;
 
 import me.zuogeren.kazumiplayer.network.packet.PlayStartPacket;
+import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
 import me.zuogeren.kazumiplayer.network.packet.ScreenSyncPacket;
 import me.zuogeren.kazumiplayer.network.packet.SyncStatePacket;
@@ -25,5 +26,6 @@ public class NetworkManager {
         registrar.playToClient(ScreenSyncPacket.TYPE, ScreenSyncPacket.STREAM_CODEC, ScreenSyncPacket::handle);
         registrar.playToClient(PlayStartPacket.TYPE, PlayStartPacket.STREAM_CODEC, PlayStartPacket::handle);
         registrar.playToClient(SyncStatePacket.TYPE, SyncStatePacket.STREAM_CODEC, SyncStatePacket::handle);
+        registrar.playToClient(PlayStopPacket.TYPE, PlayStopPacket.STREAM_CODEC, PlayStopPacket::handle);
     }
 }

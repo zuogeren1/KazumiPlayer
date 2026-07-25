@@ -1,9 +1,12 @@
 package me.zuogeren.kazumiplayer.sync;
 
+import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
 import me.zuogeren.kazumiplayer.network.packet.SyncStatePacket;
+import me.zuogeren.kazumiplayer.rule.RuleManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -51,6 +54,10 @@ public class SyncGroupManager {
         }
     }
 
+    public void leave(BlockPos screenPos) {
+        groups.remove(screenPos);
+    }
+
     public SyncGroup getGroup(BlockPos screenPos) {
         return groups.get(screenPos);
     }
@@ -61,6 +68,21 @@ public class SyncGroupManager {
         group.positionMs = positionMs;
         group.paused = paused;
         group.serverTimestamp = System.currentTimeMillis();
+    }
+
+    @SubscribeEvent
+    public void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer sp) {
+            // 进服时同步已安装的规则到客户端
+            var rm = new RuleManager(FMLPaths.CONFIGDIR.get());
+            rm.loadAll();
+            var rules = rm.listAll();
+            if (!rules.isEmpty()) {
+                String json = me.zuogeren.kazumiplayer.util.JsonUtil.GSON.toJson(
+                    rules.stream().map(rm::get).filter(r -> r != null).toList());
+                PacketDistributor.sendToPlayer(sp, new RuleSyncPacket(json));
+            }
+        }
     }
 
     @SubscribeEvent

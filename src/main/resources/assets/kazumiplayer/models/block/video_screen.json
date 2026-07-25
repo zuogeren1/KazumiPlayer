@@ -1,0 +1,15 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "particle": "kazumiplayer:block/video_screen_placeholder"
+  },
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 16, 1],
+      "faces": {
+        "south": {"uv": [0, 0, 16, 16], "texture": "#particle"}
+      }
+    }
+  ]
+}

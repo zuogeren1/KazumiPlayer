@@ -6,6 +6,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlock;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.screen.VideoScreenRegistration;
+import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
@@ -47,7 +48,30 @@ public class ScreenCommands {
                         FloatArgumentType.getFloat(ctx, "width"),
                         FloatArgumentType.getFloat(ctx, "height"),
                         facing.getName());
-                })))));
+                })))))
+            .then(Commands.literal("stop")
+                .executes(ctx -> {
+                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                    var hit = player.pick(5.0, 0, false);
+                    if (!(hit instanceof net.minecraft.world.phys.BlockHitResult blockHit)) {
+                        ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                        return 0;
+                    }
+                    BlockPos pos = blockHit.getBlockPos();
+                    var be = player.level().getBlockEntity(pos);
+                    // 停止前保存当前计时到 NBT
+                    var g = SyncGroupManager.get().getGroup(pos);
+                    if (g != null && be instanceof VideoScreenBlockEntity screen) {
+                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                        screen.updateSyncPosition(g.positionMs + elapsed);
+                    }
+                    if (be instanceof VideoScreenBlockEntity screen) {
+                        screen.clearPlayback();
+                    }
+                    SyncGroupManager.get().leave(pos);
+                    ctx.getSource().sendSuccess(() -> Component.literal("屏幕已停止"), true);
+                    return 1;
+                }));
     }
 
     private static int createScreen(CommandSourceStack src, BlockPos pos,

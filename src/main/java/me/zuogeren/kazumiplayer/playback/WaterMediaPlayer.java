@@ -13,10 +13,11 @@ import org.watermedia.api.media.players.MediaPlayer;
 public class WaterMediaPlayer {
     private static final Logger LOGGER = LogUtils.getLogger();
     private MediaPlayer player;
+    private long pendingSeekMs = -1;
+    private boolean pendingPause;
 
     public void play(String videoUrl) {
         Minecraft mc = Minecraft.getInstance();
-        // 在渲染线程外启动 MRL 异步加载和重试
         new Thread(() -> {
             for (int retry = 0; retry < 10; retry++) {
                 MRL mrl = MediaAPI.mrl(videoUrl);
@@ -40,6 +41,7 @@ public class WaterMediaPlayer {
                 return;
             }
             player.start();
+            // seek 交给外部 tick 延迟执行（此时 demuxer 尚未就绪）
         } catch (Exception e) {
             LOGGER.error("Playback failed: {}", e.getMessage());
         }
@@ -63,21 +65,38 @@ public class WaterMediaPlayer {
 
     public void pause() {
         if (player != null) player.pause();
+        else pendingPause = true;
     }
 
     public void resume() {
         if (player != null) player.resume();
+        else pendingPause = false;
     }
 
     public void seek(long ms) {
-        if (player != null) player.seek(ms);
+        if (player != null && player.playing()) player.seek(ms);
+        else pendingSeekMs = ms;
     }
 
     public void stop() {
+        pendingSeekMs = -1;
+        pendingPause = false;
         if (player != null) {
             player.stop();
             player.release();
             player = null;
+        }
+    }
+
+    public boolean hasPendingSeek() {
+        return pendingSeekMs >= 0;
+    }
+
+    public void applyPendingSeek() {
+        if (player != null && player.playing() && pendingSeekMs >= 0) {
+            player.seek(pendingSeekMs);
+            LOGGER.info("Delayed seek: {}ms (time={})", pendingSeekMs, player.time());
+            pendingSeekMs = -1;
         }
     }
 

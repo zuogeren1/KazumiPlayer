@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer;
 
 import com.mojang.logging.LogUtils;
+import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
 import me.zuogeren.kazumiplayer.command.KazumiCommand;
 import me.zuogeren.kazumiplayer.network.NetworkManager;
@@ -55,6 +56,7 @@ public class KazumiPlayer {
         // 客户端渲染器
         if (dist.isClient()) {
             modEventBus.register(ClientModEvents.class);
+            NeoForge.EVENT_BUS.register(ClientDisconnectHandler.class);
         }
 
         LOGGER.info("KazumiPlayer initialized on {} ({} rules loaded)", dist, ruleManager.count());

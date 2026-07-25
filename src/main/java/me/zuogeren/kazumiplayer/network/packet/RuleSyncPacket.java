@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.network.packet;
 
 import me.zuogeren.kazumiplayer.KazumiPlayer;
+import me.zuogeren.kazumiplayer.client.ClientRuleCache;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -28,7 +29,7 @@ public record RuleSyncPacket(String rulesJson) implements CustomPacketPayload {
 
     public static void handle(RuleSyncPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
-            // Phase 3: 存储到 ClientRuleCache
+            ClientRuleCache.updateFromJson(packet.rulesJson);
         });
     }
 }

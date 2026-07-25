@@ -5,10 +5,6 @@ import me.zuogeren.kazumiplayer.screen.VideoScreenRenderer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 
-/**
- * Client-side event handlers.
- * Registered manually from KazumiPlayer constructor via modEventBus.
- */
 public class ClientModEvents {
 
     @SubscribeEvent
