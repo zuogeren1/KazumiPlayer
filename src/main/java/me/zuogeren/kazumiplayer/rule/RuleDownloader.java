@@ -41,6 +41,10 @@ public class RuleDownloader {
                     if (rule == null) {
                         throw new RuntimeException("Failed to parse rule: " + ruleName);
                     }
+                    LOGGER.info("Downloaded rule {}: searchMode={}, apiConfig={}, xpathSearchUrl={}",
+                            ruleName, rule.getSearchMode(),
+                            rule.getSearchApiConfig() != null ? rule.getSearchApiConfig().request.url : "NULL",
+                            rule.getSearchUrl());
                     if (!rule.isValidName()) {
                         throw new RuntimeException("Invalid rule name: " + rule.getName());
                     }

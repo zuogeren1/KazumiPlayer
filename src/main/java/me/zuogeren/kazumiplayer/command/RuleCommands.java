@@ -79,6 +79,33 @@ public class RuleCommands {
 
             // --- test (连通性) ---
             .then(Commands.literal("test")
+                // 不指定规则 = 测试全部
+                .executes(ctx -> {
+                    CommandSourceStack src = ctx.getSource();
+                    var names = ruleManager.listAll();
+                    if (names.isEmpty()) {
+                        src.sendFailure(Component.literal("没有已安装的规则"));
+                        return 0;
+                    }
+                    src.sendSystemMessage(Component.literal("正在测试全部 " + names.size() + " 个规则..."));
+                    for (String name : names) {
+                        Rule rule = ruleManager.get(name);
+                        if (rule == null) continue;
+                        long start = System.currentTimeMillis();
+                        String n = name;
+                        ruleManager.getEngine().search(rule, "test")
+                            .thenAccept(r -> {
+                                long lat = System.currentTimeMillis() - start;
+                                src.sendSystemMessage(Component.literal(n + " 延迟: " + lat + "ms"));
+                            })
+                            .exceptionally(e -> {
+                                src.sendSystemMessage(Component.literal(n + " 失败"));
+                                return null;
+                            });
+                    }
+                    return 1;
+                })
+                // 指定规则
                 .then(Commands.argument("name", StringArgumentType.string())
                     .suggests((ctx, builder) -> {
                         ruleManager.listAll().forEach(builder::suggest);
@@ -92,22 +119,19 @@ public class RuleCommands {
                             src.sendFailure(Component.literal("规则不存在: " + name));
                             return 0;
                         }
-
                         src.sendSystemMessage(Component.literal("正在测试 " + name + " ..."));
                         long start = System.currentTimeMillis();
                         ruleManager.getEngine().search(rule, "test")
                             .thenAccept(result -> {
                                 long latency = System.currentTimeMillis() - start;
                                 src.sendSystemMessage(Component.literal(
-                                    "规则 " + name + " 连通正常，延迟: " + latency + "ms"));
+                                    name + " 连通正常，延迟: " + latency + "ms"));
                             })
                             .exceptionally(e -> {
                                 src.sendSystemMessage(Component.literal(
-                                    "规则 " + name + " 连通失败: "
-                                    + (e.getCause() != null ? e.getCause().getMessage() : e.getMessage())));
+                                    name + " 连通失败"));
                                 return null;
                             });
-
                         return 1;
                     })))
 
