@@ -50,6 +50,9 @@ public class PlaybackManager {
                 Minecraft.getInstance().execute(() -> {
                     waterMedia.play(url);
                     screen.setVideoState(VideoState.PLAYING);
+                    var mc = Minecraft.getInstance();
+                    mc.gui.getChat().addClientSystemMessage(
+                        net.minecraft.network.chat.Component.literal("§e视频嗅探失败，尝试直接播放..."));
                 });
                 return null;
             });

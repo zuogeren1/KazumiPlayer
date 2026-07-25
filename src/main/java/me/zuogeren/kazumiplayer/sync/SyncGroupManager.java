@@ -89,6 +89,14 @@ public class SyncGroupManager {
     public void onPlayerLeave(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
             leave(sp.getUUID());
+            // 更新所有受影响屏幕的 WatchingPlayers
+            for (var entry : groups.entrySet()) {
+                var be = sp.level().getBlockEntity(entry.getKey());
+                if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
+                    String list = String.join(",", entry.getValue().players.stream().map(java.util.UUID::toString).toList());
+                    screen.setWatchingPlayers(list);
+                }
+            }
         }
     }
 

@@ -23,12 +23,21 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private Direction facing = Direction.NORTH;
     private VideoState videoState = VideoState.IDLE;
 
-    // NBT 持久化：播放 URL 和同步位置
+    // 播放状态
     private String episodeUrl = "";
     private long syncPositionMs = -1;
 
+    // 集数管理
+    private int episodeIndex = 1;          // 当前集数 (1-based)
+    private String episodeData = "";       // Road JSON（所有集的名称+URL）
+    private String watchingPlayers = "";   // 观看者 UUID 列表，逗号分隔
+
     // 客户端暂存，不持久化
     public transient me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
+    private transient String lastEpisodeUrl;
+    public transient long lastAppliedPosition = -1;
+    public transient long playbackStartedAt; // 防抖：上次启动播放的时间戳
+    public transient boolean endedNotified;
 
     public VideoScreenBlockEntity(BlockPos pos, BlockState blockState) {
         super(VideoScreenRegistration.VIDEO_SCREEN_BLOCK_ENTITY.get(), pos, blockState);
@@ -40,6 +49,12 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public VideoState getVideoState() { return videoState; }
     public String getEpisodeUrl() { return episodeUrl; }
     public long getSyncPositionMs() { return syncPositionMs; }
+    public int getEpisodeIndex() { return episodeIndex; }
+    public String getEpisodeData() { return episodeData; }
+    public String getWatchingPlayers() { return watchingPlayers; }
+    /** 客户端：检测 episodeUrl 是否刚发生变化（用于检测切换集数） */
+    public boolean justChanged(String url) { return !url.equals(lastEpisodeUrl); }
+    public void markSeen(String url) { this.lastEpisodeUrl = url; }
 
     public void setScreenSize(float width, float height) {
         this.screenWidth = width;
@@ -57,7 +72,6 @@ public class VideoScreenBlockEntity extends BlockEntity {
         markDirty();
     }
 
-    /** 服务端：设置播放 URL 和同步位置，触发 NBT 同步 */
     public void setPlayback(String url, long positionMs) {
         this.episodeUrl = url;
         this.syncPositionMs = positionMs;
@@ -67,22 +81,38 @@ public class VideoScreenBlockEntity extends BlockEntity {
             level != null && level.isClientSide() ? "client" : "server");
     }
 
-    /** 服务端/客户端：清除播放状态（保留计时用于断线重连） */
+    /** 设置完整播放信息（含集数和 Road 数据） */
+    public void setPlaybackFull(String url, long positionMs, int episodeIdx, String episodeDataJson) {
+        this.episodeUrl = url;
+        this.syncPositionMs = positionMs;
+        this.episodeIndex = episodeIdx;
+        this.episodeData = episodeDataJson;
+        this.videoState = VideoState.PLAYING;
+        markDirty();
+    }
+
     public void clearPlayback() {
         this.episodeUrl = "";
+        this.syncPositionMs = -1;
+        this.episodeIndex = 1;
+        this.episodeData = "";
         this.videoState = VideoState.IDLE;
         if (player != null) {
             player.stop();
             player = null;
         }
         markDirty();
-        LOGGER.info("clearPlayback side={} (kept posMs={})",
-            level != null && level.isClientSide() ? "client" : "server", syncPositionMs);
+        LOGGER.info("clearPlayback side={}",
+            level != null && level.isClientSide() ? "client" : "server");
     }
 
-    /** 仅更新同步位置（不清除 URL） */
     public void updateSyncPosition(long positionMs) {
         this.syncPositionMs = positionMs;
+        markDirty();
+    }
+
+    public void setWatchingPlayers(String players) {
+        this.watchingPlayers = players;
         markDirty();
     }
 
@@ -101,8 +131,10 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.videoState = input.getString("VideoState").map(VideoState::fromName).orElse(VideoState.IDLE);
         this.episodeUrl = input.getString("EpisodeUrl").orElse("");
         this.syncPositionMs = input.getLongOr("SyncPositionMs", -1L);
+        this.episodeIndex = input.getIntOr("EpisodeIndex", 1);
+        this.episodeData = input.getString("EpisodeData").orElse("");
+        this.watchingPlayers = input.getString("WatchingPlayers").orElse("");
 
-        // 客户端：NBT 中 URL 被清空 → 停止播放器
         if (level != null && level.isClientSide() && episodeUrl.isEmpty() && player != null) {
             player.stop();
             player = null;
@@ -117,6 +149,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putString("VideoState", videoState.name());
         output.putString("EpisodeUrl", episodeUrl);
         output.putLong("SyncPositionMs", syncPositionMs);
+        output.putInt("EpisodeIndex", episodeIndex);
+        output.putString("EpisodeData", episodeData);
+        output.putString("WatchingPlayers", watchingPlayers);
     }
 
     @Override
@@ -128,6 +163,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putString("VideoState", videoState.name());
         tag.putString("EpisodeUrl", episodeUrl);
         tag.putLong("SyncPositionMs", syncPositionMs);
+        tag.putInt("EpisodeIndex", episodeIndex);
+        tag.putString("EpisodeData", episodeData);
+        tag.putString("WatchingPlayers", watchingPlayers);
         return tag;
     }
 

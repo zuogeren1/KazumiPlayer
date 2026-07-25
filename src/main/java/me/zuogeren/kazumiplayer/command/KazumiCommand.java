@@ -33,5 +33,7 @@ public class KazumiCommand {
                 .then(ScreenCommands.build())
                 .then(PlayCommands.build(ruleManager, searchManager))
         );
+
+        PlayCommands.registerTopLevel(dispatcher, ruleManager, searchManager);
     }
 }

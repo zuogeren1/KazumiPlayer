@@ -1,7 +1,9 @@
 package me.zuogeren.kazumiplayer.client;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
-import me.zuogeren.kazumiplayer.network.packet.PositionReportPacket;
+import com.mojang.logging.LogUtils;
+import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
+import org.slf4j.Logger;
 import me.zuogeren.kazumiplayer.playback.PlaybackManager;
 import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleEngine;
@@ -13,11 +15,15 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
-import net.neoforged.neoforge.network.PacketDistributor;
+import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
+
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ClientDisconnectHandler {
-
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static int tickCounter;
+    private static final Set<VideoScreenBlockEntity> activeScreens = ConcurrentHashMap.newKeySet();
 
     // ---- 命令（EVENT_BUS） ----
 
@@ -67,35 +73,79 @@ public class ClientDisconnectHandler {
 
     @SubscribeEvent
     public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return;
-        for (var be : mc.level.getGloballyRenderedBlockEntities()) {
-            if (be instanceof VideoScreenBlockEntity screen && screen.player != null) {
+        stopAllActive();
+    }
+
+    private static boolean isWatching(VideoScreenBlockEntity screen, Minecraft mc) {
+        if (mc.player == null) return false;
+        String watchers = screen.getWatchingPlayers();
+        if (watchers.isEmpty()) return false;
+        return java.util.Arrays.asList(watchers.split(","))
+            .contains(mc.player.getUUID().toString());
+    }
+
+    private static void stopAllActive() {
+        for (var screen : activeScreens) {
+            if (screen.player != null) {
                 screen.player.stop();
                 screen.player = null;
             }
         }
+        activeScreens.clear();
     }
 
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
         if (++tickCounter % 20 != 0) return;
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return;
+        if (mc.level == null) {
+            // 离开世界时停止所有播放
+            stopAllActive();
+            return;
+        }
         for (var be : mc.level.getGloballyRenderedBlockEntities()) {
             if (be instanceof VideoScreenBlockEntity screen) {
                 String url = screen.getEpisodeUrl();
                 // 新播放：启动播放器并预置 seek
-                if (screen.player == null && !url.isEmpty()) {
+                // 只有 WatchingPlayers 中的玩家才自动播放（手动 join 后才能播）
+                if (screen.player == null && !url.isEmpty() && isWatching(screen, mc)
+                        && System.currentTimeMillis() - screen.playbackStartedAt > 3000) {
+                    screen.playbackStartedAt = System.currentTimeMillis();
                     PlaybackManager pm = new PlaybackManager();
                     pm.playUrl(screen, url);
                     screen.player = pm.getWaterMedia();
+                    activeScreens.add(screen);
+                    screen.markSeen(url);
                     long seekMs = screen.getSyncPositionMs();
                     if (seekMs > 0) screen.player.seek(seekMs);
                 }
                 // 已启动但 seek 未生效：等播放器就绪后重试
                 if (screen.player != null && screen.player.hasPendingSeek() && screen.player.isPlaying()) {
                     screen.player.applyPendingSeek();
+                }
+                // NBT 位置变化 → seek（仅当位置真正改变了才 seek）
+                if (screen.player != null && screen.player.isPlaying()) {
+                    long nbtPos = screen.getSyncPositionMs();
+                    if (nbtPos >= 0 && nbtPos != screen.lastAppliedPosition) {
+                        screen.lastAppliedPosition = nbtPos;
+                        screen.player.seek(nbtPos);
+                    }
+                }
+                // 检测播放完毕 → 自动下一集
+                if (screen.player != null && screen.player.isEnded() && !screen.endedNotified) {
+                    screen.endedNotified = true;
+                    LOGGER.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
+                    var pkt = new NextEpisodePacket(screen.getBlockPos());
+                    mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
+                }
+                // URL 变了 → 停旧播放器，下次 tick 自动启动新的
+                if (!url.isEmpty() && screen.justChanged(url)) {
+                    if (screen.player != null) {
+                        screen.player.stop();
+                        screen.player = null;
+                    }
+                    screen.markSeen(url);
+                    screen.endedNotified = false;
                 }
             }
         }

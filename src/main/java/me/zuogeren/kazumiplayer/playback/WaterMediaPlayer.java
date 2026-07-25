@@ -19,7 +19,7 @@ public class WaterMediaPlayer {
     public void play(String videoUrl) {
         Minecraft mc = Minecraft.getInstance();
         new Thread(() -> {
-            for (int retry = 0; retry < 10; retry++) {
+            for (int retry = 0; retry < 30; retry++) {
                 MRL mrl = MediaAPI.mrl(videoUrl);
                 if (mrl.source(0) != null) {
                     mc.execute(() -> createAndStart(mrl, mc));
@@ -28,6 +28,8 @@ public class WaterMediaPlayer {
                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
             }
             LOGGER.error("MRL loading timeout: {}", videoUrl);
+            mc.execute(() -> mc.gui.getChat().addClientSystemMessage(
+                net.minecraft.network.chat.Component.literal("§c视频加载超时，请检查网络或稍后重试")));
         }, "KazumiPlayer-MRL-Loader").start();
     }
 
@@ -38,6 +40,8 @@ public class WaterMediaPlayer {
                 () -> MediaAPI.jsEngine());
             if (player == null) {
                 LOGGER.error("Failed to create player for: {}", mrl.uri);
+                mc.execute(() -> mc.gui.getChat().addClientSystemMessage(
+                    net.minecraft.network.chat.Component.literal("§c创建播放器失败")));
                 return;
             }
             player.start();
@@ -49,6 +53,10 @@ public class WaterMediaPlayer {
 
     public boolean isPlaying() {
         return player != null && player.playing();
+    }
+
+    public boolean isEnded() {
+        return player != null && player.ended();
     }
 
     public long getTextureId() {

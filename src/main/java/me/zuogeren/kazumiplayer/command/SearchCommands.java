@@ -180,7 +180,7 @@ public class SearchCommands {
             var e = all.get(i);
             src.sendSystemMessage(ChatComponentUtil.clickable(
                 (i + 1) + ". [" + e.ruleName + "] " + e.entry.item().name(),
-                "/kazumi play " + e.ruleName + " " + e.entry.id() + " 1", "点击播放"));
+                "/kazumi episodes " + e.ruleName + " " + e.entry.id(), "点击查看集数"));
         }
         var nav = Component.literal("").withStyle(net.minecraft.ChatFormatting.GRAY);
         if (cp > 1) {

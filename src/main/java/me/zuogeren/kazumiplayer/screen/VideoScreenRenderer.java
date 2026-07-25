@@ -83,9 +83,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         // 根据朝向绕 Y 轴旋转，使四边形正面朝向玩家
         rotateToFacing(poseStack, state.facing);
 
-        // 四边形在屏幕前方 (Z+ = 屏幕正面)
-        // halfW/halfH 决定屏幕尺寸，Z 略微前移避免 z-fighting
-        float z = 0.51f;
+        float z = 0.49f;
         float xMin = -halfW;
         float xMax =  halfW;
         float yMin = -halfH;
@@ -97,16 +95,71 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         float vMin = 1.0f;
         float vMax = 0.0f;
 
-        // submitCustomGeometry 签名: (PoseStack, RenderType, BiConsumer<PoseStack.Pose, VertexConsumer>)
         collector.submitCustomGeometry(poseStack, renderType, (pose, buffer) -> {
-            // 四边形: 4 顶点逆时针 (从正面看: 左下 → 右下 → 右上 → 左上)
-            addVertex(buffer, pose, xMin, yMin, z, uMin, vMin); // BL
-            addVertex(buffer, pose, xMax, yMin, z, uMax, vMin); // BR
-            addVertex(buffer, pose, xMax, yMax, z, uMax, vMax); // TR
-            addVertex(buffer, pose, xMin, yMax, z, uMin, vMax); // TL
+            addVideoQuad(buffer, pose, xMin, xMax, yMin, yMax, z, uMin, uMax, vMin, vMax);
         });
 
+        // 进度条（画面下方）
+        drawProgressBar(collector, poseStack, state, halfW, halfH);
+
         poseStack.popPose();
+    }
+
+    private void drawProgressBar(SubmitNodeCollector collector, PoseStack poseStack,
+                                  VideoScreenRenderState state, float halfW, float halfH) {
+        if (state.player == null) return;
+        long duration = state.player.getDurationMs();
+        long time = state.player.getTimeMs();
+        if (duration <= 0) return;
+
+        float barH = 0.12f;
+        float barY = -halfH - barH - 0.05f;
+        float ratio = Math.min(1.0f, (float) time / duration);
+        float totalW = halfW * 2;
+        float playedW = totalW * ratio;
+        float zBg = 0.49f;
+        float zFg = 0.49f;
+
+        RenderType barType = RenderTypes.entityCutout(videoTexture.getTextureId());
+
+        // 背景条（深灰）
+        collector.submitCustomGeometry(poseStack, barType, (pose, buffer) -> {
+            fillBar(buffer, pose, -halfW, halfW, barY, barY + barH, zBg, 0xFF555555);
+        });
+
+        // 已播放条（绿色），从左到右填充
+        if (playedW > 0) {
+            float pxStart = halfW - playedW;
+            collector.submitCustomGeometry(poseStack, barType, (pose, buffer) -> {
+                fillBar(buffer, pose, pxStart, halfW, barY, barY + barH, zFg, 0xFF33CC33);
+            });
+        }
+    }
+
+    private static void addVideoQuad(VertexConsumer buffer, PoseStack.Pose pose,
+                                      float xMin, float xMax, float yMin, float yMax, float z,
+                                      float uMin, float uMax, float vMin, float vMax) {
+        addVertex(buffer, pose, xMin, yMin, z, uMin, vMin);
+        addVertex(buffer, pose, xMax, yMin, z, uMax, vMin);
+        addVertex(buffer, pose, xMax, yMax, z, uMax, vMax);
+        addVertex(buffer, pose, xMin, yMax, z, uMin, vMax);
+    }
+
+    private static void fillBar(VertexConsumer vc, PoseStack.Pose pose,
+                                  float xMin, float xMax, float yMin, float yMax, float z, int color) {
+        // CCW 顶点序: BL→BR→TR→TL
+        vc.addVertex(pose, xMin, yMin, z).setColor(color).setUv(0, 0)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, 0, 0, 1);
+        vc.addVertex(pose, xMax, yMin, z).setColor(color).setUv(1, 0)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, 0, 0, 1);
+        vc.addVertex(pose, xMax, yMax, z).setColor(color).setUv(1, 1)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, 0, 0, 1);
+        vc.addVertex(pose, xMin, yMax, z).setColor(color).setUv(0, 1)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, 0, 0, 1);
     }
 
     /** 绕 Y 轴旋转使四边形正面朝向指定方向 */
@@ -120,16 +173,11 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         }
     }
 
-    /** 添加一个带完整属性的顶点 (全亮、无覆盖、法线向前) */
     private static void addVertex(VertexConsumer vc, PoseStack.Pose pose,
-                                   float x, float y, float z,
-                                   float u, float v) {
-        vc.addVertex(pose, x, y, z)
-          .setColor(-1)                              // 0xFFFFFFFF = 白色
-          .setUv(u, v)
-          .setOverlay(OverlayTexture.NO_OVERLAY)
-          .setLight(LightCoordsUtil.FULL_BRIGHT)
-          .setNormal(pose, 0.0f, 0.0f, 1.0f);        // 法线朝前 (+Z)
+                                   float x, float y, float z, float u, float v) {
+        vc.addVertex(pose, x, y, z).setColor(-1).setUv(u, v)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, 0, 0, 1);
     }
 
     @Override
