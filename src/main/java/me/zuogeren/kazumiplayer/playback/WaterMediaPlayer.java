@@ -19,7 +19,7 @@ public class WaterMediaPlayer {
             MRL mrl = MediaAPI.mrl(videoUrl);
             Minecraft mc = Minecraft.getInstance();
             player = MediaAPI.createPlayer(mrl,
-                () -> MediaAPI.glEngine(mc.getMainThread(), mc),
+                () -> MediaAPI.glEngine(Thread.currentThread(), mc),
                 null);  // 暂不处理音频
             if (player == null) {
                 LOGGER.error("Failed to create player for: {}", videoUrl);
