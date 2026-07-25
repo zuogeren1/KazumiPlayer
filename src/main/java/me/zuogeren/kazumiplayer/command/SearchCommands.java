@@ -87,12 +87,23 @@ public class SearchCommands {
                     "在所有规则中搜索: " + name));
             }
         }
+        var nav = Component.literal("").withStyle(net.minecraft.ChatFormatting.GRAY);
+        if (page.page() > 1) {
+            int prev = page.page() - 1;
+            nav.append(ChatComponentUtil.clickable(
+                "<<< 上一页  ",
+                "/kazumi page " + page.sessionId() + " " + prev,
+                "切换到第 " + prev + " 页"));
+        }
         if (page.hasNext()) {
             int next = page.page() + 1;
-            src.sendSystemMessage(ChatComponentUtil.clickable(
-                ">>> 下一页 (第 " + next + " 页)",
+            nav.append(ChatComponentUtil.clickable(
+                ">>> 下一页",
                 "/kazumi page " + page.sessionId() + " " + next,
                 "切换到第 " + next + " 页"));
+        }
+        if (page.page() > 1 || page.hasNext()) {
+            src.sendSystemMessage(nav);
         }
     }
 
@@ -171,11 +182,19 @@ public class SearchCommands {
                 (i + 1) + ". [" + e.ruleName + "] " + e.entry.item().name(),
                 "/kazumi play " + e.ruleName + " " + e.entry.id() + " 1", "点击播放"));
         }
+        var nav = Component.literal("").withStyle(net.minecraft.ChatFormatting.GRAY);
+        if (cp > 1) {
+            int prev = cp - 1;
+            nav.append(ChatComponentUtil.clickable("<<< 上一页  ",
+                "/kazumi search-rule all 翻页 " + prev, "切换到第 " + prev + " 页"));
+        }
         if (cp < totalPages) {
             int next = cp + 1;
-            src.sendSystemMessage(ChatComponentUtil.clickable(
-                ">>> 下一页 (第 " + next + " 页)", "/kazumi search-rule all 翻页 " + next,
-                "切换到第 " + next + " 页"));
+            nav.append(ChatComponentUtil.clickable(">>> 下一页",
+                "/kazumi search-rule all 翻页 " + next, "切换到第 " + next + " 页"));
+        }
+        if (cp > 1 || cp < totalPages) {
+            src.sendSystemMessage(nav);
         }
     }
 
