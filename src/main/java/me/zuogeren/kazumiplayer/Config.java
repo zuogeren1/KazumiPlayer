@@ -39,7 +39,7 @@ public class Config {
 
         searchTimeoutMs = builder
                 .comment("单个规则搜索超时时间 (毫秒)")
-                .defineInRange("searchTimeoutMs", 30000, 5000, 120000);
+                .defineInRange("searchTimeoutMs", 10000, 5000, 120000);
 
         maxSearchResultsPerRule = builder
                 .comment("每规则最大搜索结果数")

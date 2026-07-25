@@ -77,7 +77,7 @@ public class HttpUtil {
                 // 构建请求
                 HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                         .uri(URI.create(fullUrl))
-                        .timeout(Duration.ofSeconds(30))
+                        .timeout(Duration.ofSeconds(Math.max(5, Config.CONFIG.searchTimeoutMs.get() / 1000)))
                         .header("User-Agent", getRandomUserAgent())
                         .header("Accept-Language", "zh-CN,zh;q=0.9");
 
