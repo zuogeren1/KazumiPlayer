@@ -25,30 +25,30 @@ public class SearchCommands {
                         return 0;
                     }
 
-                    src.sendSuccess(() -> Component.literal("正在搜索: " + keyword + " ..."), false);
+                    src.sendSystemMessage(Component.literal("正在搜索: " + keyword + " ..."));
 
-                    var data = searchManager.searchAll(ruleManager.getRules(), keyword);
-
-                    if (data.results().isEmpty()) {
-                        src.sendSuccess(() -> Component.literal("未找到结果"), false);
-                        return 1;
-                    }
-
-                    for (var entry : data.results().entrySet()) {
-                        String ruleName = entry.getKey();
-                        src.sendSuccess(() ->
-                            ChatComponentUtil.header("[来源: " + ruleName + "]"),
-                            false);
-
-                        for (var item : entry.getValue()) {
-                            src.sendSuccess(() ->
-                                ChatComponentUtil.clickable(
-                                    "  " + item.item().name(),
-                                    "/kazumi play " + ruleName + " " + item.id() + " 1",
-                                    "点击播放: " + item.item().name()),
-                                false);
-                        }
-                    }
+                    // 非阻塞异步搜索
+                    searchManager.searchAll(ruleManager.getRules(), keyword)
+                        .thenAccept(data -> {
+                            if (data.results().isEmpty()) {
+                                src.sendSystemMessage(Component.literal("未找到结果"));
+                                return;
+                            }
+                            for (var entry : data.results().entrySet()) {
+                                String ruleName = entry.getKey();
+                                src.sendSystemMessage(ChatComponentUtil.header("[来源: " + ruleName + "]"));
+                                for (var item : entry.getValue()) {
+                                    src.sendSystemMessage(ChatComponentUtil.clickable(
+                                        "  " + item.item().name(),
+                                        "/kazumi play " + ruleName + " " + item.id() + " 1",
+                                        "点击播放: " + item.item().name()));
+                                }
+                            }
+                        })
+                        .exceptionally(e -> {
+                            src.sendSystemMessage(Component.literal("搜索出错: " + e.getMessage()));
+                            return null;
+                        });
 
                     return 1;
                 }));
