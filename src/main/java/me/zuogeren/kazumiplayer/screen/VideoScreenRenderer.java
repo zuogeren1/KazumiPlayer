@@ -162,7 +162,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         if (state.skinItemState != null) {
             poseStack.pushPose();
             poseStack.translate(0.5, 0.5, 0.5);
-            state.skinItemState.submit(poseStack, collector, LightCoordsUtil.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, 0);
+            state.skinItemState.submit(poseStack, collector, state.lightCoords, OverlayTexture.NO_OVERLAY, 0);
             poseStack.popPose();
         }
     }
