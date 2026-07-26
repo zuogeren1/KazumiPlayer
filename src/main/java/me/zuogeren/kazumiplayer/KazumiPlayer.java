@@ -7,11 +7,9 @@ import me.zuogeren.kazumiplayer.command.KazumiCommand;
 import me.zuogeren.kazumiplayer.network.NetworkManager;
 import me.zuogeren.kazumiplayer.rule.RuleEngine;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
-import me.zuogeren.kazumiplayer.item.ConnectionToolItem;
 import me.zuogeren.kazumiplayer.screen.VideoScreenRegistration;
 import me.zuogeren.kazumiplayer.speaker.SpeakerRegistration;
 import me.zuogeren.kazumiplayer.search.SearchManager;
-import net.neoforged.neoforge.registries.DeferredRegister;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
@@ -56,11 +54,6 @@ public class KazumiPlayer {
         // 方块、物品、方块实体
         VideoScreenRegistration.register(modEventBus);
         SpeakerRegistration.register(modEventBus);
-
-        // 连接工具
-        var itemReg = DeferredRegister.createItems(MODID);
-        itemReg.register("connection_tool", ConnectionToolItem::new);
-        itemReg.register(modEventBus);
 
         // 客户端渲染器
         if (dist.isClient()) {

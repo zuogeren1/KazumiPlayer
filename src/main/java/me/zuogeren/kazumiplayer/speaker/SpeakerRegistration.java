@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.speaker;
 
 import me.zuogeren.kazumiplayer.KazumiPlayer;
+import me.zuogeren.kazumiplayer.item.ConnectionToolItem;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -34,6 +35,9 @@ public class SpeakerRegistration {
 
     public static final DeferredItem<BlockItem> SPEAKER_BLOCK_ITEM =
         ITEMS.registerSimpleBlockItem(SPEAKER_BLOCK);
+
+    public static final DeferredItem<ConnectionToolItem> CONNECTION_TOOL =
+        ITEMS.register("connection_tool", ConnectionToolItem::new);
 
     public static final Supplier<BlockEntityType<SpeakerBlockEntity>> SPEAKER_BLOCK_ENTITY =
         BLOCK_ENTITY_TYPES.register("speaker",
