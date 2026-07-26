@@ -7,16 +7,19 @@ import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import org.slf4j.Logger;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 客户端→服务端：当前集播放完毕，请求切换到下一集
@@ -42,16 +45,24 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
             if (!(be instanceof VideoScreenBlockEntity screen)) return;
 
             String data = screen.getEpisodeData();
+            // 无 EpisodeData（play-url 等）：播放完毕直接停止
             if (data.isEmpty()) {
-                LOGGER.info("No EpisodeData, skipping auto-next");
+                stopPlaybackAndNotify(sp, screen, packet.screenPos);
                 return;
             }
             int idx = screen.getEpisodeIndex() + 1; // next episode
             List<Road> roads = JsonUtil.GSON.fromJson(data,
                 new com.google.gson.reflect.TypeToken<List<Road>>() {}.getType());
-            if (roads == null || roads.isEmpty()) return;
+            if (roads == null || roads.isEmpty()) {
+                stopPlaybackAndNotify(sp, screen, packet.screenPos);
+                return;
+            }
             Road road = roads.get(0);
-            if (idx < 1 || idx > road.data().size()) return; // out of bounds
+            if (idx < 1 || idx > road.data().size()) {
+                // 没有下一集：停止播放并通知
+                stopPlaybackAndNotify(sp, screen, packet.screenPos);
+                return;
+            }
 
             String nextUrl = road.data().get(idx - 1);
             String allData = JsonUtil.GSON.toJson(roads);
@@ -59,5 +70,36 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
             SyncGroupManager.get().onPlayStart(sp, screen.getScreenId(), packet.screenPos, nextUrl);
             LOGGER.info("Auto next episode {}: {}", idx, nextUrl);
         });
+    }
+
+    private static void stopPlaybackAndNotify(ServerPlayer triggerPlayer, VideoScreenBlockEntity screen, BlockPos pos) {
+        UUID sid = screen.getScreenId();
+        var g = SyncGroupManager.get().getGroup(sid);
+
+        // 保存实时位置到 NBT
+        if (g != null) {
+            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+            screen.updateSyncPosition(g.positionMs + elapsed);
+        }
+
+        // 收集观看者列表（删组前）
+        List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
+
+        // 停止播放
+        screen.clearPlayback();
+        SyncGroupManager.get().leaveByScreenId(sid);
+
+        // 通知所有观看者
+        var server = ((net.minecraft.server.level.ServerLevel) triggerPlayer.level()).getServer();
+        Component msg = Component.literal("§e播放已结束 §7("
+            + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+        for (UUID pid : watchers) {
+            ServerPlayer p = server.getPlayerList().getPlayer(pid);
+            if (p != null) {
+                PacketDistributor.sendToPlayer(p, new PlayStopPacket(pos));
+                p.sendSystemMessage(msg);
+            }
+        }
+        LOGGER.info("Playback ended at {} ({} watchers notified)", pos, watchers.size());
     }
 }
