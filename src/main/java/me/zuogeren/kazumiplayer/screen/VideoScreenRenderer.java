@@ -224,7 +224,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         if (playedW > 0) {
             float pxStart = halfW - playedW;
             collector.submitCustomGeometry(poseStack, barType, (pose, buffer) -> {
-                fillBar(buffer, pose, pxStart, halfW, barY, barY + barH, zFg, 0xFF33CC33);
+                fillBar(buffer, pose, pxStart, halfW, barY, barY + barH, zFg, 0xFF44FF33);
             });
         }
     }
