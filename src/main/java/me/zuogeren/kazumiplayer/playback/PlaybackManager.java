@@ -67,12 +67,16 @@ public class PlaybackManager {
 
     private static boolean isDirectVideoUrl(String url) {
         String lower = url.toLowerCase();
-        return lower.startsWith("file://")
+        boolean direct = lower.startsWith("file://")
+            || (url.length() > 2 && url.charAt(1) == ':')  // Windows 盘符
+            || lower.startsWith("/")                        // Unix 绝对路径
             || lower.endsWith(".mp4")
             || lower.endsWith(".mkv")
             || lower.endsWith(".m3u8")
             || lower.endsWith(".avi")
             || lower.endsWith(".webm")
             || lower.endsWith(".mov");
+        LOGGER.debug("isDirectVideoUrl({}) = {}", url, direct);
+        return direct;
     }
 }

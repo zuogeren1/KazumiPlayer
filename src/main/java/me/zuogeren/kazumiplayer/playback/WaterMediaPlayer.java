@@ -25,12 +25,11 @@ public class WaterMediaPlayer {
     public void removeListener(PlayStateListener l) { listeners.remove(l); }
 
     private static String normalizeUrl(String url) {
-        // 本地 Windows 路径转 file:/// URI
-        if (url.length() > 2 && url.charAt(1) == ':') {
-            return "file:///" + url.replace('\\', '/');
-        }
-        if (url.startsWith("/") || url.startsWith("~/")) {
-            return "file://" + url;
+        // 本地 Windows/Unix 路径转 file:// URI（正确编码中文等非 ASCII 字符）
+        if ((url.length() > 2 && url.charAt(1) == ':') || url.startsWith("/") || url.startsWith("~/")) {
+            try {
+                return java.nio.file.Path.of(url).toUri().toString();
+            } catch (Exception ignored) {}
         }
         return url;
     }
@@ -47,7 +46,7 @@ public class WaterMediaPlayer {
                 }
                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
             }
-            LOGGER.error("MRL loading timeout: {}", videoUrl);
+            LOGGER.error("MRL loading timeout: {} (normalized: {})", videoUrl, url);
             mc.execute(() -> mc.gui.getChat().addClientSystemMessage(
                 net.minecraft.network.chat.Component.literal("§c视频加载超时，请检查网络或稍后重试")));
         }, "KazumiPlayer-MRL-Loader").start();
