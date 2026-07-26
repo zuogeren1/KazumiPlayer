@@ -154,11 +154,21 @@ public class PlayCommands {
                     ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
                     return 0;
                 }
+                // 离开前保存实时位置
+                var be0 = player.level().getBlockEntity(screenPos);
+                if (be0 instanceof VideoScreenBlockEntity sc) {
+                    UUID sid = sc.getScreenId();
+                    var g = SyncGroupManager.get().getGroup(sid);
+                    if (g != null) {
+                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                        sc.updateSyncPosition(g.positionMs + elapsed);
+                    }
+                }
                 SyncGroupManager.get().leave(player.getUUID());
                 PacketDistributor.sendToPlayer(player, new PlayStopPacket(screenPos));
-                // 同步 WatchingPlayers
-                var be0 = player.level().getBlockEntity(screenPos);
-                if (be0 instanceof VideoScreenBlockEntity sc) syncWatchingPlayers(sc);
+                // 同步 WatchingPlayers（leave 后若组被删则清空）
+                var be1 = player.level().getBlockEntity(screenPos);
+                if (be1 instanceof VideoScreenBlockEntity sc) syncWatchingPlayersOrClear(sc);
                 ctx.getSource().sendSystemMessage(Component.literal("已停止当前客户端播放"));
                 return 1;
             });
@@ -172,10 +182,20 @@ public class PlayCommands {
                     ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
                     return 0;
                 }
+                // 离开前保存实时位置
+                var be0 = player.level().getBlockEntity(screenPos);
+                if (be0 instanceof VideoScreenBlockEntity sc) {
+                    UUID sid = sc.getScreenId();
+                    var g = SyncGroupManager.get().getGroup(sid);
+                    if (g != null) {
+                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                        sc.updateSyncPosition(g.positionMs + elapsed);
+                    }
+                }
                 SyncGroupManager.get().leave(player.getUUID());
                 PacketDistributor.sendToPlayer(player, new PlayStopPacket(screenPos));
-                var be0 = player.level().getBlockEntity(screenPos);
-                if (be0 instanceof VideoScreenBlockEntity sc) syncWatchingPlayers(sc);
+                var be1 = player.level().getBlockEntity(screenPos);
+                if (be1 instanceof VideoScreenBlockEntity sc) syncWatchingPlayersOrClear(sc);
                 ctx.getSource().sendSystemMessage(Component.literal("已离开同步播放"));
                 return 1;
             });
@@ -441,6 +461,14 @@ public class PlayCommands {
             String list = String.join(",", g.players.stream().map(java.util.UUID::toString).toList());
             screen.setWatchingPlayers(list);
         }
+    }
+
+    /** 同步 WatchingPlayers；组被删（最后一人离开）时清空 */
+    private static void syncWatchingPlayersOrClear(VideoScreenBlockEntity screen) {
+        var g = SyncGroupManager.get().getGroup(screen.getScreenId());
+        screen.setWatchingPlayers(g != null
+            ? String.join(",", g.players.stream().map(java.util.UUID::toString).toList())
+            : "");
     }
 
     private static BlockPos getTargetScreen(ServerPlayer player) {

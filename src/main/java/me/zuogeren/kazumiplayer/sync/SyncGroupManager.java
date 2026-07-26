@@ -87,13 +87,29 @@ public class SyncGroupManager {
     @SubscribeEvent
     public void onPlayerLeave(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
-            leave(sp.getUUID());
-            // 更新所有受影响屏幕的 WatchingPlayers
+            UUID playerId = sp.getUUID();
+            // 离开前：收集受影响的屏幕列表，并保存实时位置
+            List<BlockPos> affectedScreens = new ArrayList<>();
             for (var entry : groups.entrySet()) {
-                var be = sp.level().getBlockEntity(entry.getValue().screenPos);
+                SyncGroup g = entry.getValue();
+                if (g.players.contains(playerId)) {
+                    affectedScreens.add(g.screenPos);
+                    var be = sp.level().getBlockEntity(g.screenPos);
+                    if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
+                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                        screen.updateSyncPosition(g.positionMs + elapsed);
+                    }
+                }
+            }
+            leave(playerId);
+            // 更新所有受影响屏幕的 WatchingPlayers（组已被删的会清空）
+            for (BlockPos pos : affectedScreens) {
+                var be = sp.level().getBlockEntity(pos);
                 if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
-                    String list = String.join(",", entry.getValue().players.stream().map(java.util.UUID::toString).toList());
-                    screen.setWatchingPlayers(list);
+                    SyncGroup g = groups.get(screen.getScreenId());
+                    screen.setWatchingPlayers(g != null
+                        ? String.join(",", g.players.stream().map(java.util.UUID::toString).toList())
+                        : "");
                 }
             }
         }
