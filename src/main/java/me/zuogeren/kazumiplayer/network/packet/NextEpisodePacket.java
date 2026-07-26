@@ -74,9 +74,9 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
             if (g != null) {
                 screen.setWatchingPlayers(String.join(",", g.players.stream().map(UUID::toString).toList()));
             }
-            // 通知所有观看者
+            // 通知所有观看者（包括触发者，因为自动切集没有单独提示）
             String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
-            notifyWatchers(sp, packet.screenPos, sid, "自动切换到 " + name);
+            broadcastToGroup(sp, packet.screenPos, sid, "自动切换到 " + name);
             LOGGER.info("Auto next episode {}: {}", idx, nextUrl);
         });
     }
@@ -112,14 +112,15 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
         LOGGER.info("Playback ended at {} ({} watchers notified)", pos, watchers.size());
     }
 
-    private static void notifyWatchers(ServerPlayer trigger, BlockPos pos, UUID screenId, String action) {
+    /** 通知组内所有玩家（包括触发者） */
+    private static void broadcastToGroup(ServerPlayer trigger, BlockPos pos, UUID screenId, String action) {
         var g = SyncGroupManager.get().getGroup(screenId);
         if (g == null) return;
         Component msg = Component.literal("§e" + action + " §7("
             + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+        var server = ((net.minecraft.server.level.ServerLevel) trigger.level()).getServer();
         for (UUID pid : g.players) {
-            if (pid.equals(trigger.getUUID())) continue;
-            ServerPlayer p = ((net.minecraft.server.level.ServerLevel) trigger.level()).getServer().getPlayerList().getPlayer(pid);
+            ServerPlayer p = server.getPlayerList().getPlayer(pid);
             if (p != null) p.sendSystemMessage(msg);
         }
     }
