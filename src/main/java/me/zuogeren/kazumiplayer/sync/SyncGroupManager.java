@@ -1,7 +1,6 @@
 package me.zuogeren.kazumiplayer.sync;
 
 import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
-import me.zuogeren.kazumiplayer.network.packet.SyncStatePacket;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
@@ -14,7 +13,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 服务端同步组管理: 每个屏幕一个 SyncGroup
+ * 服务端同步组管理: 每个屏幕一个 SyncGroup，以 UUID 为 key
  */
 public class SyncGroupManager {
     private static SyncGroupManager instance;
@@ -22,14 +21,14 @@ public class SyncGroupManager {
     public static SyncGroupManager get() { return instance; }
     public static void init() { instance = new SyncGroupManager(); }
 
-    private final Map<BlockPos, SyncGroup> groups = new ConcurrentHashMap<>();
+    private final Map<UUID, SyncGroup> groups = new ConcurrentHashMap<>();
 
     /**
      * 当有玩家开始播放时调用
      */
-    public void onPlayStart(ServerPlayer player, BlockPos screenPos, String videoUrl) {
-        SyncGroup group = groups.computeIfAbsent(screenPos,
-            k -> new SyncGroup(screenPos, videoUrl));
+    public void onPlayStart(ServerPlayer player, UUID screenId, BlockPos screenPos, String videoUrl) {
+        SyncGroup group = groups.computeIfAbsent(screenId,
+            k -> new SyncGroup(screenId, screenPos, videoUrl));
         group.players.add(player.getUUID());
         group.videoUrl = videoUrl;
         group.positionMs = 0;
@@ -37,8 +36,8 @@ public class SyncGroupManager {
         group.serverTimestamp = System.currentTimeMillis();
     }
 
-    public void join(ServerPlayer player, BlockPos screenPos, String videoUrl) {
-        SyncGroup group = groups.get(screenPos);
+    public void join(ServerPlayer player, UUID screenId, String videoUrl) {
+        SyncGroup group = groups.get(screenId);
         if (group == null) return;
         group.players.add(player.getUUID());
     }
@@ -54,16 +53,16 @@ public class SyncGroupManager {
         }
     }
 
-    public void leave(BlockPos screenPos) {
-        groups.remove(screenPos);
+    public void leaveByScreenId(UUID screenId) {
+        groups.remove(screenId);
     }
 
-    public SyncGroup getGroup(BlockPos screenPos) {
-        return groups.get(screenPos);
+    public SyncGroup getGroup(UUID screenId) {
+        return groups.get(screenId);
     }
 
-    public void updateState(BlockPos screenPos, long positionMs, boolean paused) {
-        SyncGroup group = groups.get(screenPos);
+    public void updateState(UUID screenId, long positionMs, boolean paused) {
+        SyncGroup group = groups.get(screenId);
         if (group == null) return;
         group.positionMs = positionMs;
         group.paused = paused;
@@ -91,7 +90,7 @@ public class SyncGroupManager {
             leave(sp.getUUID());
             // 更新所有受影响屏幕的 WatchingPlayers
             for (var entry : groups.entrySet()) {
-                var be = sp.level().getBlockEntity(entry.getKey());
+                var be = sp.level().getBlockEntity(entry.getValue().screenPos);
                 if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
                     String list = String.join(",", entry.getValue().players.stream().map(java.util.UUID::toString).toList());
                     screen.setWatchingPlayers(list);
@@ -101,6 +100,7 @@ public class SyncGroupManager {
     }
 
     public static class SyncGroup {
+        public final UUID screenId;
         public final BlockPos screenPos;
         public String videoUrl;
         public long positionMs;
@@ -108,7 +108,8 @@ public class SyncGroupManager {
         public long serverTimestamp;
         public final Set<UUID> players = ConcurrentHashMap.newKeySet();
 
-        SyncGroup(BlockPos pos, String url) {
+        SyncGroup(UUID screenId, BlockPos pos, String url) {
+            this.screenId = screenId;
             this.screenPos = pos;
             this.videoUrl = url;
             this.serverTimestamp = System.currentTimeMillis();

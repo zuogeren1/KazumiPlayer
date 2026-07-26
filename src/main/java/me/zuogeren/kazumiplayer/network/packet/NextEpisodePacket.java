@@ -56,7 +56,7 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
             String nextUrl = road.data().get(idx - 1);
             String allData = JsonUtil.GSON.toJson(roads);
             screen.setPlaybackFull(nextUrl, 0, idx, allData);
-            SyncGroupManager.get().onPlayStart(sp, packet.screenPos, nextUrl);
+            SyncGroupManager.get().onPlayStart(sp, screen.getScreenId(), packet.screenPos, nextUrl);
             LOGGER.info("Auto next episode {}: {}", idx, nextUrl);
         });
     }

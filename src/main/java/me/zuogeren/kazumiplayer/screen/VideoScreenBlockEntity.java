@@ -2,6 +2,7 @@ package me.zuogeren.kazumiplayer.screen;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
+import java.util.UUID;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
@@ -33,6 +34,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private String watchingPlayers = "";   // 观看者 UUID 列表，逗号分隔
     private boolean playbackPaused;
     private String skinBlock = "";         // 方块皮肤 ID，空=默认
+    private UUID screenId;                 // 屏幕唯一标识，lazy 生成
 
     // 客户端暂存，不持久化
     public transient me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
@@ -56,6 +58,14 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public String getWatchingPlayers() { return watchingPlayers; }
     public boolean isPlaybackPaused() { return playbackPaused; }
     public String getSkinBlock() { return skinBlock; }
+    /** 屏幕唯一标识，首次访问时 lazy 生成 */
+    public UUID getScreenId() {
+        if (screenId == null) {
+            screenId = UUID.randomUUID();
+            markDirty();
+        }
+        return screenId;
+    }
     /** 客户端：检测 episodeUrl 是否刚发生变化（用于检测切换集数） */
     public boolean justChanged(String url) { return !url.equals(lastEpisodeUrl); }
     public void markSeen(String url) { this.lastEpisodeUrl = url; }
@@ -150,6 +160,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.watchingPlayers = input.getString("WatchingPlayers").orElse("");
         this.playbackPaused = input.getBooleanOr("PlaybackPaused", false);
         this.skinBlock = input.getString("SkinBlock").orElse("");
+        this.screenId = input.getString("ScreenId").map(UUID::fromString).orElse(null);
 
         if (level != null && level.isClientSide() && episodeUrl.isEmpty() && player != null) {
             player.stop();
@@ -170,6 +181,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putString("WatchingPlayers", watchingPlayers);
         output.putBoolean("PlaybackPaused", playbackPaused);
         output.putString("SkinBlock", skinBlock);
+        output.putString("ScreenId", screenId != null ? screenId.toString() : "");
     }
 
     @Override
@@ -186,12 +198,17 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putString("WatchingPlayers", watchingPlayers);
         tag.putBoolean("PlaybackPaused", playbackPaused);
         tag.putString("SkinBlock", skinBlock);
+        tag.putString("ScreenId", screenId != null ? screenId.toString() : "");
         return tag;
     }
 
     @Override
     public void setRemoved() {
         super.setRemoved();
+        // 服务端：屏幕被破坏时清理 SyncGroup
+        if (screenId != null && level != null && !level.isClientSide()) {
+            me.zuogeren.kazumiplayer.sync.SyncGroupManager.get().leaveByScreenId(screenId);
+        }
         if (player != null && level != null && level.isClientSide()) {
             player.stop();
             player = null;

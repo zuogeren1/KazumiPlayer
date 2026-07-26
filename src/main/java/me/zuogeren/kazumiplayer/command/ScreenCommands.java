@@ -12,6 +12,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import java.util.UUID;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -59,16 +60,17 @@ public class ScreenCommands {
                     }
                     BlockPos pos = blockHit.getBlockPos();
                     var be = player.level().getBlockEntity(pos);
-                    // 停止前保存当前计时到 NBT
-                    var g = SyncGroupManager.get().getGroup(pos);
-                    if (g != null && be instanceof VideoScreenBlockEntity screen) {
-                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
-                        screen.updateSyncPosition(g.positionMs + elapsed);
-                    }
                     if (be instanceof VideoScreenBlockEntity screen) {
+                        UUID sid = screen.getScreenId();
+                        // 停止前保存当前计时到 NBT
+                        var g = SyncGroupManager.get().getGroup(sid);
+                        if (g != null) {
+                            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                            screen.updateSyncPosition(g.positionMs + elapsed);
+                        }
                         screen.clearPlayback();
+                        SyncGroupManager.get().leaveByScreenId(sid);
                     }
-                    SyncGroupManager.get().leave(pos);
                     ctx.getSource().sendSuccess(() -> Component.literal("屏幕已停止"), true);
                     return 1;
                 }));

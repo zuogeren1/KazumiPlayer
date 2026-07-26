@@ -23,6 +23,7 @@ import net.minecraft.world.phys.HitResult;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.List;
+import java.util.UUID;
 
 public class PlayCommands {
 
@@ -73,8 +74,11 @@ public class PlayCommands {
                                     String roadJson = JsonUtil.GSON.toJson(result.roads());
 
                                     player.level().getServer().execute(() -> {
-                                        setScreenFull(player, screenPos, epUrl, 0, episode, roadJson);
-                                        SyncGroupManager.get().onPlayStart(player, screenPos, epUrl);
+                                        var be = player.level().getBlockEntity(screenPos);
+                                        if (be instanceof VideoScreenBlockEntity screen) {
+                                            setScreenFull(screen, epUrl, 0, episode, roadJson);
+                                            SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, epUrl);
+                                        }
                                     });
                                     ctx.getSource().sendSystemMessage(Component.literal(
                                         "正在播放: " + road.identifier().get(idx) + " (第" + episode + "集)"));
@@ -99,8 +103,11 @@ public class PlayCommands {
                         ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
                         return 0;
                     }
-                    setScreenNbt(player, screenPos, url, 0);
-                    SyncGroupManager.get().onPlayStart(player, screenPos, url);
+                    var be = player.level().getBlockEntity(screenPos);
+                    if (be instanceof VideoScreenBlockEntity screen) {
+                        setScreenNbt(screen, url, 0);
+                        SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, url);
+                    }
                     ctx.getSource().sendSystemMessage(Component.literal("已开始播放: " + url));
                     return 1;
                 }));
@@ -120,7 +127,8 @@ public class PlayCommands {
                     return 0;
                 }
                 String url = screen.getEpisodeUrl();
-                var group = SyncGroupManager.get().getGroup(screenPos);
+                UUID sid = screen.getScreenId();
+                var group = SyncGroupManager.get().getGroup(sid);
                 long currentPos;
                 if (group != null) {
                     long elapsed = group.paused ? 0 : System.currentTimeMillis() - group.serverTimestamp;
@@ -128,10 +136,10 @@ public class PlayCommands {
                 } else {
                     currentPos = screen.getSyncPositionMs();
                     if (currentPos < 0) currentPos = 0;
-                    SyncGroupManager.get().onPlayStart(player, screenPos, url);
+                    SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
                 }
-                SyncGroupManager.get().join(player, screenPos, url);
-                setScreenNbt(player, screenPos, url, currentPos);
+                SyncGroupManager.get().join(player, sid, url);
+                setScreenNbt(screen, url, currentPos);
                 ctx.getSource().sendSystemMessage(Component.literal(
                     "已加入同步播放 (位置: " + (currentPos / 1000) + "s)"));
                 return 1;
@@ -150,7 +158,7 @@ public class PlayCommands {
                 PacketDistributor.sendToPlayer(player, new PlayStopPacket(screenPos));
                 // 同步 WatchingPlayers
                 var be0 = player.level().getBlockEntity(screenPos);
-                if (be0 instanceof VideoScreenBlockEntity sc) syncWatchingPlayers(sc, screenPos);
+                if (be0 instanceof VideoScreenBlockEntity sc) syncWatchingPlayers(sc);
                 ctx.getSource().sendSystemMessage(Component.literal("已停止当前客户端播放"));
                 return 1;
             });
@@ -167,7 +175,7 @@ public class PlayCommands {
                 SyncGroupManager.get().leave(player.getUUID());
                 PacketDistributor.sendToPlayer(player, new PlayStopPacket(screenPos));
                 var be0 = player.level().getBlockEntity(screenPos);
-                if (be0 instanceof VideoScreenBlockEntity sc) syncWatchingPlayers(sc, screenPos);
+                if (be0 instanceof VideoScreenBlockEntity sc) syncWatchingPlayers(sc);
                 ctx.getSource().sendSystemMessage(Component.literal("已离开同步播放"));
                 return 1;
             });
@@ -326,7 +334,7 @@ public class PlayCommands {
         String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
         String roadJson = JsonUtil.GSON.toJson(roads);
         screen.setPlaybackFull(url, 0, idx, roadJson);
-        SyncGroupManager.get().onPlayStart(player, screenPos, url);
+        SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, url);
         src.sendSystemMessage(Component.literal("已切换到: " + name));
         return 1;
     }
@@ -339,10 +347,10 @@ public class PlayCommands {
         if (screenPos == null) { src.sendFailure(Component.literal("请瞄准一个屏幕!")); return 0; }
         var be = player.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(Component.literal("目标方块不是屏幕")); return 0; }
-        long cur = getLivePosition(screen, screenPos);
+        long cur = getLivePosition(screen);
         long newPos = Math.max(0, cur + deltaSec * 1000L);
         screen.updateSyncPosition(newPos);
-        updateSyncGroupPosition(screenPos, newPos);
+        updateSyncGroupPosition(screen.getScreenId(), newPos);
         src.sendSystemMessage(Component.literal("时间调整: " + (deltaSec >= 0 ? "+" : "") + deltaSec + "s → " + formatMs(newPos)));
         return 1;
     }
@@ -354,7 +362,7 @@ public class PlayCommands {
         var be = player.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(Component.literal("目标方块不是屏幕")); return 0; }
         screen.updateSyncPosition(ms);
-        updateSyncGroupPosition(screenPos, ms);
+        updateSyncGroupPosition(screen.getScreenId(), ms);
         src.sendSystemMessage(Component.literal("跳转到: " + formatMs(ms)));
         return 1;
     }
@@ -372,8 +380,8 @@ public class PlayCommands {
     }
 
     /** 从 SyncGroup 读实时位置，fallback 到 NBT */
-    private static long getLivePosition(VideoScreenBlockEntity screen, BlockPos screenPos) {
-        var g = SyncGroupManager.get().getGroup(screenPos);
+    private static long getLivePosition(VideoScreenBlockEntity screen) {
+        var g = SyncGroupManager.get().getGroup(screen.getScreenId());
         if (g != null) {
             long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
             return g.positionMs + elapsed;
@@ -382,10 +390,10 @@ public class PlayCommands {
         return nbt >= 0 ? nbt : 0;
     }
 
-    private static void updateSyncGroupPosition(BlockPos screenPos, long newPos) {
-        var g = SyncGroupManager.get().getGroup(screenPos);
+    private static void updateSyncGroupPosition(UUID screenId, long newPos) {
+        var g = SyncGroupManager.get().getGroup(screenId);
         if (g != null) {
-            SyncGroupManager.get().updateState(screenPos, newPos, g.paused);
+            SyncGroupManager.get().updateState(screenId, newPos, g.paused);
         }
     }
 
@@ -393,21 +401,16 @@ public class PlayCommands {
         ServerPlayer player = src.getPlayerOrException();
         BlockPos pos = getTargetScreen(player);
         if (pos == null) { src.sendFailure(Component.literal("请瞄准一个屏幕!")); return 0; }
-        var g = SyncGroupManager.get().getGroup(pos);
-        if (g == null) { src.sendFailure(Component.literal("该屏幕未在播放")); return 0; }
-        long cur;
-        if (g != null) {
-            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
-            cur = g.positionMs + elapsed;
-        } else {
-            cur = 0;
-        }
-        SyncGroupManager.get().updateState(pos, cur, pause);
         var be = player.level().getBlockEntity(pos);
-        if (be instanceof VideoScreenBlockEntity screen) {
-            screen.updateSyncPosition(cur);
-            screen.setPlaybackPaused(pause);
-        }
+        if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(Component.literal("目标方块不是屏幕")); return 0; }
+        UUID sid = screen.getScreenId();
+        var g = SyncGroupManager.get().getGroup(sid);
+        if (g == null) { src.sendFailure(Component.literal("该屏幕未在播放")); return 0; }
+        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+        long cur = g.positionMs + elapsed;
+        SyncGroupManager.get().updateState(sid, cur, pause);
+        screen.updateSyncPosition(cur);
+        screen.setPlaybackPaused(pause);
         src.sendSystemMessage(Component.literal(pause ? "已暂停" : "已恢复"));
         return 1;
     }
@@ -421,25 +424,19 @@ public class PlayCommands {
 
     // ---- 辅助 ----
 
-    private static void setScreenNbt(ServerPlayer player, BlockPos screenPos, String url, long positionMs) {
-        var be = player.level().getBlockEntity(screenPos);
-        if (be instanceof VideoScreenBlockEntity screen) {
-            screen.setPlayback(url, positionMs);
-            syncWatchingPlayers(screen, screenPos);
-        }
+    private static void setScreenNbt(VideoScreenBlockEntity screen, String url, long positionMs) {
+        screen.setPlayback(url, positionMs);
+        syncWatchingPlayers(screen);
     }
 
-    private static void setScreenFull(ServerPlayer player, BlockPos screenPos, String url,
+    private static void setScreenFull(VideoScreenBlockEntity screen, String url,
                                        long positionMs, int episodeIdx, String roadJson) {
-        var be = player.level().getBlockEntity(screenPos);
-        if (be instanceof VideoScreenBlockEntity screen) {
-            screen.setPlaybackFull(url, positionMs, episodeIdx, roadJson);
-            syncWatchingPlayers(screen, screenPos);
-        }
+        screen.setPlaybackFull(url, positionMs, episodeIdx, roadJson);
+        syncWatchingPlayers(screen);
     }
 
-    private static void syncWatchingPlayers(VideoScreenBlockEntity screen, BlockPos screenPos) {
-        var g = SyncGroupManager.get().getGroup(screenPos);
+    private static void syncWatchingPlayers(VideoScreenBlockEntity screen) {
+        var g = SyncGroupManager.get().getGroup(screen.getScreenId());
         if (g != null) {
             String list = String.join(",", g.players.stream().map(java.util.UUID::toString).toList());
             screen.setWatchingPlayers(list);
