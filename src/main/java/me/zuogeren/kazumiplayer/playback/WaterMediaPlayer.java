@@ -1,11 +1,15 @@
 package me.zuogeren.kazumiplayer.playback;
 
 import com.mojang.logging.LogUtils;
+import me.zuogeren.kazumiplayer.client.PlayStateListener;
 import net.minecraft.client.Minecraft;
 import org.slf4j.Logger;
 import org.watermedia.api.media.MRL;
 import org.watermedia.api.media.MediaAPI;
 import org.watermedia.api.media.players.MediaPlayer;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * WaterMedia V3 播放器封装 (FFmpeg)
@@ -15,6 +19,10 @@ public class WaterMediaPlayer {
     private MediaPlayer player;
     private long pendingSeekMs = -1;
     private boolean pendingPause;
+    private final List<PlayStateListener> listeners = new ArrayList<>();
+
+    public void addListener(PlayStateListener l) { listeners.add(l); }
+    public void removeListener(PlayStateListener l) { listeners.remove(l); }
 
     public void play(String videoUrl) {
         Minecraft mc = Minecraft.getInstance();
@@ -35,9 +43,10 @@ public class WaterMediaPlayer {
 
     private void createAndStart(MRL mrl, Minecraft mc) {
         try {
+            // v3 API: 使用 ALEngine (OpenAL) 替代 JSEngine (JavaSound) 以获得空间音频
             player = MediaAPI.createPlayer(mrl,
                 () -> MediaAPI.glEngine(Thread.currentThread(), mc),
-                () -> MediaAPI.jsEngine());
+                () -> MediaAPI.alEngine());
             if (player == null) {
                 LOGGER.error("Failed to create player for: {}", mrl.uri);
                 mc.execute(() -> mc.gui.getChat().addClientSystemMessage(
@@ -45,10 +54,19 @@ public class WaterMediaPlayer {
                 return;
             }
             player.start();
+            applyVolumeFromOptions();
             // seek 交给外部 tick 延迟执行（此时 demuxer 尚未就绪）
         } catch (Exception e) {
             LOGGER.error("Playback failed: {}", e.getMessage());
         }
+    }
+
+    /** 从原版唱片机/音符盒音量滑块读取并应用音量 (0-100) */
+    public void applyVolumeFromOptions() {
+        if (player == null) return;
+        float vol = Minecraft.getInstance().options.getSoundSourceVolume(
+            net.minecraft.sounds.SoundSource.RECORDS);
+        player.volume((int) (vol * 100));
     }
 
     public boolean isPlaying() {
@@ -72,18 +90,30 @@ public class WaterMediaPlayer {
     }
 
     public void pause() {
-        if (player != null) player.pause();
-        else pendingPause = true;
+        if (player != null) {
+            player.pause();
+            for (var l : listeners) l.onPause();
+        } else {
+            pendingPause = true;
+        }
     }
 
     public void resume() {
-        if (player != null) player.resume();
-        else pendingPause = false;
+        if (player != null) {
+            player.resume();
+            for (var l : listeners) l.onResume();
+        } else {
+            pendingPause = false;
+        }
     }
 
     public void seek(long ms) {
-        if (player != null && player.playing()) player.seek(ms);
-        else pendingSeekMs = ms;
+        if (player != null && player.playing()) {
+            player.seek(ms);
+            for (var l : listeners) l.onSeek(ms);
+        } else {
+            pendingSeekMs = ms;
+        }
     }
 
     public void stop() {
@@ -94,6 +124,7 @@ public class WaterMediaPlayer {
             player.release();
             player = null;
         }
+        for (var l : listeners) l.onStop();
     }
 
     public boolean hasPendingSeek() {
@@ -105,6 +136,7 @@ public class WaterMediaPlayer {
             player.seek(pendingSeekMs);
             LOGGER.info("Delayed seek: {}ms (time={})", pendingSeekMs, player.time());
             pendingSeekMs = -1;
+            for (var l : listeners) l.onSeek(player.time());
         }
     }
 

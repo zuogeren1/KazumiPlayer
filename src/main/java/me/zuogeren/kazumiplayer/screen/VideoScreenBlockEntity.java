@@ -15,6 +15,8 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
+import java.util.ArrayList;
+import java.util.List;
 
 public class VideoScreenBlockEntity extends BlockEntity {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -35,6 +37,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private boolean playbackPaused;
     private String skinBlock = "";         // 方块皮肤 ID，空=默认
     private UUID screenId;                 // 屏幕唯一标识，lazy 生成
+    private final List<BlockPos> connectedSpeakers = new ArrayList<>(); // 已连接音响列表
 
     // 客户端暂存，不持久化
     public transient me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
@@ -58,6 +61,13 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public String getWatchingPlayers() { return watchingPlayers; }
     public boolean isPlaybackPaused() { return playbackPaused; }
     public String getSkinBlock() { return skinBlock; }
+    public List<BlockPos> getConnectedSpeakers() { return connectedSpeakers; }
+    public void addConnectedSpeaker(BlockPos pos) {
+        if (!connectedSpeakers.contains(pos)) { connectedSpeakers.add(pos); markDirty(); }
+    }
+    public void removeConnectedSpeaker(BlockPos pos) {
+        connectedSpeakers.remove(pos); markDirty();
+    }
     /** 屏幕唯一标识，首次访问时 lazy 生成 */
     public UUID getScreenId() {
         if (screenId == null) {
@@ -161,6 +171,19 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.playbackPaused = input.getBooleanOr("PlaybackPaused", false);
         this.skinBlock = input.getString("SkinBlock").orElse("");
         this.screenId = input.getString("ScreenId").filter(s -> !s.isEmpty()).map(UUID::fromString).orElse(null);
+        // ConnectedSpeakers: 逗号分隔的 BlockPos 编码 "x,y,z;x,y,z;..."
+        this.connectedSpeakers.clear();
+        input.getString("ConnectedSpeakers").ifPresent(str -> {
+            for (String s : str.split(";")) {
+                if (s.isBlank()) continue;
+                String[] p = s.split(",");
+                if (p.length == 3) {
+                    try {
+                        connectedSpeakers.add(new BlockPos(Integer.parseInt(p[0]), Integer.parseInt(p[1]), Integer.parseInt(p[2])));
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        });
 
         if (level != null && level.isClientSide() && episodeUrl.isEmpty() && player != null) {
             player.stop();
@@ -182,6 +205,13 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putBoolean("PlaybackPaused", playbackPaused);
         output.putString("SkinBlock", skinBlock);
         output.putString("ScreenId", screenId != null ? screenId.toString() : "");
+        // ConnectedSpeakers: "x,y,z;x,y,z;..."
+        var sb = new StringBuilder();
+        for (var pos : connectedSpeakers) {
+            if (!sb.isEmpty()) sb.append(';');
+            sb.append(pos.getX()).append(',').append(pos.getY()).append(',').append(pos.getZ());
+        }
+        output.putString("ConnectedSpeakers", sb.toString());
     }
 
     @Override
@@ -199,15 +229,31 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putBoolean("PlaybackPaused", playbackPaused);
         tag.putString("SkinBlock", skinBlock);
         tag.putString("ScreenId", screenId != null ? screenId.toString() : "");
+        var sb = new StringBuilder();
+        for (var pos : connectedSpeakers) {
+            if (!sb.isEmpty()) sb.append(';');
+            sb.append(pos.getX()).append(',').append(pos.getY()).append(',').append(pos.getZ());
+        }
+        tag.putString("ConnectedSpeakers", sb.toString());
         return tag;
     }
 
     @Override
     public void setRemoved() {
         super.setRemoved();
-        // 服务端：屏幕被破坏时清理 SyncGroup
-        if (screenId != null && level != null && !level.isClientSide()) {
-            me.zuogeren.kazumiplayer.sync.SyncGroupManager.get().leaveByScreenId(screenId);
+        // 服务端：屏幕被破坏时清理 SyncGroup + 通知所有已连接音响
+        if (level != null && !level.isClientSide()) {
+            if (screenId != null) {
+                me.zuogeren.kazumiplayer.sync.SyncGroupManager.get().leaveByScreenId(screenId);
+            }
+            // 通知音响清空连接
+            for (BlockPos spkPos : new ArrayList<>(connectedSpeakers)) {
+                var be = level.getBlockEntity(spkPos);
+                if (be instanceof me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity spk) {
+                    spk.clearLink();
+                }
+            }
+            connectedSpeakers.clear();
         }
         if (player != null && level != null && level.isClientSide()) {
             player.stop();

@@ -6,6 +6,7 @@ import me.zuogeren.kazumiplayer.network.packet.PlayStartPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
 import me.zuogeren.kazumiplayer.network.packet.ScreenSyncPacket;
+import me.zuogeren.kazumiplayer.network.packet.SpeakerConnectPacket;
 import me.zuogeren.kazumiplayer.network.packet.SyncStatePacket;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -31,5 +32,6 @@ public class NetworkManager {
         registrar.playToClient(PlayStopPacket.TYPE, PlayStopPacket.STREAM_CODEC, PlayStopPacket::handle);
         registrar.playToServer(NextEpisodePacket.TYPE, NextEpisodePacket.STREAM_CODEC, NextEpisodePacket::handle);
         registrar.playToServer(PlaybackControlPacket.TYPE, PlaybackControlPacket.STREAM_CODEC, PlaybackControlPacket::handle);
+        registrar.playToServer(SpeakerConnectPacket.TYPE, SpeakerConnectPacket.STREAM_CODEC, SpeakerConnectPacket::handle);
     }
 }
