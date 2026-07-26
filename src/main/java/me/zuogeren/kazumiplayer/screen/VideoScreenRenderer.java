@@ -210,8 +210,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         float ratio = Math.min(1.0f, (float) time / duration);
         float totalW = halfW * 2;
         float playedW = totalW * ratio;
-        float zBg = 0.49f;
-        float zFg = 0.50f;
+        float zBg = 0.50f;
+        float zFg = 0.52f;
 
         RenderType barType = RenderTypes.entityCutout(videoTexture.getTextureId());
 
