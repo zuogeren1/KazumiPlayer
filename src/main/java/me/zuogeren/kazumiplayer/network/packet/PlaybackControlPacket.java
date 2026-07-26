@@ -1,6 +1,6 @@
 package me.zuogeren.kazumiplayer.network.packet;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.KazumiPlayer;
 import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
@@ -13,7 +13,6 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
-import org.slf4j.Logger;
 
 import java.util.List;
 
@@ -23,7 +22,6 @@ import java.util.List;
  * value: 切集时=目标集数, seek_forward/back=秒数(正数), seek_goto=毫秒
  */
 public record PlaybackControlPacket(BlockPos screenPos, String action, long value) implements CustomPacketPayload {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     public static final Type<PlaybackControlPacket> TYPE =
         new Type<>(Identifier.fromNamespaceAndPath(KazumiPlayer.MODID, "playback_control"));
@@ -74,6 +72,6 @@ public record PlaybackControlPacket(BlockPos screenPos, String action, long valu
 
         String url = road.data().get(idx - 1);
         screen.setPlaybackFull(url, 0, idx, data);
-        LOGGER.info("Episode switch to {}: {}", idx, url);
+        KazumiLog.network.info("Episode switch to {}: {}", idx, url);
     }
 }

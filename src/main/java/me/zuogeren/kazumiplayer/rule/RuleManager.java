@@ -1,9 +1,8 @@
 package me.zuogeren.kazumiplayer.rule;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
 import com.google.gson.reflect.TypeToken;
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
-import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,7 +17,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * 服务端规则管理器: 安装/删除/列出规则
  */
 public class RuleManager {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     private final Map<String, Rule> rules = new ConcurrentHashMap<>();
     private final Path rulesDir;
@@ -44,10 +42,10 @@ public class RuleManager {
                 for (Rule rule : loaded) {
                     rules.put(rule.getName(), rule);
                 }
-                LOGGER.info("Loaded {} rules", loaded.size());
+                KazumiLog.rule.info("Loaded {} rules", loaded.size());
             }
         } catch (IOException e) {
-            LOGGER.error("Failed to load rules", e);
+            KazumiLog.rule.error("Failed to load rules", e);
         }
     }
 
@@ -60,7 +58,7 @@ public class RuleManager {
             String json = JsonUtil.GSON_PRETTY.toJson(new ArrayList<>(rules.values()));
             Files.writeString(rulesDir.resolve("plugins.json"), json);
         } catch (IOException e) {
-            LOGGER.error("Failed to save rules", e);
+            KazumiLog.rule.error("Failed to save rules", e);
         }
     }
 

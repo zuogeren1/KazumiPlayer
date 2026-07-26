@@ -1,6 +1,6 @@
 package me.zuogeren.kazumiplayer.screen;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import java.util.UUID;
 import net.minecraft.core.Direction;
@@ -14,12 +14,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
 import java.util.ArrayList;
 import java.util.List;
 
 public class VideoScreenBlockEntity extends BlockEntity {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     private float screenWidth = 3.0f;
     private float screenHeight = 2.0f;
@@ -101,7 +99,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.syncPositionMs = positionMs;
         this.videoState = VideoState.PLAYING;
         markDirty();
-        LOGGER.info("setPlayback url={} posMs={} side={}", url, positionMs,
+        KazumiLog.screen.info("setPlayback url={} posMs={} side={}", url, positionMs,
             level != null && level.isClientSide() ? "client" : "server");
     }
 
@@ -126,7 +124,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
             player = null;
         }
         markDirty();
-        LOGGER.info("clearPlayback side={}",
+        KazumiLog.screen.info("clearPlayback side={}",
             level != null && level.isClientSide() ? "client" : "server");
     }
 

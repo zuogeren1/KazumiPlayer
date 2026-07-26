@@ -1,6 +1,6 @@
 package me.zuogeren.kazumiplayer.speaker;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.client.PlayStateListener;
 import me.zuogeren.kazumiplayer.playback.WaterMediaPlayer;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
@@ -16,12 +16,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
 
 import java.util.UUID;
 
 public class SpeakerBlockEntity extends BlockEntity implements PlayStateListener {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     // 连接状态
     private UUID linkedScreenId;
@@ -96,7 +94,7 @@ public class SpeakerBlockEntity extends BlockEntity implements PlayStateListener
             long speakerTime = audioPlayer.getTimeMs();
             if (Math.abs(screenTime - speakerTime) > DRIFT_THRESHOLD_MS) {
                 audioPlayer.seek(screenTime);
-                LOGGER.debug("Speaker drift corrected: {}ms → {}ms", speakerTime, screenTime);
+                KazumiLog.speaker.debug("Speaker drift corrected: {}ms → {}ms", speakerTime, screenTime);
             }
         }
     }

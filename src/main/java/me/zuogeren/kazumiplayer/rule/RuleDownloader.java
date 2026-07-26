@@ -1,11 +1,10 @@
 package me.zuogeren.kazumiplayer.rule;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
 import com.google.gson.reflect.TypeToken;
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.Config;
 import me.zuogeren.kazumiplayer.util.HttpUtil;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
-import org.slf4j.Logger;
 
 import java.util.Collections;
 import java.util.List;
@@ -15,7 +14,6 @@ import java.util.concurrent.CompletableFuture;
  * 从 KazumiRules GitHub 仓库下载规则
  */
 public class RuleDownloader {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
      * 获取规则目录 (index.json)
@@ -41,7 +39,7 @@ public class RuleDownloader {
                     if (rule == null) {
                         throw new RuntimeException("Failed to parse rule: " + ruleName);
                     }
-                    LOGGER.info("Downloaded rule {}: searchMode={}, apiConfig={}, xpathSearchUrl={}",
+                    KazumiLog.rule.info("Downloaded rule {}: searchMode={}, apiConfig={}, xpathSearchUrl={}",
                             ruleName, rule.getSearchMode(),
                             rule.getSearchApiConfig() != null ? rule.getSearchApiConfig().request.url : "NULL",
                             rule.getSearchUrl());
@@ -51,7 +49,7 @@ public class RuleDownloader {
                     if (!rule.isValidBaseUrl()) {
                         throw new RuntimeException("Invalid baseUrl for rule: " + rule.getName());
                     }
-                    LOGGER.info("Downloaded rule: {}", rule.getName());
+                    KazumiLog.rule.info("Downloaded rule: {}", rule.getName());
                     return rule;
                 });
     }

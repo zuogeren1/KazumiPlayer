@@ -1,7 +1,7 @@
 package me.zuogeren.kazumiplayer.screen;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
 import com.mojang.blaze3d.platform.NativeImage;
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.KazumiPlayer;
 import me.zuogeren.kazumiplayer.playback.WaterMediaPlayer;
 import net.minecraft.client.Minecraft;
@@ -10,7 +10,6 @@ import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.system.MemoryUtil;
-import org.slf4j.Logger;
 
 import java.nio.ByteBuffer;
 
@@ -22,7 +21,6 @@ import java.nio.ByteBuffer;
  * 使 RenderType.entityCutout(textureId) 能正常寻址该纹理。
  */
 public class VideoScreenTexture implements AutoCloseable {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private static final String PREFIX = "video_screen_frame/";
 
     // 默认分辨率，后续可根据实际视频尺寸调整
@@ -44,7 +42,7 @@ public class VideoScreenTexture implements AutoCloseable {
         TextureManager tm = Minecraft.getInstance().getTextureManager();
         tm.register(textureId, getOrCreateDynamicTexture());
         registered = true;
-        LOGGER.info("VideoScreenTexture registered: {}", textureId);
+        KazumiLog.render.info("VideoScreenTexture registered: {}", textureId);
     }
 
     private DynamicTexture getOrCreateDynamicTexture() {
@@ -88,7 +86,7 @@ public class VideoScreenTexture implements AutoCloseable {
             dt.upload();
             return true;
         } catch (Exception e) {
-            LOGGER.error("Failed to update video frame: {}", e.getMessage());
+            KazumiLog.render.error("Failed to update video frame: {}", e.getMessage());
             return false;
         }
     }

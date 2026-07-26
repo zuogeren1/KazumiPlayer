@@ -1,6 +1,6 @@
 package me.zuogeren.kazumiplayer.network.packet;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.KazumiPlayer;
 import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
@@ -16,7 +16,6 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
-import org.slf4j.Logger;
 
 import java.util.List;
 import java.util.UUID;
@@ -25,7 +24,6 @@ import java.util.UUID;
  * 客户端→服务端：当前集播放完毕，请求切换到下一集
  */
 public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPayload {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     public static final Type<NextEpisodePacket> TYPE =
         new Type<>(Identifier.fromNamespaceAndPath(KazumiPlayer.MODID, "next_episode"));
@@ -77,7 +75,7 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
             // 通知所有观看者（包括触发者，因为自动切集没有单独提示）
             String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
             SyncNotificationUtil.broadcastToGroup(sp, packet.screenPos, sid, "自动切换到 " + name);
-            LOGGER.info("Auto next episode {}: {}", idx, nextUrl);
+            KazumiLog.network.info("Auto next episode {}: {}", idx, nextUrl);
         });
     }
 
@@ -106,6 +104,6 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
         }
         // 通知所有观看者
         SyncNotificationUtil.broadcastToGroup(triggerPlayer, pos, sid, "播放已结束");
-        LOGGER.info("Playback ended at {} ({} watchers notified)", pos, watchers.size());
+        KazumiLog.network.info("Playback ended at {} ({} watchers notified)", pos, watchers.size());
     }
 }

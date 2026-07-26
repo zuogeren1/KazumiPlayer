@@ -1,6 +1,6 @@
 package me.zuogeren.kazumiplayer.rule;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.Config;
 import me.zuogeren.kazumiplayer.rule.dto.PreparedRuleRequest;
 import me.zuogeren.kazumiplayer.rule.dto.Road;
@@ -13,7 +13,6 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import org.slf4j.Logger;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -28,7 +27,6 @@ import java.util.concurrent.CompletionException;
  * 移植自 Kazumi Dart lib/services/plugin/xpath_rule_strategy.dart
  */
 public class XPathRuleStrategy {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
      * 准备搜索请求: 替换 @keyword 占位符
@@ -65,7 +63,7 @@ public class XPathRuleStrategy {
         try {
             containers = doc.selectXpath(config.searchList());
         } catch (Exception e) {
-            LOGGER.warn("XPath searchList failed for {}: {}", config.pluginName(), e.getMessage());
+            KazumiLog.rule.warn("XPath searchList failed for {}: {}", config.pluginName(), e.getMessage());
             return new RuleSearchResult(config.pluginName(), items, raw, diagnostics);
         }
 
@@ -194,7 +192,7 @@ public class XPathRuleStrategy {
                         raw = raw.substring(0, maxBytes);
                     }
                     RuleSearchResult result = parseSearch(raw, config);
-                    LOGGER.info("[Search] {} parsed: {} items, diagnostics: {}",
+                    KazumiLog.rule.info("[Search] {} parsed: {} items, diagnostics: {}",
                             config.pluginName(), result.items().size(), result.diagnostics());
                     return result;
                 });
@@ -212,7 +210,7 @@ public class XPathRuleStrategy {
                         raw = raw.substring(0, maxBytes);
                     }
                     RuleChapterResult result = parseChapters(raw, config);
-                    LOGGER.info("[Chapter] {} parsed: {} roads, diagnostics: {}",
+                    KazumiLog.rule.info("[Chapter] {} parsed: {} roads, diagnostics: {}",
                             config.pluginName(), result.roads().size(), result.diagnostics());
                     return result;
                 });

@@ -1,13 +1,12 @@
 package me.zuogeren.kazumiplayer.playback;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
 import com.cinemamod.mcef.MCEF;
 import com.cinemamod.mcef.MCEFBrowser;
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.ClientConfig;
 import org.cef.CefSettings;
 import org.cef.browser.CefBrowser;
 import org.cef.handler.CefDisplayHandlerAdapter;
-import org.slf4j.Logger;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -19,7 +18,6 @@ import java.util.concurrent.TimeUnit;
  * JS 嗅探脚本移植自 Kazumi Dart webview/video/impl/video_webview_impl.dart
  */
 public class VideoSniffer {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     // 视频 URL 嗅探报告前缀
     private static final String SNIFF_PREFIX = "KAZUMI_VIDEO_URL:";
@@ -115,7 +113,7 @@ public class VideoSniffer {
                         String message, String source, int line) {
                     if (message.startsWith(SNIFF_PREFIX)) {
                         String videoUrl = message.substring(SNIFF_PREFIX.length());
-                        LOGGER.info("Sniffed video URL: {}", videoUrl);
+                        KazumiLog.sniff.info("Sniffed video URL: {}", videoUrl);
                         future.complete(videoUrl);
                         return true;
                     }
@@ -143,7 +141,7 @@ public class VideoSniffer {
                 MCEF.getClient().removeDisplayHandler(handler);
                 browser.close();
                 if (err != null) {
-                    LOGGER.warn("Sniff failed: {}", err.getMessage());
+                    KazumiLog.sniff.warn("Sniff failed: {}", err.getMessage());
                 }
             });
 

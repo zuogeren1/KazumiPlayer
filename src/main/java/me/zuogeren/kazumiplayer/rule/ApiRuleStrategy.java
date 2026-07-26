@@ -3,11 +3,9 @@ package me.zuogeren.kazumiplayer.rule;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.rule.dto.*;
 import me.zuogeren.kazumiplayer.util.EpisodeUrlNormalizer;
 import me.zuogeren.kazumiplayer.util.HttpUtil;
-import org.slf4j.Logger;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -18,7 +16,6 @@ import java.util.*;
  * 使用 SimpleJsonPath (无外部依赖)
  */
 public class ApiRuleStrategy {
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     public PreparedRuleRequest prepareSearchRequest(Rule rule, String keyword) {
         if (rule.getSearchApiConfig() == null) {

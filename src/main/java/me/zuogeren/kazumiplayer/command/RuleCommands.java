@@ -3,7 +3,6 @@ package me.zuogeren.kazumiplayer.command;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleIndex;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
@@ -13,13 +12,11 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
-import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class RuleCommands {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private static final int PAGE_SIZE = 8;
 
     public static LiteralArgumentBuilder<CommandSourceStack> build(

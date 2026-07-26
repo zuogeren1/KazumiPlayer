@@ -1,6 +1,6 @@
 package me.zuogeren.kazumiplayer;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
 import me.zuogeren.kazumiplayer.command.KazumiCommand;
@@ -18,15 +18,14 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.fml.loading.FMLPaths;
-import org.slf4j.Logger;
 
 @Mod(KazumiPlayer.MODID)
 public class KazumiPlayer {
     public static final String MODID = "kazumiplayer";
-    private static final Logger LOGGER = LogUtils.getLogger();
+
 
     public KazumiPlayer(IEventBus modEventBus, ModContainer modContainer, Dist dist) {
-        LOGGER.info("KazumiPlayer initializing...");
+        KazumiLog.general.info("KazumiPlayer initializing...");
 
         // 配置
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
@@ -61,6 +60,6 @@ public class KazumiPlayer {
             NeoForge.EVENT_BUS.register(ClientDisconnectHandler.class);
         }
 
-        LOGGER.info("KazumiPlayer initialized on {} ({} rules loaded)", dist, ruleManager.count());
+        KazumiLog.general.info("KazumiPlayer initialized on {} ({} rules loaded)", dist, ruleManager.count());
     }
 }

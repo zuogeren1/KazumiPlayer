@@ -1,9 +1,8 @@
 package me.zuogeren.kazumiplayer.util;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.Config;
-import org.slf4j.Logger;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -24,7 +23,6 @@ import java.util.concurrent.CompletableFuture;
  * HTTP 客户端，内置 SSRF 防护和响应大小限制
  */
 public class HttpUtil {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
@@ -68,7 +66,7 @@ public class HttpUtil {
         CompletableFuture.runAsync(() -> {
             try {
                 URI uri = URI.create(urlString);
-                LOGGER.debug("HTTP {} {} (host: {})", method, urlString, uri.getHost());
+                KazumiLog.http.debug("HTTP {} {} (host: {})", method, urlString, uri.getHost());
                 checkSsrf(uri);
 
                 // 构建 URL (添加 query params)
@@ -98,22 +96,22 @@ public class HttpUtil {
                 int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
                 String body = readResponseBody(response, maxBytes);
 
-                LOGGER.debug("HTTP {} {} -> {} ({} bytes)",
+                KazumiLog.http.debug("HTTP {} {} -> {} ({} bytes)",
                         method, uri.getHost(), response.statusCode(), body.length());
                 future.complete(body);
             } catch (SsrfBlockedException e) {
                 future.completeExceptionally(e);
             } catch (java.net.UnknownHostException e) {
-                LOGGER.error("DNS failed for {}: {}", urlString, e.getMessage());
+                KazumiLog.http.error("DNS failed for {}: {}", urlString, e.getMessage());
                 future.completeExceptionally(new RuntimeException("DNS解析失败: " + e.getMessage(), e));
             } catch (java.net.http.HttpTimeoutException e) {
-                LOGGER.warn("HTTP timeout: {}", urlString);
+                KazumiLog.http.warn("HTTP timeout: {}", urlString);
                 future.completeExceptionally(new RuntimeException("请求超时", e));
             } catch (java.net.ConnectException e) {
-                LOGGER.warn("Connection refused: {} ({})", urlString, e.getMessage());
+                KazumiLog.http.warn("Connection refused: {} ({})", urlString, e.getMessage());
                 future.completeExceptionally(new RuntimeException("连接失败: " + e.getMessage(), e));
             } catch (Exception e) {
-                LOGGER.warn("HTTP request failed for {}: {} {}", urlString,
+                KazumiLog.http.warn("HTTP request failed for {}: {} {}", urlString,
                         e.getClass().getSimpleName(), e.getMessage());
                 future.completeExceptionally(new RuntimeException(e.getMessage(), e));
             }
@@ -135,7 +133,7 @@ public class HttpUtil {
             while ((n = in.read(buf)) != -1) {
                 totalRead += n;
                 if (totalRead > maxBytes) {
-                    LOGGER.warn("Response body exceeds max size ({}), truncating", maxBytes);
+                    KazumiLog.http.warn("Response body exceeds max size ({}), truncating", maxBytes);
                     break;
                 }
                 out.write(buf, 0, n);

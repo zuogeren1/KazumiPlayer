@@ -1,9 +1,8 @@
 package me.zuogeren.kazumiplayer.client;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
-import org.slf4j.Logger;
 import me.zuogeren.kazumiplayer.playback.PlaybackManager;
 import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleEngine;
@@ -21,7 +20,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ClientDisconnectHandler {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private static int tickCounter;
     private static final Set<VideoScreenBlockEntity> activeScreens = ConcurrentHashMap.newKeySet();
 
@@ -143,7 +141,7 @@ public class ClientDisconnectHandler {
                 // 检测播放完毕 → 自动下一集
                 if (screen.player != null && screen.player.isEnded() && !screen.endedNotified) {
                     screen.endedNotified = true;
-                    LOGGER.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
+                    KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
                     var pkt = new NextEpisodePacket(screen.getBlockPos());
                     mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
                 }

@@ -1,10 +1,9 @@
 package me.zuogeren.kazumiplayer.search;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.util.HttpUtil;
-import org.slf4j.Logger;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -21,7 +20,6 @@ import java.util.concurrent.CompletableFuture;
  * 移植自 Kazumi Dart lib/request/apis/bangumi_api.dart
  */
 public class BangumiApi {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private static final String API_DOMAIN = "https://api.bgm.tv";
     private static final String SEARCH_PATH = "/v0/search/subjects";
 
@@ -59,10 +57,10 @@ public class BangumiApi {
                         .fromJson(response.body(), SearchResponse.class);
                     return sr != null && sr.data != null ? sr.data : Collections.emptyList();
                 }
-                LOGGER.warn("Bangumi search returned {}", response.statusCode());
+                KazumiLog.search.warn("Bangumi search returned {}", response.statusCode());
                 return Collections.<BangumiSubject>emptyList();
             } catch (Exception e) {
-                LOGGER.warn("Bangumi search failed: {}", e.getMessage());
+                KazumiLog.search.warn("Bangumi search failed: {}", e.getMessage());
                 return Collections.emptyList();
             }
         });

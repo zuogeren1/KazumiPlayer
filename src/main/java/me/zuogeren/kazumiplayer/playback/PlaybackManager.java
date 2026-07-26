@@ -1,13 +1,12 @@
 package me.zuogeren.kazumiplayer.playback;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleEngine;
 import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.screen.VideoState;
 import net.minecraft.client.Minecraft;
-import org.slf4j.Logger;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -16,7 +15,6 @@ import java.util.concurrent.CompletableFuture;
  * 接收 URL → MCEF 嗅探(如需要) → WaterMedia 播放
  */
 public class PlaybackManager {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private final WaterMediaPlayer waterMedia = new WaterMediaPlayer();
     private final VideoSniffer sniffer = new VideoSniffer();
 
@@ -36,7 +34,7 @@ public class PlaybackManager {
         }
 
         // 用 MCEF 嗅探视频直链
-        LOGGER.info("Sniffing video URL from: {}", url);
+        KazumiLog.playback.info("Sniffing video URL from: {}", url);
         return sniffer.sniff(url)
             .thenAccept(videoUrl -> {
                 Minecraft.getInstance().execute(() -> {
@@ -46,7 +44,7 @@ public class PlaybackManager {
             })
             .exceptionally(e -> {
                 // 嗅探失败，尝试直接播放
-                LOGGER.warn("Sniff failed, trying direct play: {}", e.getMessage());
+                KazumiLog.playback.warn("Sniff failed, trying direct play: {}", e.getMessage());
                 Minecraft.getInstance().execute(() -> {
                     waterMedia.play(url);
                     screen.setVideoState(VideoState.PLAYING);
@@ -76,7 +74,7 @@ public class PlaybackManager {
             || lower.endsWith(".avi")
             || lower.endsWith(".webm")
             || lower.endsWith(".mov");
-        LOGGER.debug("isDirectVideoUrl({}) = {}", url, direct);
+        KazumiLog.playback.debug("isDirectVideoUrl({}) = {}", url, direct);
         return direct;
     }
 }

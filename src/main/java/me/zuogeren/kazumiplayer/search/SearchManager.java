@@ -1,11 +1,10 @@
 package me.zuogeren.kazumiplayer.search;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.Config;
 import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleEngine;
 import me.zuogeren.kazumiplayer.rule.dto.RuleSearchResult;
-import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +19,6 @@ import java.util.concurrent.TimeoutException;
  * 服务端搜索编排: 并行搜索所有已安装规则 (非阻塞)
  */
 public class SearchManager {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private final RuleEngine engine;
     private final SearchResultCache cache;
     private final ForkJoinPool pool = ForkJoinPool.commonPool();
@@ -52,7 +50,7 @@ public class SearchManager {
                 })
                 .exceptionally(e -> {
                     if (!(e instanceof TimeoutException)) {
-                        LOGGER.warn("Search failed for {}: {}", rule.getName(),
+                        KazumiLog.search.warn("Search failed for {}: {}", rule.getName(),
                                 e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
                     }
                     return null;

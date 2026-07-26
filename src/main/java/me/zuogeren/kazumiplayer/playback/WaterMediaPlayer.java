@@ -1,9 +1,8 @@
 package me.zuogeren.kazumiplayer.playback;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.mojang.logging.LogUtils;
 import me.zuogeren.kazumiplayer.client.PlayStateListener;
 import net.minecraft.client.Minecraft;
-import org.slf4j.Logger;
 import org.watermedia.api.media.MRL;
 import org.watermedia.api.media.MediaAPI;
 import org.watermedia.api.media.players.MediaPlayer;
@@ -15,7 +14,6 @@ import java.util.List;
  * WaterMedia V3 播放器封装 (FFmpeg)
  */
 public class WaterMediaPlayer {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private MediaPlayer player;
     private long pendingSeekMs = -1;
     private boolean pendingPause;
@@ -46,7 +44,7 @@ public class WaterMediaPlayer {
                 }
                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
             }
-            LOGGER.error("MRL loading timeout: {} (normalized: {})", videoUrl, url);
+            KazumiLog.playback.error("MRL loading timeout: {} (normalized: {})", videoUrl, url);
             mc.execute(() -> mc.gui.getChat().addClientSystemMessage(
                 net.minecraft.network.chat.Component.literal("§c视频加载超时，请检查网络或稍后重试")));
         }, "KazumiPlayer-MRL-Loader").start();
@@ -59,7 +57,7 @@ public class WaterMediaPlayer {
                 () -> MediaAPI.glEngine(Thread.currentThread(), mc),
                 () -> MediaAPI.alEngine());
             if (player == null) {
-                LOGGER.error("Failed to create player for: {}", mrl.uri);
+                KazumiLog.playback.error("Failed to create player for: {}", mrl.uri);
                 mc.execute(() -> mc.gui.getChat().addClientSystemMessage(
                     net.minecraft.network.chat.Component.literal("§c创建播放器失败")));
                 return;
@@ -68,7 +66,7 @@ public class WaterMediaPlayer {
             applyVolumeFromOptions();
             // seek 交给外部 tick 延迟执行（此时 demuxer 尚未就绪）
         } catch (Exception e) {
-            LOGGER.error("Playback failed: {}", e.getMessage());
+            KazumiLog.playback.error("Playback failed: {}", e.getMessage());
         }
     }
 
@@ -145,7 +143,7 @@ public class WaterMediaPlayer {
     public void applyPendingSeek() {
         if (player != null && player.playing() && pendingSeekMs >= 0) {
             player.seek(pendingSeekMs);
-            LOGGER.info("Delayed seek: {}ms (time={})", pendingSeekMs, player.time());
+            KazumiLog.playback.info("Delayed seek: {}ms (time={})", pendingSeekMs, player.time());
             pendingSeekMs = -1;
             for (var l : listeners) l.onSeek(player.time());
         }
