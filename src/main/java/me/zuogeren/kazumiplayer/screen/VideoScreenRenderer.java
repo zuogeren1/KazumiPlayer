@@ -132,8 +132,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
 
         poseStack.pushPose();
 
-        // 屏幕显示在方块上方
-        poseStack.translate(0.5, 1.0 + halfH, 0.5);
+        // 屏幕显示在方块上方（+0.5格避开方块遮挡进度条）
+        poseStack.translate(0.5, 1.5 + halfH, 0.5);
 
         // 根据朝向绕 Y 轴旋转
         rotateToFacing(poseStack, state.facing);
