@@ -26,11 +26,8 @@ import net.minecraft.world.phys.Vec3;
 
 public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlockEntity, VideoScreenRenderState> {
 
-    // 各状态对应的占位颜色 (ABGR packed int)
-    // IDLE/STOPPED → 深灰, LOADING → 深蓝, ERROR → 深红
-    private static final int COLOR_IDLE    = 0xFF333333;
+    // LOADING 状态占位色 (ABGR packed int)
     private static final int COLOR_LOADING = 0xFF333388;
-    private static final int COLOR_ERROR   = 0xFF883333;
 
     private static final Identifier WHITE_TEX = Identifier.fromNamespaceAndPath("kazumiplayer", "progress_bar_white");
     private static boolean whiteTexRegistered;
@@ -107,21 +104,17 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         float halfW = state.screenWidth / 2.0f;
         float halfH = state.screenHeight / 2.0f;
 
+        // IDLE 状态（无播放器）不渲染视频面——避免读到其他屏幕写入的共享纹理
+        if (state.player == null) return;
+
         // 决定显示视频帧还是占位色
         boolean hasFrame = false;
-        if (state.player != null && state.player.isPlaying()) {
+        if (state.player.isPlaying()) {
             hasFrame = videoTexture.updateFrame(state.player);
         }
 
         if (!hasFrame) {
-            int color;
-            if (state.player != null) {
-                // 有播放器但未就绪 → LOADING
-                color = COLOR_LOADING;
-            } else {
-                color = COLOR_IDLE;
-            }
-            videoTexture.fillPlaceholder(color);
+            videoTexture.fillPlaceholder(COLOR_LOADING);
         }
 
         RenderType renderType = RenderTypes.entityCutout(videoTexture.getTextureId());
