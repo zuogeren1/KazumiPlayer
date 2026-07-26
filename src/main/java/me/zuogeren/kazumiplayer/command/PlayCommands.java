@@ -123,27 +123,36 @@ public class PlayCommands {
                     return 0;
                 }
                 var be = player.level().getBlockEntity(screenPos);
-                if (!(be instanceof VideoScreenBlockEntity screen) || screen.getEpisodeUrl().isEmpty()) {
-                    ctx.getSource().sendFailure(Component.literal("该屏幕未在播放"));
+                if (!(be instanceof VideoScreenBlockEntity screen)) {
+                    ctx.getSource().sendFailure(Component.literal("目标方块不是屏幕"));
                     return 0;
                 }
-                String url = screen.getEpisodeUrl();
                 UUID sid = screen.getScreenId();
+                String url = screen.getEpisodeUrl();
                 var group = SyncGroupManager.get().getGroup(sid);
-                long currentPos;
                 if (group != null) {
+                    // 已在播放：加入现有组
                     long elapsed = group.paused ? 0 : System.currentTimeMillis() - group.serverTimestamp;
-                    currentPos = group.positionMs + elapsed;
-                } else {
-                    currentPos = screen.getSyncPositionMs();
-                    if (currentPos < 0) currentPos = 0;
+                    long currentPos = group.positionMs + elapsed;
+                    SyncGroupManager.get().join(player, sid, url);
+                    setScreenNbt(screen, url, currentPos);
+                    SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
+                    ctx.getSource().sendSystemMessage(Component.literal(
+                        "已加入同步播放 (位置: " + (currentPos / 1000) + "s)"));
+                } else if (!url.isEmpty()) {
+                    // 有 URL 但无组（异常恢复）：重建组
                     SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
+                    setScreenNbt(screen, url, 0);
+                    SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
+                    ctx.getSource().sendSystemMessage(Component.literal(
+                        "已加入同步播放 (位置: 0s)"));
+                } else {
+                    // 屏幕未在播放：创建待机组，等开始播放时自动生效
+                    SyncGroupManager.get().joinStandby(player, sid, screenPos);
+                    SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
+                    ctx.getSource().sendSystemMessage(Component.literal(
+                        "已加入同步播放（等待播放开始）"));
                 }
-                SyncGroupManager.get().join(player, sid, url);
-                setScreenNbt(screen, url, currentPos);
-                SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
-                ctx.getSource().sendSystemMessage(Component.literal(
-                    "已加入同步播放 (位置: " + (currentPos / 1000) + "s)"));
                 return 1;
             });
 

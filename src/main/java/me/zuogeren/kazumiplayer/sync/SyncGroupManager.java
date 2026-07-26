@@ -42,6 +42,18 @@ public class SyncGroupManager {
         group.players.add(player.getUUID());
     }
 
+    /** 加入待机（屏幕未在播放时），创建空 URL 组；等播放开始后自动生效 */
+    public void joinStandby(ServerPlayer player, UUID screenId, BlockPos screenPos) {
+        SyncGroup group = groups.computeIfAbsent(screenId,
+            k -> new SyncGroup(screenId, screenPos, ""));
+        group.players.add(player.getUUID());
+        // 同步 WatchingPlayers
+        var be = player.level().getBlockEntity(screenPos);
+        if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
+            screen.setWatchingPlayers(String.join(",", group.players.stream().map(java.util.UUID::toString).toList()));
+        }
+    }
+
     public void leave(UUID playerId) {
         for (var it = groups.entrySet().iterator(); it.hasNext(); ) {
             var entry = it.next();
