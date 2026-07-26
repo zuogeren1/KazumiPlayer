@@ -13,6 +13,7 @@ import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.ChatComponentUtil;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
+import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
@@ -140,7 +141,7 @@ public class PlayCommands {
                 }
                 SyncGroupManager.get().join(player, sid, url);
                 setScreenNbt(screen, url, currentPos);
-                notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
+                SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
                 ctx.getSource().sendSystemMessage(Component.literal(
                     "已加入同步播放 (位置: " + (currentPos / 1000) + "s)"));
                 return 1;
@@ -163,7 +164,7 @@ public class PlayCommands {
                     if (g != null) {
                         long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
                         sc.updateSyncPosition(g.positionMs + elapsed);
-                        notifyOtherWatchers(player, screenPos, sid, "停止了播放");
+                        SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "停止了播放");
                     }
                 }
                 SyncGroupManager.get().leave(player.getUUID());
@@ -192,7 +193,7 @@ public class PlayCommands {
                     if (g != null) {
                         long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
                         sc.updateSyncPosition(g.positionMs + elapsed);
-                        notifyOtherWatchers(player, screenPos, sid, "离开了同步播放");
+                        SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "离开了同步播放");
                     }
                 }
                 SyncGroupManager.get().leave(player.getUUID());
@@ -360,7 +361,7 @@ public class PlayCommands {
         UUID sid = screen.getScreenId();
         SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
         syncWatchingPlayers(screen);
-        notifyOtherWatchers(player, screenPos, sid, "切换到 " + name);
+        SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "切换到 " + name);
         src.sendSystemMessage(Component.literal("已切换到: " + name));
         return 1;
     }
@@ -381,7 +382,7 @@ public class PlayCommands {
         String action = deltaSec >= 0
             ? "快进了 " + deltaSec + "s → " + formatMs(newPos)
             : "快退了 " + (-deltaSec) + "s → " + formatMs(newPos);
-        notifyOtherWatchers(player, screenPos, sid, action);
+        SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, action);
         src.sendSystemMessage(Component.literal("时间调整: " + (deltaSec >= 0 ? "+" : "") + deltaSec + "s → " + formatMs(newPos)));
         return 1;
     }
@@ -395,7 +396,7 @@ public class PlayCommands {
         screen.updateSyncPosition(ms);
         UUID sid = screen.getScreenId();
         updateSyncGroupPosition(sid, ms);
-        notifyOtherWatchers(player, screenPos, sid, "跳转到 " + formatMs(ms));
+        SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "跳转到 " + formatMs(ms));
         src.sendSystemMessage(Component.literal("跳转到: " + formatMs(ms)));
         return 1;
     }
@@ -444,7 +445,7 @@ public class PlayCommands {
         SyncGroupManager.get().updateState(sid, cur, pause);
         screen.updateSyncPosition(cur);
         screen.setPlaybackPaused(pause);
-        notifyOtherWatchers(player, pos, sid, pause ? "暂停了播放" : "恢复了播放");
+        SyncNotificationUtil.notifyOtherWatchers(player, pos, sid, pause ? "暂停了播放" : "恢复了播放");
         src.sendSystemMessage(Component.literal(pause ? "已暂停" : "已恢复"));
         return 1;
     }
@@ -483,21 +484,6 @@ public class PlayCommands {
         screen.setWatchingPlayers(g != null
             ? String.join(",", g.players.stream().map(java.util.UUID::toString).toList())
             : "");
-    }
-
-    /** 通知其他观看者（不包括操作者本人） */
-    private static void notifyOtherWatchers(ServerPlayer actor, BlockPos pos, UUID screenId, String action) {
-        var g = SyncGroupManager.get().getGroup(screenId);
-        if (g == null) return;
-        String actorName = actor.getName().getString();
-        Component msg = Component.literal("§e" + actorName + " " + action + " §7("
-            + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
-        var server = ((net.minecraft.server.level.ServerLevel) actor.level()).getServer();
-        for (UUID pid : g.players) {
-            if (pid.equals(actor.getUUID())) continue;
-            ServerPlayer p = server.getPlayerList().getPlayer(pid);
-            if (p != null) p.sendSystemMessage(msg);
-        }
     }
 
     private static BlockPos getTargetScreen(ServerPlayer player) {
