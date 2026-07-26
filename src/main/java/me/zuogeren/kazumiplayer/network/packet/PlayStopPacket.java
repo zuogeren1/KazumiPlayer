@@ -36,6 +36,8 @@ public record PlayStopPacket(BlockPos screenPos) implements CustomPacketPayload 
                     screen.player.stop();
                     screen.player = null;
                 }
+                // 清空播放 URL，防止客户端 tick 循环立即重开播放
+                screen.clearPlayback();
             }
         });
     }

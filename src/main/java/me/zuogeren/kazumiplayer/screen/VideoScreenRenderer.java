@@ -4,6 +4,8 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.core.BlockPos;
+import java.util.Map;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
@@ -32,12 +34,10 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     private static final Identifier WHITE_TEX = Identifier.fromNamespaceAndPath("kazumiplayer", "progress_bar_white");
     private static boolean whiteTexRegistered;
 
-    private final VideoScreenTexture videoTexture;
+    private final Map<BlockPos, VideoScreenTexture> screenTextures = new java.util.HashMap<>();
     private final ItemModelResolver itemModelResolver;
 
     public VideoScreenRenderer(BlockEntityRendererProvider.Context context) {
-        this.videoTexture = new VideoScreenTexture();
-        this.videoTexture.ensureRegistered();
         ensureProgressBarTexture();
         this.itemModelResolver = context.itemModelResolver();
     }
@@ -68,6 +68,13 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         state.facing = be.getFacing();
         state.videoState = be.getVideoState();
         state.player = be.player;
+        state.videoTexture = screenTextures.computeIfAbsent(be.getBlockPos(),
+            k -> {
+                String key = k.getX() + "_" + k.getY() + "_" + k.getZ();
+                var t = new VideoScreenTexture(key);
+                t.ensureRegistered();
+                return t;
+            });
         state.skinBlock = be.getSkinBlock();
         // 方块模型：统一走 ItemModelResolver（支持资源包替换纹理）
         String skin = be.getSkinBlock();
@@ -108,16 +115,17 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         if (state.player == null) return;
 
         // 决定显示视频帧还是占位色
+        VideoScreenTexture tex = state.videoTexture;
         boolean hasFrame = false;
         if (state.player.isPlaying()) {
-            hasFrame = videoTexture.updateFrame(state.player);
+            hasFrame = tex.updateFrame(state.player);
         }
 
         if (!hasFrame) {
-            videoTexture.fillPlaceholder(COLOR_LOADING);
+            tex.fillPlaceholder(COLOR_LOADING);
         }
 
-        RenderType renderType = RenderTypes.entityCutout(videoTexture.getTextureId());
+        RenderType renderType = RenderTypes.entityCutout(tex.getTextureId());
 
         poseStack.pushPose();
 

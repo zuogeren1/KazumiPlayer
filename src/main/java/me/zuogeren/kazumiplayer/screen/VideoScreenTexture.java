@@ -23,24 +23,28 @@ import java.nio.ByteBuffer;
  */
 public class VideoScreenTexture implements AutoCloseable {
     private static final Logger LOGGER = LogUtils.getLogger();
-    public static final Identifier TEXTURE_ID = Identifier.fromNamespaceAndPath(
-        KazumiPlayer.MODID, "video_screen_frame");
+    private static final String PREFIX = "video_screen_frame/";
 
     // 默认分辨率，后续可根据实际视频尺寸调整
     private static final int DEFAULT_WIDTH = 1920;
     private static final int DEFAULT_HEIGHT = 1080;
 
+    private final Identifier textureId;
     private DynamicTexture dynamicTexture;
     private NativeImage nativeImage;
     private boolean registered;
+
+    public VideoScreenTexture(String uniqueKey) {
+        this.textureId = Identifier.fromNamespaceAndPath(KazumiPlayer.MODID, PREFIX + uniqueKey);
+    }
 
     /** 确保 DynamicTexture 已注册到 TextureManager，幂等 */
     public void ensureRegistered() {
         if (registered) return;
         TextureManager tm = Minecraft.getInstance().getTextureManager();
-        tm.register(TEXTURE_ID, getOrCreateDynamicTexture());
+        tm.register(textureId, getOrCreateDynamicTexture());
         registered = true;
-        LOGGER.info("VideoScreenTexture registered: {}", TEXTURE_ID);
+        LOGGER.info("VideoScreenTexture registered: {}", textureId);
     }
 
     private DynamicTexture getOrCreateDynamicTexture() {
@@ -99,7 +103,7 @@ public class VideoScreenTexture implements AutoCloseable {
     }
 
     public Identifier getTextureId() {
-        return TEXTURE_ID;
+        return textureId;
     }
 
     @Override

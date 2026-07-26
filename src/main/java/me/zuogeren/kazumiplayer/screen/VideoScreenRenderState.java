@@ -10,4 +10,5 @@ public class VideoScreenRenderState extends net.minecraft.client.renderer.blocke
     public me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
     public String skinBlock = "";
     public ItemStackRenderState skinItemState;
+    public VideoScreenTexture videoTexture; // 每屏幕独立纹理
 }
