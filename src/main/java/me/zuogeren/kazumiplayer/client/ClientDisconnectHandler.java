@@ -157,5 +157,11 @@ public class ClientDisconnectHandler {
                 }
             }
         }
+        // 音响 tick（漂移校正、屏幕连接检查）
+        for (var be : mc.level.getGloballyRenderedBlockEntities()) {
+            if (be instanceof me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity spk) {
+                spk.clientTick();
+            }
+        }
     }
 }
