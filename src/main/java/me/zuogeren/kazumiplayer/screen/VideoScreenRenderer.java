@@ -211,7 +211,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         float totalW = halfW * 2;
         float playedW = totalW * ratio;
         float zBg = 0.49f;
-        float zFg = 0.47f;
+        float zFg = 0.50f;
 
         RenderType barType = RenderTypes.entityCutout(BLOCK_PLACEHOLDER);
 
@@ -220,11 +220,11 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
             fillBar(buffer, pose, -halfW, halfW, barY, barY + barH, zBg, 0xFF555555);
         });
 
-        // 已播放条（绿色），从左侧开始填充
+        // 已播放条（绿色），从右端向左填充
         if (playedW > 0) {
-            float pxEnd = -halfW + playedW;
+            float pxStart = halfW - playedW;
             collector.submitCustomGeometry(poseStack, barType, (pose, buffer) -> {
-                fillBar(buffer, pose, -halfW, pxEnd, barY, barY + barH, zFg, 0xFF44FF33);
+                fillBar(buffer, pose, pxStart, halfW, barY, barY + barH, zFg, 0xFF44FF33);
             });
         }
     }
