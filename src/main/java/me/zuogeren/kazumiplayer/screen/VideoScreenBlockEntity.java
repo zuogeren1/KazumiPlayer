@@ -160,7 +160,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.watchingPlayers = input.getString("WatchingPlayers").orElse("");
         this.playbackPaused = input.getBooleanOr("PlaybackPaused", false);
         this.skinBlock = input.getString("SkinBlock").orElse("");
-        this.screenId = input.getString("ScreenId").map(UUID::fromString).orElse(null);
+        this.screenId = input.getString("ScreenId").filter(s -> !s.isEmpty()).map(UUID::fromString).orElse(null);
 
         if (level != null && level.isClientSide() && episodeUrl.isEmpty() && player != null) {
             player.stop();
