@@ -24,11 +24,23 @@ public class WaterMediaPlayer {
     public void addListener(PlayStateListener l) { listeners.add(l); }
     public void removeListener(PlayStateListener l) { listeners.remove(l); }
 
+    private static String normalizeUrl(String url) {
+        // 本地 Windows 路径转 file:/// URI
+        if (url.length() > 2 && url.charAt(1) == ':') {
+            return "file:///" + url.replace('\\', '/');
+        }
+        if (url.startsWith("/") || url.startsWith("~/")) {
+            return "file://" + url;
+        }
+        return url;
+    }
+
     public void play(String videoUrl) {
+        String url = normalizeUrl(videoUrl);
         Minecraft mc = Minecraft.getInstance();
         new Thread(() -> {
             for (int retry = 0; retry < 30; retry++) {
-                MRL mrl = MediaAPI.mrl(videoUrl);
+                MRL mrl = MediaAPI.mrl(url);
                 if (mrl.source(0) != null) {
                     mc.execute(() -> createAndStart(mrl, mc));
                     return;

@@ -130,6 +130,7 @@ public class ClientDisconnectHandler {
                     } else {
                         screen.player.resume();
                     }
+                    screen.player.applyVolumeFromOptions();
                 }
                 // NBT 位置变化 → seek
                 if (screen.player != null && screen.player.isPlaying()) {

@@ -8,7 +8,6 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
@@ -65,9 +64,12 @@ public class ConnectionToolItem extends Item {
                 int ty = tag.getInt("TargetY").orElse(0);
                 int tz = tag.getInt("TargetZ").orElse(0);
                 BlockPos targetPos = new BlockPos(tx, ty, tz);
-                if (level.isClientSide() && player instanceof ServerPlayer sp) {
-                    sp.connection.send(new ServerboundCustomPayloadPacket(
-                        new SpeakerConnectPacket(ctx.getClickedPos(), targetPos, targetId, true)));
+                if (level.isClientSide()) {
+                    var conn = net.minecraft.client.Minecraft.getInstance().getConnection();
+                    if (conn != null) {
+                        conn.send(new ServerboundCustomPayloadPacket(
+                            new SpeakerConnectPacket(ctx.getClickedPos(), targetPos, targetId, true)));
+                    }
                 }
             } catch (IllegalArgumentException ignored) {}
             return InteractionResult.SUCCESS;
