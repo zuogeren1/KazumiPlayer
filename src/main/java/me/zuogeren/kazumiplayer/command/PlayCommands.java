@@ -497,7 +497,10 @@ public class PlayCommands {
 
     private static BlockPos getTargetScreen(ServerPlayer player) {
         HitResult hit = player.pick(5.0, 0, false);
-        if (hit instanceof BlockHitResult blockHit) return blockHit.getBlockPos();
+        if (hit instanceof BlockHitResult blockHit) {
+            BlockPos pos = blockHit.getBlockPos();
+            if (player.level().getBlockEntity(pos) instanceof VideoScreenBlockEntity) return pos;
+        }
         return null;
     }
 }

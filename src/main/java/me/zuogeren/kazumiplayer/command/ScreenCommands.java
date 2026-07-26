@@ -60,17 +60,19 @@ public class ScreenCommands {
                     }
                     BlockPos pos = blockHit.getBlockPos();
                     var be = player.level().getBlockEntity(pos);
-                    if (be instanceof VideoScreenBlockEntity screen) {
-                        UUID sid = screen.getScreenId();
-                        // 停止前保存当前计时到 NBT
-                        var g = SyncGroupManager.get().getGroup(sid);
-                        if (g != null) {
-                            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
-                            screen.updateSyncPosition(g.positionMs + elapsed);
-                        }
-                        screen.clearPlayback();
-                        SyncGroupManager.get().leaveByScreenId(sid);
+                    if (!(be instanceof VideoScreenBlockEntity screen)) {
+                        ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                        return 0;
                     }
+                    UUID sid = screen.getScreenId();
+                    // 停止前保存当前计时到 NBT
+                    var g = SyncGroupManager.get().getGroup(sid);
+                    if (g != null) {
+                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                        screen.updateSyncPosition(g.positionMs + elapsed);
+                    }
+                    screen.clearPlayback();
+                    SyncGroupManager.get().leaveByScreenId(sid);
                     ctx.getSource().sendSuccess(() -> Component.literal("屏幕已停止"), true);
                     return 1;
                 }));
