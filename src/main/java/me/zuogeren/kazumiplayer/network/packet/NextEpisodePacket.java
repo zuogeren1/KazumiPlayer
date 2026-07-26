@@ -67,7 +67,16 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
             String nextUrl = road.data().get(idx - 1);
             String allData = JsonUtil.GSON.toJson(roads);
             screen.setPlaybackFull(nextUrl, 0, idx, allData);
-            SyncGroupManager.get().onPlayStart(sp, screen.getScreenId(), packet.screenPos, nextUrl);
+            UUID sid = screen.getScreenId();
+            SyncGroupManager.get().onPlayStart(sp, sid, packet.screenPos, nextUrl);
+            // 同步 WatchingPlayers NBT
+            var g = SyncGroupManager.get().getGroup(sid);
+            if (g != null) {
+                screen.setWatchingPlayers(String.join(",", g.players.stream().map(UUID::toString).toList()));
+            }
+            // 通知所有观看者
+            String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
+            notifyWatchers(sp, packet.screenPos, sid, "自动切换到 " + name);
             LOGGER.info("Auto next episode {}: {}", idx, nextUrl);
         });
     }
@@ -101,5 +110,17 @@ public record NextEpisodePacket(BlockPos screenPos) implements CustomPacketPaylo
             }
         }
         LOGGER.info("Playback ended at {} ({} watchers notified)", pos, watchers.size());
+    }
+
+    private static void notifyWatchers(ServerPlayer trigger, BlockPos pos, UUID screenId, String action) {
+        var g = SyncGroupManager.get().getGroup(screenId);
+        if (g == null) return;
+        Component msg = Component.literal("§e" + action + " §7("
+            + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+        for (UUID pid : g.players) {
+            if (pid.equals(trigger.getUUID())) continue;
+            ServerPlayer p = ((net.minecraft.server.level.ServerLevel) trigger.level()).getServer().getPlayerList().getPlayer(pid);
+            if (p != null) p.sendSystemMessage(msg);
+        }
     }
 }

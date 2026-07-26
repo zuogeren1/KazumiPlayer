@@ -354,7 +354,11 @@ public class PlayCommands {
         String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
         String roadJson = JsonUtil.GSON.toJson(roads);
         screen.setPlaybackFull(url, 0, idx, roadJson);
-        SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, url);
+        UUID sid = screen.getScreenId();
+        SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
+        syncWatchingPlayers(screen);
+        // 通知所有观看者
+        notifyWatchers(player, screenPos, sid, "切换到 " + name);
         src.sendSystemMessage(Component.literal("已切换到: " + name));
         return 1;
     }
@@ -469,6 +473,19 @@ public class PlayCommands {
         screen.setWatchingPlayers(g != null
             ? String.join(",", g.players.stream().map(java.util.UUID::toString).toList())
             : "");
+    }
+
+    /** 通知所有观看者（不包括触发者，他们已有自己的消息） */
+    private static void notifyWatchers(ServerPlayer trigger, BlockPos pos, UUID screenId, String action) {
+        var g = SyncGroupManager.get().getGroup(screenId);
+        if (g == null) return;
+        Component msg = Component.literal("§e" + action + " §7("
+            + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+        for (UUID pid : g.players) {
+            if (pid.equals(trigger.getUUID())) continue;
+            ServerPlayer p = ((net.minecraft.server.level.ServerLevel) trigger.level()).getServer().getPlayerList().getPlayer(pid);
+            if (p != null) p.sendSystemMessage(msg);
+        }
     }
 
     private static BlockPos getTargetScreen(ServerPlayer player) {
