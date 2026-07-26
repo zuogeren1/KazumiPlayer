@@ -22,8 +22,8 @@ import java.util.UUID;
 
 public class ConnectionToolItem extends Item {
 
-    public ConnectionToolItem() {
-        super(new Properties().stacksTo(1));
+    public ConnectionToolItem(Properties properties) {
+        super(properties.stacksTo(1));
     }
 
     @Override

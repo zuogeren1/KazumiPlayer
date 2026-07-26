@@ -37,7 +37,7 @@ public class SpeakerRegistration {
         ITEMS.registerSimpleBlockItem(SPEAKER_BLOCK);
 
     public static final DeferredItem<ConnectionToolItem> CONNECTION_TOOL =
-        ITEMS.register("connection_tool", ConnectionToolItem::new);
+        ITEMS.registerItem("connection_tool", ConnectionToolItem::new, props -> props);
 
     public static final Supplier<BlockEntityType<SpeakerBlockEntity>> SPEAKER_BLOCK_ENTITY =
         BLOCK_ENTITY_TYPES.register("speaker",
