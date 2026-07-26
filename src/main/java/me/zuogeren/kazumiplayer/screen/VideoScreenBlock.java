@@ -47,25 +47,20 @@ public class VideoScreenBlock extends Block implements EntityBlock {
     }
 
     @Override
-    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
-            Player player, BlockHitResult hit) {
-        if (player.isShiftKeyDown() && level.getBlockEntity(pos) instanceof VideoScreenBlockEntity screen) {
-            screen.setSkinBlock("");
-            return InteractionResult.SUCCESS;
-        }
-        return InteractionResult.PASS;
-    }
-
-    @Override
     protected InteractionResult useItemOn(net.minecraft.world.item.ItemStack stack, BlockState state,
             Level level, BlockPos pos, Player player, net.minecraft.world.InteractionHand hand, BlockHitResult hit) {
         if (stack.getItem() instanceof BlockItem bi) {
             BlockState skinState = bi.getBlock().defaultBlockState();
-            // 仅完整方块（六面全满的立方体）
             if (skinState.getShape(level, pos) == Shapes.block()) {
                 if (level.getBlockEntity(pos) instanceof VideoScreenBlockEntity screen) {
                     var key = BuiltInRegistries.BLOCK.getKey(bi.getBlock());
-                    screen.setSkinBlock(key.toString());
+                    String newSkin = key.toString();
+                    // 拿相同方块右键 → 重置为默认
+                    if (newSkin.equals(screen.getSkinBlock())) {
+                        screen.setSkinBlock("");
+                    } else {
+                        screen.setSkinBlock(newSkin);
+                    }
                     return InteractionResult.SUCCESS;
                 }
             }

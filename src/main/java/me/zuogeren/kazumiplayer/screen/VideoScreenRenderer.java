@@ -13,8 +13,12 @@ import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.Direction;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
@@ -28,13 +32,32 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     private static final int COLOR_LOADING = 0xFF333388;
     private static final int COLOR_ERROR   = 0xFF883333;
 
+    private static final Identifier BLOCK_PLACEHOLDER = Identifier.fromNamespaceAndPath("kazumiplayer", "block_placeholder");
+    private static boolean placeholderRegistered;
+
     private final VideoScreenTexture videoTexture;
     private final ItemModelResolver itemModelResolver;
 
     public VideoScreenRenderer(BlockEntityRendererProvider.Context context) {
         this.videoTexture = new VideoScreenTexture();
         this.videoTexture.ensureRegistered();
+        ensurePlaceholderRegistered();
         this.itemModelResolver = context.itemModelResolver();
+    }
+
+    private static void ensurePlaceholderRegistered() {
+        if (placeholderRegistered) return;
+        placeholderRegistered = true;
+        try {
+            var mc = Minecraft.getInstance();
+            var res = mc.getResourceManager()
+                .getResource(Identifier.fromNamespaceAndPath("kazumiplayer", "textures/block/video_screen_placeholder.png"));
+            if (res.isPresent()) {
+                var img = NativeImage.read(res.get().open());
+                mc.getTextureManager().register(BLOCK_PLACEHOLDER,
+                    new DynamicTexture(() -> "kazumiplayer_block_placeholder", img));
+            }
+        } catch (Exception ignored) {}
     }
 
     @Override
@@ -140,8 +163,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
             state.skinItemState.submit(poseStack, collector, LightCoordsUtil.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, 0);
             poseStack.popPose();
         } else {
-            // 占位纹理立方体
-            var rt = RenderTypes.entityCutout(videoTexture.getTextureId());
+            // 占位立方体（使用独立贴图，不被视频帧覆盖）
+            var rt = RenderTypes.entityCutout(BLOCK_PLACEHOLDER);
             poseStack.pushPose();
             poseStack.translate(0.5, 0.5, 0.5);
             float s = 0.5f;
@@ -188,7 +211,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         float totalW = halfW * 2;
         float playedW = totalW * ratio;
         float zBg = 0.49f;
-        float zFg = 0.49f;
+        float zFg = 0.50f;
 
         RenderType barType = RenderTypes.entityCutout(videoTexture.getTextureId());
 
