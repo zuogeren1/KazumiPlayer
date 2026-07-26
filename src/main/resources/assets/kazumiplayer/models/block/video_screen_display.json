@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "kazumiplayer:block/video_screen_placeholder"
+  }
+}

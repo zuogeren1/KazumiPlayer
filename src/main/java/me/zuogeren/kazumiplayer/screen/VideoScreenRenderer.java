@@ -32,9 +32,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     private static final int COLOR_LOADING = 0xFF333388;
     private static final int COLOR_ERROR   = 0xFF883333;
 
-    private static final Identifier BLOCK_PLACEHOLDER = Identifier.fromNamespaceAndPath("kazumiplayer", "block_placeholder");
     private static final Identifier WHITE_TEX = Identifier.fromNamespaceAndPath("kazumiplayer", "progress_bar_white");
-    private static boolean placeholderRegistered;
+    private static boolean whiteTexRegistered;
 
     private final VideoScreenTexture videoTexture;
     private final ItemModelResolver itemModelResolver;
@@ -42,24 +41,15 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     public VideoScreenRenderer(BlockEntityRendererProvider.Context context) {
         this.videoTexture = new VideoScreenTexture();
         this.videoTexture.ensureRegistered();
-        ensurePlaceholderRegistered();
+        ensureProgressBarTexture();
         this.itemModelResolver = context.itemModelResolver();
     }
 
-    private static void ensurePlaceholderRegistered() {
-        if (placeholderRegistered) return;
-        placeholderRegistered = true;
+    private static void ensureProgressBarTexture() {
+        if (whiteTexRegistered) return;
+        whiteTexRegistered = true;
         var mc = Minecraft.getInstance();
-        try {
-            var res = mc.getResourceManager()
-                .getResource(Identifier.fromNamespaceAndPath("kazumiplayer", "textures/block/video_screen_placeholder.png"));
-            if (res.isPresent()) {
-                var img = NativeImage.read(res.get().open());
-                mc.getTextureManager().register(BLOCK_PLACEHOLDER,
-                    new DynamicTexture(() -> "kazumiplayer_block_placeholder", img));
-            }
-        } catch (Exception ignored) {}
-        // 1x1 纯白纹理，进度条着色用（不与方块占位纹理混色）
+        // 1x1 纯白纹理，进度条着色用
         var white = new NativeImage(1, 1, false);
         white.setPixel(0, 0, 0xFFFFFFFF);
         mc.getTextureManager().register(WHITE_TEX,
@@ -82,8 +72,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         state.videoState = be.getVideoState();
         state.player = be.player;
         state.skinBlock = be.getSkinBlock();
-        // 解析皮肤物品模型
-        state.skinItemState = null;
+        // 方块模型：统一走 ItemModelResolver（支持资源包替换纹理）
         String skin = be.getSkinBlock();
         if (!skin.isEmpty()) {
             var id = net.minecraft.resources.Identifier.tryParse(skin);
@@ -97,6 +86,13 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
                     state.skinItemState = itemState;
                 }
             }
+        } else {
+            // 默认：渲染自身 BlockItem（items/ JSON → video_screen_display model → cube_all+占位纹理）
+            ItemStack stack = new ItemStack(VideoScreenRegistration.VIDEO_SCREEN_BLOCK_ITEM.get());
+            var itemState = new ItemStackRenderState();
+            itemModelResolver.updateForTopItem(itemState, stack,
+                ItemDisplayContext.HEAD, be.getLevel(), null, 0);
+            state.skinItemState = itemState;
         }
     }
 
@@ -162,46 +158,13 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
 
     private void drawSkin(SubmitNodeCollector collector, PoseStack poseStack,
                            VideoScreenRenderState state) {
+        // 统一走 ItemStackRenderState.submit()：有皮肤→皮肤方块，无皮肤→默认 BlockItem
         if (state.skinItemState != null) {
             poseStack.pushPose();
             poseStack.translate(0.5, 0.5, 0.5);
-            poseStack.scale(1.0f, 1.0f, 1.0f);
             state.skinItemState.submit(poseStack, collector, LightCoordsUtil.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, 0);
             poseStack.popPose();
-        } else {
-            // 占位立方体（使用独立贴图，不被视频帧覆盖）
-            var rt = RenderTypes.entityCutout(BLOCK_PLACEHOLDER);
-            poseStack.pushPose();
-            poseStack.translate(0.5, 0.5, 0.5);
-            float s = 0.5f;
-            collector.submitCustomGeometry(poseStack, rt, (pose, buffer) -> {
-                quad(buffer, pose, -s, s, -s, s, s, -s, s, s, s, -s, s, s, 0, 1, 0);    // top
-                quad(buffer, pose, -s, -s, s, s, -s, s, s, -s, -s, -s, -s, -s, 0, -1, 0); // bottom
-                quad(buffer, pose, s, -s, -s, -s, -s, -s, -s, s, -s, s, s, -s, 0, 0, -1);  // north
-                quad(buffer, pose, -s, -s, s, s, -s, s, s, s, s, -s, s, s, 0, 0, 1);      // south
-                quad(buffer, pose, -s, -s, -s, -s, -s, s, -s, s, s, -s, s, -s, -1, 0, 0); // west
-                quad(buffer, pose, s, -s, s, s, -s, -s, s, s, -s, s, s, s, 1, 0, 0);     // east
-            });
-            poseStack.popPose();
         }
-    }
-
-    private static void quad(VertexConsumer vc, PoseStack.Pose pose,
-                              float x0, float y0, float z0, float x1, float y1, float z1,
-                              float x2, float y2, float z2, float x3, float y3, float z3,
-                              float nx, float ny, float nz) {
-        vc.addVertex(pose, x0, y0, z0).setColor(-1).setUv(0, 0)
-          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
-          .setNormal(pose, nx, ny, nz);
-        vc.addVertex(pose, x1, y1, z1).setColor(-1).setUv(1, 0)
-          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
-          .setNormal(pose, nx, ny, nz);
-        vc.addVertex(pose, x2, y2, z2).setColor(-1).setUv(1, 1)
-          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
-          .setNormal(pose, nx, ny, nz);
-        vc.addVertex(pose, x3, y3, z3).setColor(-1).setUv(0, 1)
-          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
-          .setNormal(pose, nx, ny, nz);
     }
 
     private void drawProgressBar(SubmitNodeCollector collector, PoseStack poseStack,
