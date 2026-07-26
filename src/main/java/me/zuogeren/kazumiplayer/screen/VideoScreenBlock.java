@@ -47,6 +47,16 @@ public class VideoScreenBlock extends Block implements EntityBlock {
     }
 
     @Override
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
+            Player player, BlockHitResult hit) {
+        if (player.isShiftKeyDown() && level.getBlockEntity(pos) instanceof VideoScreenBlockEntity screen) {
+            screen.setSkinBlock("");
+            return InteractionResult.SUCCESS;
+        }
+        return InteractionResult.PASS;
+    }
+
+    @Override
     protected InteractionResult useItemOn(net.minecraft.world.item.ItemStack stack, BlockState state,
             Level level, BlockPos pos, Player player, net.minecraft.world.InteractionHand hand, BlockHitResult hit) {
         if (stack.getItem() instanceof BlockItem bi) {
