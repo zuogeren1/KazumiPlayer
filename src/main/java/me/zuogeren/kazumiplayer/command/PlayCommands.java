@@ -140,6 +140,7 @@ public class PlayCommands {
                 }
                 SyncGroupManager.get().join(player, sid, url);
                 setScreenNbt(screen, url, currentPos);
+                notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
                 ctx.getSource().sendSystemMessage(Component.literal(
                     "已加入同步播放 (位置: " + (currentPos / 1000) + "s)"));
                 return 1;
@@ -162,6 +163,7 @@ public class PlayCommands {
                     if (g != null) {
                         long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
                         sc.updateSyncPosition(g.positionMs + elapsed);
+                        notifyOtherWatchers(player, screenPos, sid, "停止了播放");
                     }
                 }
                 SyncGroupManager.get().leave(player.getUUID());
@@ -190,6 +192,7 @@ public class PlayCommands {
                     if (g != null) {
                         long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
                         sc.updateSyncPosition(g.positionMs + elapsed);
+                        notifyOtherWatchers(player, screenPos, sid, "离开了同步播放");
                     }
                 }
                 SyncGroupManager.get().leave(player.getUUID());
@@ -357,8 +360,7 @@ public class PlayCommands {
         UUID sid = screen.getScreenId();
         SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
         syncWatchingPlayers(screen);
-        // 通知所有观看者
-        notifyWatchers(player, screenPos, sid, "切换到 " + name);
+        notifyOtherWatchers(player, screenPos, sid, "切换到 " + name);
         src.sendSystemMessage(Component.literal("已切换到: " + name));
         return 1;
     }
@@ -374,7 +376,12 @@ public class PlayCommands {
         long cur = getLivePosition(screen);
         long newPos = Math.max(0, cur + deltaSec * 1000L);
         screen.updateSyncPosition(newPos);
-        updateSyncGroupPosition(screen.getScreenId(), newPos);
+        UUID sid = screen.getScreenId();
+        updateSyncGroupPosition(sid, newPos);
+        String action = deltaSec >= 0
+            ? "快进了 " + deltaSec + "s → " + formatMs(newPos)
+            : "快退了 " + (-deltaSec) + "s → " + formatMs(newPos);
+        notifyOtherWatchers(player, screenPos, sid, action);
         src.sendSystemMessage(Component.literal("时间调整: " + (deltaSec >= 0 ? "+" : "") + deltaSec + "s → " + formatMs(newPos)));
         return 1;
     }
@@ -386,7 +393,9 @@ public class PlayCommands {
         var be = player.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(Component.literal("目标方块不是屏幕")); return 0; }
         screen.updateSyncPosition(ms);
-        updateSyncGroupPosition(screen.getScreenId(), ms);
+        UUID sid = screen.getScreenId();
+        updateSyncGroupPosition(sid, ms);
+        notifyOtherWatchers(player, screenPos, sid, "跳转到 " + formatMs(ms));
         src.sendSystemMessage(Component.literal("跳转到: " + formatMs(ms)));
         return 1;
     }
@@ -435,6 +444,7 @@ public class PlayCommands {
         SyncGroupManager.get().updateState(sid, cur, pause);
         screen.updateSyncPosition(cur);
         screen.setPlaybackPaused(pause);
+        notifyOtherWatchers(player, pos, sid, pause ? "暂停了播放" : "恢复了播放");
         src.sendSystemMessage(Component.literal(pause ? "已暂停" : "已恢复"));
         return 1;
     }
@@ -475,15 +485,17 @@ public class PlayCommands {
             : "");
     }
 
-    /** 通知所有观看者（不包括触发者，他们已有自己的消息） */
-    private static void notifyWatchers(ServerPlayer trigger, BlockPos pos, UUID screenId, String action) {
+    /** 通知其他观看者（不包括操作者本人） */
+    private static void notifyOtherWatchers(ServerPlayer actor, BlockPos pos, UUID screenId, String action) {
         var g = SyncGroupManager.get().getGroup(screenId);
         if (g == null) return;
-        Component msg = Component.literal("§e" + action + " §7("
+        String actorName = actor.getName().getString();
+        Component msg = Component.literal("§e" + actorName + " " + action + " §7("
             + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+        var server = ((net.minecraft.server.level.ServerLevel) actor.level()).getServer();
         for (UUID pid : g.players) {
-            if (pid.equals(trigger.getUUID())) continue;
-            ServerPlayer p = ((net.minecraft.server.level.ServerLevel) trigger.level()).getServer().getPlayerList().getPlayer(pid);
+            if (pid.equals(actor.getUUID())) continue;
+            ServerPlayer p = server.getPlayerList().getPlayer(pid);
             if (p != null) p.sendSystemMessage(msg);
         }
     }
