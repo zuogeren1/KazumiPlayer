@@ -32,6 +32,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private String episodeData = "";       // Road JSON（所有集的名称+URL）
     private String watchingPlayers = "";   // 观看者 UUID 列表，逗号分隔
     private boolean playbackPaused;
+    private String skinBlock = "";         // 方块皮肤 ID，空=默认
 
     // 客户端暂存，不持久化
     public transient me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
@@ -54,6 +55,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public String getEpisodeData() { return episodeData; }
     public String getWatchingPlayers() { return watchingPlayers; }
     public boolean isPlaybackPaused() { return playbackPaused; }
+    public String getSkinBlock() { return skinBlock; }
     /** 客户端：检测 episodeUrl 是否刚发生变化（用于检测切换集数） */
     public boolean justChanged(String url) { return !url.equals(lastEpisodeUrl); }
     public void markSeen(String url) { this.lastEpisodeUrl = url; }
@@ -123,6 +125,11 @@ public class VideoScreenBlockEntity extends BlockEntity {
         markDirty();
     }
 
+    public void setSkinBlock(String id) {
+        this.skinBlock = id;
+        markDirty();
+    }
+
     private void markDirty() {
         setChanged();
         if (level != null) {
@@ -142,6 +149,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.episodeData = input.getString("EpisodeData").orElse("");
         this.watchingPlayers = input.getString("WatchingPlayers").orElse("");
         this.playbackPaused = input.getBooleanOr("PlaybackPaused", false);
+        this.skinBlock = input.getString("SkinBlock").orElse("");
 
         if (level != null && level.isClientSide() && episodeUrl.isEmpty() && player != null) {
             player.stop();
@@ -161,6 +169,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putString("EpisodeData", episodeData);
         output.putString("WatchingPlayers", watchingPlayers);
         output.putBoolean("PlaybackPaused", playbackPaused);
+        output.putString("SkinBlock", skinBlock);
     }
 
     @Override
@@ -176,6 +185,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putString("EpisodeData", episodeData);
         tag.putString("WatchingPlayers", watchingPlayers);
         tag.putBoolean("PlaybackPaused", playbackPaused);
+        tag.putString("SkinBlock", skinBlock);
         return tag;
     }
 

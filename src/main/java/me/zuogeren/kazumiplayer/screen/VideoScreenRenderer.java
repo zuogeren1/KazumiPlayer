@@ -46,6 +46,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         state.facing = be.getFacing();
         state.videoState = be.getVideoState();
         state.player = be.player;
+        state.skinBlock = be.getSkinBlock();
     }
 
     @Override
@@ -77,10 +78,10 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
 
         poseStack.pushPose();
 
-        // 屏幕显示在方块上方，不与方块重叠
+        // 屏幕显示在方块上方
         poseStack.translate(0.5, 1.0 + halfH, 0.5);
 
-        // 根据朝向绕 Y 轴旋转，使四边形正面朝向玩家
+        // 根据朝向绕 Y 轴旋转
         rotateToFacing(poseStack, state.facing);
 
         float z = 0.49f;
