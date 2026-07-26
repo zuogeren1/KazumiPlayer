@@ -3,6 +3,7 @@ package me.zuogeren.kazumiplayer.screen;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
@@ -12,7 +13,10 @@ import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.core.Direction;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.phys.Vec3;
 
@@ -52,6 +56,9 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     @Override
     public void submit(VideoScreenRenderState state, PoseStack poseStack,
                        SubmitNodeCollector collector, CameraRenderState camera) {
+
+        // 方块皮肤渲染
+        drawSkin(collector, poseStack, state);
 
         // 屏幕半宽高 (单位: 方块, 1.0 = 1 block)
         float halfW = state.screenWidth / 2.0f;
@@ -104,6 +111,68 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         drawProgressBar(collector, poseStack, state, halfW, halfH);
 
         poseStack.popPose();
+    }
+
+    private void drawSkin(SubmitNodeCollector collector, PoseStack poseStack,
+                           VideoScreenRenderState state) {
+        String skinId = state.skinBlock;
+        TextureAtlasSprite sprite = null;
+
+        if (!skinId.isEmpty()) {
+            Identifier blockId = Identifier.tryParse(skinId);
+            if (blockId == null) return;
+            Identifier spriteId = Identifier.fromNamespaceAndPath(blockId.getNamespace(),
+                "block/" + blockId.getPath());
+            var mc = Minecraft.getInstance();
+            var tex = mc.getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS);
+            if (!(tex instanceof TextureAtlas atlas)) return;
+            sprite = atlas.getSprite(spriteId);
+        }
+
+        RenderType cubeType = sprite != null
+            ? RenderTypes.entityCutout(sprite.atlasLocation())
+            : RenderTypes.entityCutout(videoTexture.getTextureId());
+
+        poseStack.pushPose();
+        poseStack.translate(0.5, 0.5, 0.5);
+        float s = 0.5f;
+
+        final var finalSprite = sprite;
+        collector.submitCustomGeometry(poseStack, cubeType, (pose, buffer) -> {
+            var vc = finalSprite != null ? finalSprite.wrap(buffer) : buffer;
+            // 顶 Y+
+            face(vc, pose, -s, -s, s, -s, s, s, -s, s, s, 0, 1, 0);
+            // 底 Y-
+            face(vc, pose, -s, s, s, s, s, -s, -s, -s, -s, 0, -1, 0);
+            // 前 Z+
+            face(vc, pose, -s, -s, s, -s, s, s, -s, s, s, 0, 0, 1);
+            // 后 Z-
+            face(vc, pose, s, -s, -s, -s, -s, s, s, s, -s, 0, 0, -1);
+            // 右 X+
+            face(vc, pose, s, -s, s, s, s, -s, s, s, s, 1, 0, 0);
+            // 左 X-
+            face(vc, pose, -s, -s, -s, s, -s, s, -s, -s, -s, -1, 0, 0);
+        });
+
+        poseStack.popPose();
+    }
+
+    private static void face(VertexConsumer vc, PoseStack.Pose pose,
+                              float x0, float z0, float x1, float z1,
+                              float x2, float z2, float x3, float z3,
+                              float y, float nx, float ny, float nz) {
+        vc.addVertex(pose, x0, y, z0).setColor(-1).setUv(0, 0)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, nx, ny, nz);
+        vc.addVertex(pose, x1, y, z1).setColor(-1).setUv(1, 0)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, nx, ny, nz);
+        vc.addVertex(pose, x2, y, z2).setColor(-1).setUv(1, 1)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, nx, ny, nz);
+        vc.addVertex(pose, x3, y, z3).setColor(-1).setUv(0, 1)
+          .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
+          .setNormal(pose, nx, ny, nz);
     }
 
     private void drawProgressBar(SubmitNodeCollector collector, PoseStack poseStack,
