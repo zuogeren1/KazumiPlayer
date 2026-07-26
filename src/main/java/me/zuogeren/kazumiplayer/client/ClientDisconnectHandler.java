@@ -114,6 +114,7 @@ public class ClientDisconnectHandler {
                     screen.player = pm.getWaterMedia();
                     activeScreens.add(screen);
                     screen.markSeen(url);
+                    screen.endedNotified = true; // 防止新播放器初始化期间误触发 isEnded()
                     long seekMs = screen.getSyncPositionMs();
                     if (seekMs > 0) screen.player.seek(seekMs);
                 }
