@@ -33,6 +33,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     private static final int COLOR_ERROR   = 0xFF883333;
 
     private static final Identifier BLOCK_PLACEHOLDER = Identifier.fromNamespaceAndPath("kazumiplayer", "block_placeholder");
+    private static final Identifier WHITE_TEX = Identifier.fromNamespaceAndPath("kazumiplayer", "progress_bar_white");
     private static boolean placeholderRegistered;
 
     private final VideoScreenTexture videoTexture;
@@ -48,8 +49,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     private static void ensurePlaceholderRegistered() {
         if (placeholderRegistered) return;
         placeholderRegistered = true;
+        var mc = Minecraft.getInstance();
         try {
-            var mc = Minecraft.getInstance();
             var res = mc.getResourceManager()
                 .getResource(Identifier.fromNamespaceAndPath("kazumiplayer", "textures/block/video_screen_placeholder.png"));
             if (res.isPresent()) {
@@ -58,6 +59,11 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
                     new DynamicTexture(() -> "kazumiplayer_block_placeholder", img));
             }
         } catch (Exception ignored) {}
+        // 1x1 纯白纹理，进度条着色用（不与方块占位纹理混色）
+        var white = new NativeImage(1, 1, false);
+        white.setPixel(0, 0, 0xFFFFFFFF);
+        mc.getTextureManager().register(WHITE_TEX,
+            new DynamicTexture(() -> "progress_bar_white", white));
     }
 
     @Override
@@ -211,9 +217,9 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         float totalW = halfW * 2;
         float playedW = totalW * ratio;
         float zBg = 0.49f;
-        float zFg = 0.50f;
+        float zFg = 0.47f;
 
-        RenderType barType = RenderTypes.entityCutout(BLOCK_PLACEHOLDER);
+        RenderType barType = RenderTypes.entityCutout(WHITE_TEX);
 
         // 背景条（深灰）
         collector.submitCustomGeometry(poseStack, barType, (pose, buffer) -> {
