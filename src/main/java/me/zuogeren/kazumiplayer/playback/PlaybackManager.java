@@ -65,7 +65,7 @@ public class PlaybackManager {
 
     private static boolean isDirectVideoUrl(String url) {
         String lower = url.toLowerCase();
-        boolean hasDrive = url.length() > 2 && url.charAt(1) == ':';
+        boolean hasDrive = url.length() > 2 && (url.charAt(1) == ':' || url.charAt(1) == '：');
         boolean hasVideoExt = lower.endsWith(".mp4") || lower.endsWith(".mkv")
             || lower.endsWith(".m3u8") || lower.endsWith(".avi")
             || lower.endsWith(".webm") || lower.endsWith(".mov");

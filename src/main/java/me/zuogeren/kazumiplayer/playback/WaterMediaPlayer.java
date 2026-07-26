@@ -24,7 +24,8 @@ public class WaterMediaPlayer {
 
     private static String normalizeUrl(String url) {
         // 本地 Windows/Unix 路径转 file:// URI（正确编码中文等非 ASCII 字符）
-        if ((url.length() > 2 && url.charAt(1) == ':') || url.startsWith("/") || url.startsWith("~/")) {
+        char c1 = url.length() > 1 ? url.charAt(1) : 0;
+        if ((c1 == ':' || c1 == '：') || url.startsWith("/") || url.startsWith("~/")) {
             try {
                 return java.nio.file.Path.of(url).toUri().toString();
             } catch (Exception ignored) {}
