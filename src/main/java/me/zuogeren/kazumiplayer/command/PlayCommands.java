@@ -76,8 +76,8 @@ public class PlayCommands {
                                     player.level().getServer().execute(() -> {
                                         var be = player.level().getBlockEntity(screenPos);
                                         if (be instanceof VideoScreenBlockEntity screen) {
-                                            setScreenFull(screen, epUrl, 0, episode, roadJson);
                                             SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, epUrl);
+                                            setScreenFull(screen, epUrl, 0, episode, roadJson);
                                         }
                                     });
                                     ctx.getSource().sendSystemMessage(Component.literal(
@@ -105,8 +105,8 @@ public class PlayCommands {
                     }
                     var be = player.level().getBlockEntity(screenPos);
                     if (be instanceof VideoScreenBlockEntity screen) {
-                        setScreenNbt(screen, url, 0);
                         SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, url);
+                        setScreenNbt(screen, url, 0);
                     }
                     ctx.getSource().sendSystemMessage(Component.literal("已开始播放: " + url));
                     return 1;
