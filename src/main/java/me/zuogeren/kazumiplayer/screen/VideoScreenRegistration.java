@@ -28,7 +28,6 @@ public class VideoScreenRegistration {
                     VideoScreenBlock::new,
                     () -> BlockBehaviour.Properties.of()
                             .noOcclusion()
-                            .noCollision()
                             .instabreak());
 
     public static final DeferredItem<BlockItem> VIDEO_SCREEN_BLOCK_ITEM =

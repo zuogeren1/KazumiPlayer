@@ -3,21 +3,21 @@ package me.zuogeren.kazumiplayer.screen;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
+import net.minecraft.client.renderer.item.ItemModelResolver;
+import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.core.Direction;
-import net.minecraft.resources.Identifier;
 import net.minecraft.util.LightCoordsUtil;
+import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 
 public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlockEntity, VideoScreenRenderState> {
@@ -29,10 +29,12 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     private static final int COLOR_ERROR   = 0xFF883333;
 
     private final VideoScreenTexture videoTexture;
+    private final ItemModelResolver itemModelResolver;
 
     public VideoScreenRenderer(BlockEntityRendererProvider.Context context) {
         this.videoTexture = new VideoScreenTexture();
         this.videoTexture.ensureRegistered();
+        this.itemModelResolver = context.itemModelResolver();
     }
 
     @Override
@@ -51,6 +53,22 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         state.videoState = be.getVideoState();
         state.player = be.player;
         state.skinBlock = be.getSkinBlock();
+        // 解析皮肤物品模型
+        state.skinItemState = null;
+        String skin = be.getSkinBlock();
+        if (!skin.isEmpty()) {
+            var id = net.minecraft.resources.Identifier.tryParse(skin);
+            if (id != null) {
+                var block = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(id);
+                if (block != null) {
+                    ItemStack stack = new ItemStack(block.asItem());
+                    var itemState = new ItemStackRenderState();
+                    itemModelResolver.updateForTopItem(itemState, stack,
+                        ItemDisplayContext.HEAD, be.getLevel(), null, 0);
+                    state.skinItemState = itemState;
+                }
+            }
+        }
     }
 
     @Override
@@ -115,62 +133,44 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
 
     private void drawSkin(SubmitNodeCollector collector, PoseStack poseStack,
                            VideoScreenRenderState state) {
-        String skinId = state.skinBlock;
-        TextureAtlasSprite sprite = null;
-
-        if (!skinId.isEmpty()) {
-            Identifier blockId = Identifier.tryParse(skinId);
-            if (blockId == null) return;
-            Identifier spriteId = Identifier.fromNamespaceAndPath(blockId.getNamespace(),
-                "block/" + blockId.getPath());
-            var mc = Minecraft.getInstance();
-            var tex = mc.getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS);
-            if (!(tex instanceof TextureAtlas atlas)) return;
-            sprite = atlas.getSprite(spriteId);
+        if (state.skinItemState != null) {
+            poseStack.pushPose();
+            poseStack.translate(0.5, 0.5, 0.5);
+            poseStack.scale(1.0f, 1.0f, 1.0f);
+            state.skinItemState.submit(poseStack, collector, LightCoordsUtil.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, 0);
+            poseStack.popPose();
+        } else {
+            // 占位纹理立方体
+            var rt = RenderTypes.entityCutout(videoTexture.getTextureId());
+            poseStack.pushPose();
+            poseStack.translate(0.5, 0.5, 0.5);
+            float s = 0.5f;
+            collector.submitCustomGeometry(poseStack, rt, (pose, buffer) -> {
+                quad(buffer, pose, -s, s, -s, s, s, -s, s, s, s, -s, s, s, 0, 1, 0);    // top
+                quad(buffer, pose, -s, -s, s, s, -s, s, s, -s, -s, -s, -s, -s, 0, -1, 0); // bottom
+                quad(buffer, pose, s, -s, -s, -s, -s, -s, -s, s, -s, s, s, -s, 0, 0, -1);  // north
+                quad(buffer, pose, -s, -s, s, s, -s, s, s, s, s, -s, s, s, 0, 0, 1);      // south
+                quad(buffer, pose, -s, -s, -s, -s, -s, s, -s, s, s, -s, s, -s, -1, 0, 0); // west
+                quad(buffer, pose, s, -s, s, s, -s, -s, s, s, -s, s, s, s, 1, 0, 0);     // east
+            });
+            poseStack.popPose();
         }
-
-        RenderType cubeType = sprite != null
-            ? RenderTypes.entityCutout(sprite.atlasLocation())
-            : RenderTypes.entityCutout(videoTexture.getTextureId());
-
-        poseStack.pushPose();
-        poseStack.translate(0.5, 0.5, 0.5);
-        float s = 0.5f;
-
-        final var finalSprite = sprite;
-        collector.submitCustomGeometry(poseStack, cubeType, (pose, buffer) -> {
-            var vc = finalSprite != null ? finalSprite.wrap(buffer) : buffer;
-            // 顶 Y+
-            face(vc, pose, -s, -s, s, -s, s, s, -s, s, s, 0, 1, 0);
-            // 底 Y-
-            face(vc, pose, -s, s, s, s, s, -s, -s, -s, -s, 0, -1, 0);
-            // 前 Z+
-            face(vc, pose, -s, -s, s, -s, s, s, -s, s, s, 0, 0, 1);
-            // 后 Z-
-            face(vc, pose, s, -s, -s, -s, -s, s, s, s, -s, 0, 0, -1);
-            // 右 X+
-            face(vc, pose, s, -s, s, s, s, -s, s, s, s, 1, 0, 0);
-            // 左 X-
-            face(vc, pose, -s, -s, -s, s, -s, s, -s, -s, -s, -1, 0, 0);
-        });
-
-        poseStack.popPose();
     }
 
-    private static void face(VertexConsumer vc, PoseStack.Pose pose,
-                              float x0, float z0, float x1, float z1,
-                              float x2, float z2, float x3, float z3,
-                              float y, float nx, float ny, float nz) {
-        vc.addVertex(pose, x0, y, z0).setColor(-1).setUv(0, 0)
+    private static void quad(VertexConsumer vc, PoseStack.Pose pose,
+                              float x0, float y0, float z0, float x1, float y1, float z1,
+                              float x2, float y2, float z2, float x3, float y3, float z3,
+                              float nx, float ny, float nz) {
+        vc.addVertex(pose, x0, y0, z0).setColor(-1).setUv(0, 0)
           .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
           .setNormal(pose, nx, ny, nz);
-        vc.addVertex(pose, x1, y, z1).setColor(-1).setUv(1, 0)
+        vc.addVertex(pose, x1, y1, z1).setColor(-1).setUv(1, 0)
           .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
           .setNormal(pose, nx, ny, nz);
-        vc.addVertex(pose, x2, y, z2).setColor(-1).setUv(1, 1)
+        vc.addVertex(pose, x2, y2, z2).setColor(-1).setUv(1, 1)
           .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
           .setNormal(pose, nx, ny, nz);
-        vc.addVertex(pose, x3, y, z3).setColor(-1).setUv(0, 1)
+        vc.addVertex(pose, x3, y3, z3).setColor(-1).setUv(0, 1)
           .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT)
           .setNormal(pose, nx, ny, nz);
     }
