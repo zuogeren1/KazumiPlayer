@@ -8,10 +8,15 @@ import me.zuogeren.kazumiplayer.rule.RuleIndex;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
 import me.zuogeren.kazumiplayer.search.SearchManager;
 import me.zuogeren.kazumiplayer.util.ChatComponentUtil;
+import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
+import me.zuogeren.kazumiplayer.util.JsonUtil;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,6 +40,7 @@ public class RuleCommands {
                             .thenAccept(rule -> {
                                 ruleManager.install(rule);
                                 src.sendSystemMessage(Component.literal("已安装规则: " + name));
+                                broadcastRuleSync(ruleManager);
                             })
                             .exceptionally(e -> {
                                 src.sendSystemMessage(Component.literal("下载规则失败: " + e.getMessage()));
@@ -68,6 +74,7 @@ public class RuleCommands {
                         String name = StringArgumentType.getString(ctx, "name");
                         if (ruleManager.delete(name)) {
                             ctx.getSource().sendSystemMessage(Component.literal("已删除规则: " + name));
+                            broadcastRuleSync(ruleManager);
                         } else {
                             ctx.getSource().sendFailure(Component.literal("规则不存在: " + name));
                         }
@@ -154,6 +161,7 @@ public class RuleCommands {
                         .thenAccept(count -> {
                             src.sendSystemMessage(Component.literal(
                                 "下载完成，共安装了 " + count + " 个规则"));
+                            broadcastRuleSync(ruleManager);
                         })
                         .exceptionally(e -> {
                             src.sendSystemMessage(Component.literal(
@@ -163,6 +171,22 @@ public class RuleCommands {
 
                     return 1;
                 }));
+    }
+
+    /**
+     * 向所有在线玩家广播已安装规则列表（进服时由 SyncGroupManager 同步，
+     * 这里在安装/删除后推送，保证客户端 /krule test 与缓存始终是最新的）
+     */
+    private static void broadcastRuleSync(RuleManager ruleManager) {
+        var rules = ruleManager.listAll();
+        if (rules.isEmpty()) return;
+        String json = JsonUtil.GSON.toJson(
+            rules.stream().map(ruleManager::get).filter(r -> r != null).toList());
+        var server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            PacketDistributor.sendToPlayer(player, new RuleSyncPacket(json));
+        }
     }
 
     /**
