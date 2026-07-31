@@ -2,14 +2,17 @@ package me.zuogeren.kazumiplayer;
 
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
+import me.zuogeren.kazumiplayer.client.KazumiConfigScreen;
 import me.zuogeren.kazumiplayer.network.ClientPacketHandlers;
 import me.zuogeren.kazumiplayer.network.PacketDispatcher;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
+import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 
 /**
@@ -29,6 +32,13 @@ public class KazumiPlayerClient {
 
         // 客户端配置
         modContainer.registerConfig(ModConfig.Type.CLIENT, ClientConfig.SPEC);
+
+        // Cloth Config 可选：装了才提供配置界面（mods.toml 中声明为 optional 依赖）
+        if (ModList.get().isLoaded("cloth_config")) {
+            IConfigScreenFactory configScreenFactory = (container, parent) -> KazumiConfigScreen.create(parent);
+            modContainer.registerExtensionPoint(IConfigScreenFactory.class, configScreenFactory);
+            KazumiLog.general.info("Cloth Config detected, config screen enabled");
+        }
 
         // 客户端渲染器注册
         modEventBus.register(ClientModEvents.class);

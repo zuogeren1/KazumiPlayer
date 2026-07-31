@@ -23,6 +23,64 @@ public class ClientDisconnectHandler {
     private static int tickCounter;
     private static final Set<VideoScreenBlockEntity> activeScreens = ConcurrentHashMap.newKeySet();
 
+    // ---- 调试：鼠标抓取状态监控（临时诊断用，定位播放时鼠标脱离准心） ----
+    private static boolean lastMouseGrabbed = true;
+    private static boolean lastWindowActive = true;
+    private static long lastUngrabTick = -1;
+    private static int diagTickCounter;
+    private static int mouseStuckTicks;
+
+    @SubscribeEvent
+    public static void onClientTickHighFrequency(ClientTickEvent.Post event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) {
+            lastMouseGrabbed = true;
+            return;
+        }
+        boolean grabbed = mc.mouseHandler.isMouseGrabbed();
+        boolean windowActive = mc.isWindowActive();
+        if (windowActive != lastWindowActive) {
+            lastWindowActive = windowActive;
+            KazumiLog.general.debug("window active changed -> {} (mouseGrabbed={})",
+                windowActive, grabbed);
+        }
+        if (grabbed != lastMouseGrabbed) {
+            lastMouseGrabbed = grabbed;
+            if (!grabbed) {
+                long now = System.currentTimeMillis();
+                long sinceLast = lastUngrabTick < 0 ? -1 : now - lastUngrabTick;
+                lastUngrabTick = now;
+                // 记录释放时上下文：窗口活跃？是否开着 GUI？正在播放的屏幕数
+                int playingScreens = (int) activeScreens.stream()
+                    .filter(s -> ScreenPlayerManager.getPlayer(s.getBlockPos()) != null).count();
+                KazumiLog.general.debug("mouse ungrabbed t={}ms (since last={}ms) windowActive={} screen={} playingScreens={}",
+                    now, sinceLast, mc.isWindowActive(),
+                    mc.screen == null ? "null" : mc.screen.getClass().getSimpleName(),
+                    playingScreens);
+            }
+        }
+        // 防御修复：窗口活跃且无 GUI，但鼠标持续未捕获（如关闭聊天框时抓取被焦点竞争跳过）
+        // → 自动重新捕获，避免"鼠标指针出现、需点击窗口才恢复"
+        if (mc.isWindowActive() && mc.screen == null && !grabbed) {
+            if (++mouseStuckTicks > 10) { // 10 tick = 0.5 秒防抖
+                mc.mouseHandler.grabMouse();
+                KazumiLog.general.debug("auto-restored mouse grab (was stuck {} ticks)", mouseStuckTicks);
+                mouseStuckTicks = 0;
+            }
+        } else {
+            mouseStuckTicks = 0;
+        }
+        // 周期性状态快照（每 2 秒）：捕获"持续未捕获"但无状态变化的盲区
+        if (++diagTickCounter % 40 == 0) {
+            int playingScreens = (int) activeScreens.stream()
+                .filter(s -> ScreenPlayerManager.getPlayer(s.getBlockPos()) != null).count();
+            KazumiLog.general.debug("snapshot mouseGrabbed={} windowActive={} screen={} playingScreens={}",
+                grabbed, windowActive,
+                mc.screen == null ? "null" : mc.screen.getClass().getSimpleName(),
+                playingScreens);
+        }
+    }
+
     // ---- 命令（EVENT_BUS） ----
 
     @SubscribeEvent

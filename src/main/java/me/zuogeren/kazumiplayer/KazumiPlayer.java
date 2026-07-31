@@ -8,6 +8,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
 
 @Mod(KazumiPlayer.MODID)
 public class KazumiPlayer {
@@ -23,6 +24,18 @@ public class KazumiPlayer {
 
         // 服务端通用配置
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+
+        // 配置加载/重载后应用日志分类级别（修改后即时生效）
+        modEventBus.addListener((ModConfigEvent.Loading event) -> {
+            if (event.getConfig().getSpec() == Config.SPEC) {
+                LogConfig.applyAll();
+            }
+        });
+        modEventBus.addListener((ModConfigEvent.Reloading event) -> {
+            if (event.getConfig().getSpec() == Config.SPEC) {
+                LogConfig.applyAll();
+            }
+        });
 
         // 网络数据包
         modEventBus.register(NetworkManager.class);

@@ -7,6 +7,7 @@ import me.zuogeren.kazumiplayer.ClientConfig;
 import org.cef.CefSettings;
 import org.cef.browser.CefBrowser;
 import org.cef.handler.CefDisplayHandlerAdapter;
+import net.minecraft.client.Minecraft;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -97,6 +98,7 @@ public class VideoSniffer {
      * @return CompletableFuture<String> 视频直链 (m3u8/mp4)
      */
     public CompletableFuture<String> sniff(String pageUrl) {
+        KazumiLog.sniff.debug("sniff start pageUrl={}", pageUrl);
         CompletableFuture<String> future = new CompletableFuture<>();
         int timeoutSec = ClientConfig.CONFIG.sniffTimeoutSeconds.get();
 
@@ -106,7 +108,12 @@ public class VideoSniffer {
                 return future;
             }
 
+            var mc = Minecraft.getInstance();
+            KazumiLog.sniff.debug("before createBrowser mouseGrabbed={} windowActive={}",
+                mc.mouseHandler.isMouseGrabbed(), mc.isWindowActive());
             MCEFBrowser browser = MCEF.createBrowser(pageUrl, true);
+            KazumiLog.sniff.debug("after createBrowser mouseGrabbed={} windowActive={}",
+                mc.mouseHandler.isMouseGrabbed(), mc.isWindowActive());
             var handler = new CefDisplayHandlerAdapter() {
                 @Override
                 public boolean onConsoleMessage(CefBrowser b, CefSettings.LogSeverity level,
@@ -140,6 +147,14 @@ public class VideoSniffer {
             future.whenComplete((url, err) -> {
                 MCEF.getClient().removeDisplayHandler(handler);
                 browser.close();
+                KazumiLog.sniff.debug("sniff done url={} err={}, restoring mouse", url, err);
+                // 浏览器创建/关闭可能抢走窗口焦点导致鼠标脱离准心，恢复鼠标捕获
+                Minecraft.getInstance().execute(() ->
+                    Minecraft.getInstance().mouseHandler.grabMouse());
+                Minecraft.getInstance().execute(() ->
+                    KazumiLog.sniff.debug("after grab mouseGrabbed={} windowActive={}",
+                        Minecraft.getInstance().mouseHandler.isMouseGrabbed(),
+                        Minecraft.getInstance().isWindowActive()));
                 if (err != null) {
                     KazumiLog.sniff.warn("Sniff failed: {}", err.getMessage());
                 }

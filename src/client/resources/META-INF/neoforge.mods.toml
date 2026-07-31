@@ -51,6 +51,13 @@ versionRange = "[3.0.0,)"
 ordering = "AFTER"
 side = "CLIENT"
 
+[[dependencies."kazumiplayer"]]
+modId = "cloth_config"
+type = "optional"
+versionRange = "[26.1.154,)"
+ordering = "AFTER"
+side = "CLIENT"
+
 [[dependencies.kazumiplayer_server]]
 modId = "kazumiplayer"
 type = "required"

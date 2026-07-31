@@ -141,6 +141,8 @@ dependencies {
     clientImplementation "maven.modrinth:G922NeHS:SytIeSKM"
     // WaterMedia Binaries - native VLC/FFMPEG (3.0.0.5 matches API 3.0.0.22)
     clientImplementation "maven.modrinth:4997XcoK:SYiGqsPE"
+    // Cloth Config API - 客户端可选配置界面（不装也能运行）
+    clientImplementation "maven.modrinth:9s6osm5g:TimoYzse"
 }
 
 // ---- mod 元数据生成（两份 mods.toml） ----

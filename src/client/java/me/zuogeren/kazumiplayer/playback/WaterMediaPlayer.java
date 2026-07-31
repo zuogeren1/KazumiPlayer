@@ -35,6 +35,7 @@ public class WaterMediaPlayer {
 
     public void play(String videoUrl) {
         String url = normalizeUrl(videoUrl);
+        KazumiLog.playback.debug("WaterMedia.play() called url={}", url);
         Minecraft mc = Minecraft.getInstance();
         new Thread(() -> {
             for (int retry = 0; retry < 30; retry++) {
@@ -53,6 +54,7 @@ public class WaterMediaPlayer {
 
     private void createAndStart(MRL mrl, Minecraft mc) {
         try {
+            KazumiLog.playback.debug("createAndStart creating player");
             // v3 API: 使用 ALEngine (OpenAL) 替代 JSEngine (JavaSound) 以获得空间音频
             player = MediaAPI.createPlayer(mrl,
                 () -> MediaAPI.glEngine(Thread.currentThread(), mc),
@@ -65,6 +67,10 @@ public class WaterMediaPlayer {
             }
             player.start();
             applyVolumeFromOptions();
+            KazumiLog.playback.debug("player started, grabbing mouse");
+            // 播放器初始化可能抢走窗口焦点（如引擎/上下文创建），恢复鼠标捕获
+            Minecraft.getInstance().mouseHandler.grabMouse();
+            KazumiLog.playback.debug("mouse grabbed={}", Minecraft.getInstance().mouseHandler.isMouseGrabbed());
             // seek 交给外部 tick 延迟执行（此时 demuxer 尚未就绪）
         } catch (Exception e) {
             KazumiLog.playback.error("Playback failed: {}", e.getMessage());
