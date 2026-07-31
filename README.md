@@ -10,7 +10,7 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 - **剧集管理**：自动下一集、手动切集、时间快进/快退/跳转
 - **进度条**：视频下方实时进度条
 - **规则测试**：客户端 `/krule test` 直接测试规则连通性
-- **配置系统**：Cloth Config 配置界面（可选），12 个日志分类 DEBUG 开关即时生效
+- **配置系统**：Cloth Config 配置界面（可选），13 个日志分类 DEBUG 开关即时生效
 - **GPL-3.0 开源**
 
 ## 安装
@@ -29,7 +29,7 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 
 | 文件 | 内容 |
 |------|------|
-| `kazumiplayer.toml` | 服务端通用配置 + 日志分类 DEBUG 开关（`log.debugGeneral` 等 12 项） |
+| `kazumiplayer.toml` | 服务端通用配置 + 日志分类 DEBUG 开关（`log.debugGeneral` 等 13 项） |
 | `kazumiplayer-client.toml` | 客户端播放/嗅探配置（音量、并发数、超时、同步等） |
 
 **日志开关**：默认全部关闭，开启后对应分类输出 DEBUG 诊断日志并即时生效，无需重启。

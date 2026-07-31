@@ -25,6 +25,16 @@ public class ClientDisconnectHandler {
 
     private static int mouseStuckTicks;
 
+    /** 注册正在播放的屏幕（自动播放与 PlayStartPacket 两条路径统一跟踪，供移除兜底清理） */
+    public static void trackScreen(VideoScreenBlockEntity screen) {
+        activeScreens.add(screen);
+    }
+
+    /** 取消跟踪（停止播放/屏幕移除时调用） */
+    public static void untrackScreen(VideoScreenBlockEntity screen) {
+        activeScreens.remove(screen);
+    }
+
     // GLFW 光标模式常量（与 InputConstants.grabOrReleaseMouse 使用的值一致）
     private static final int GLFW_CURSOR = 208897;
     private static final int GLFW_CURSOR_DISABLED = 212995;
@@ -122,6 +132,13 @@ public class ClientDisconnectHandler {
         stopAllActive();
     }
 
+    /** 单机世界退出：集成服务端停止时兜底停止所有播放（客户端连远程服时由 LoggingOut 兜底） */
+    @SubscribeEvent
+    public static void onServerStopped(net.neoforged.neoforge.event.server.ServerStoppedEvent event) {
+        // 事件在服务端线程触发，调度到渲染线程执行（WaterMedia 播放器需主线程操作）
+        Minecraft.getInstance().execute(ClientDisconnectHandler::stopAllActive);
+    }
+
     private static boolean isWatching(VideoScreenBlockEntity screen, Minecraft mc) {
         if (mc.player == null) return false;
         String watchers = screen.getWatchingPlayers();
@@ -131,11 +148,10 @@ public class ClientDisconnectHandler {
     }
 
     private static void stopAllActive() {
-        for (var screen : activeScreens) {
-            ScreenPlayerManager.remove(screen.getBlockPos());
-        }
-        activeScreens.clear();
+        // 先统一 stop 所有播放器，再清空跟踪集合（remove 也会 stop，但显式 stopAll 保证顺序）
         ScreenPlayerManager.stopAll();
+        activeScreens.clear();
+        SpeakerClientAudio.stopAll();
     }
 
     @SubscribeEvent
@@ -159,6 +175,23 @@ public class ClientDisconnectHandler {
                 ScreenPlayerManager.remove(screen.getBlockPos());
                 iter.remove();
                 KazumiLog.playback.info("Cleaned up orphan playback at removed screen {}", screen.getBlockPos());
+            }
+        }
+        // 全面兜底：ScreenPlayerManager 中存在播放器但对应屏幕 BE 已不存在/已停止播放 → 停止并清理
+        for (var sp : ScreenPlayerManager.getAll().entrySet()) {
+            var be = mc.level.getBlockEntity(sp.getKey());
+            boolean screenGone = !(be instanceof VideoScreenBlockEntity screen)
+                    || screen.isRemoved();
+            boolean noLongerWatching = be instanceof VideoScreenBlockEntity screen
+                    && screen.getEpisodeUrl().isEmpty();
+            if (sp.getValue().player != null && (screenGone || noLongerWatching)) {
+                sp.getValue().player.stop();
+                sp.getValue().player = null;
+                ScreenPlayerManager.remove(sp.getKey());
+                KazumiLog.playback.info("Cleaned up stale playback at {}", sp.getKey());
+            } else if (sp.getValue().player == null && sp.getValue().lastEpisodeUrl.isEmpty()) {
+                // 空闲残留条目（从未播放/已停止的占位）→ 移除，防止注册表无限增长
+                ScreenPlayerManager.remove(sp.getKey());
             }
         }
         for (var be : mc.level.getGloballyRenderedBlockEntities()) {
@@ -213,6 +246,14 @@ public class ClientDisconnectHandler {
         for (var be : mc.level.getGloballyRenderedBlockEntities()) {
             if (be instanceof me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity spk) {
                 SpeakerClientAudio.tick(spk);
+            }
+        }
+        // 音响方块被移除兜底：BE 不再渲染，tick 不会触发 → 按位置检查并清理音频
+        for (var pos : SpeakerClientAudio.getActivePositions()) {
+            var be = mc.level.getBlockEntity(pos);
+            if (!(be instanceof me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity)
+                    || be.isRemoved()) {
+                SpeakerClientAudio.remove(pos);
             }
         }
     }

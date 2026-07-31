@@ -34,12 +34,21 @@ public final class ScreenPlayerManager {
         return sp == null ? null : sp.player;
     }
 
+    /** 全部屏幕播放状态（兜底清理用） */
+    public static Map<BlockPos, ScreenPlayer> getAll() {
+        return players;
+    }
+
     public static void setPlayer(BlockPos pos, WaterMediaPlayer player) {
         get(pos).player = player;
     }
 
     public static void remove(BlockPos pos) {
-        players.remove(pos);
+        ScreenPlayer sp = players.remove(pos);
+        if (sp != null && sp.player != null) {
+            sp.player.stop();
+            sp.player = null;
+        }
     }
 
     /** 停止所有屏幕的播放并清空注册表（断线/离开世界时调用） */

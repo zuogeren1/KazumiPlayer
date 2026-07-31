@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.network;
 
 import me.zuogeren.kazumiplayer.client.ClientRuleCache;
+import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.network.packet.PlayStartPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
@@ -47,6 +48,7 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 pm.stop(screen);
                 pm.playUrl(screen, packet.episodeUrl());
                 ScreenPlayerManager.setPlayer(screen.getBlockPos(), pm.getWaterMedia());
+                ClientDisconnectHandler.trackScreen(screen);
                 var sp = ScreenPlayerManager.get(screen.getBlockPos());
                 sp.playbackStartedAt = System.currentTimeMillis();
                 sp.lastEpisodeUrl = packet.episodeUrl();
@@ -68,6 +70,10 @@ public class ClientPacketHandlers implements IClientPacketHandler {
             if (player != null) {
                 player.stop();
                 ScreenPlayerManager.remove(packet.screenPos());
+            }
+            // 同步取消跟踪（若屏幕 BE 仍存在则在其上取消）
+            if (mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity s2) {
+                ClientDisconnectHandler.untrackScreen(s2);
             }
             if (mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity screen) {
                 // 清空播放 URL，防止客户端 tick 循环立即重开播放

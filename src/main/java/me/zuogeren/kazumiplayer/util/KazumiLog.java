@@ -30,6 +30,9 @@ public final class KazumiLog {
     /** 音响系统 (SpeakerBlockEntity) */
     public static final Logger speaker   = LoggerFactory.getLogger("kazumiplayer.speaker");
 
+    /** 音频播放 (SpeakerClientAudio, 音响音频跟随/漂移校正等) */
+    public static final Logger audio     = LoggerFactory.getLogger("kazumiplayer.audio");
+
     /** 网络包 (所有 Packet 类) */
     public static final Logger network   = LoggerFactory.getLogger("kazumiplayer.network");
 

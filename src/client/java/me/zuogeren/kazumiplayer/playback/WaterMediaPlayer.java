@@ -144,12 +144,22 @@ public class WaterMediaPlayer {
     public void stop() {
         pendingSeekMs = -1;
         pendingPause = false;
-        if (player != null) {
-            player.stop();
-            player.release();
+        try {
+            if (player != null) {
+                player.stop();
+                player.release();
+            }
+        } catch (Throwable t) {
+            // 播放器停止异常不能阻断后续清理（否则声音残留且播放器无法复用）
+            KazumiLog.playback.warn("Failed to stop media player cleanly: {}", t.getMessage());
+        } finally {
             player = null;
+            for (var l : listeners) {
+                try {
+                    l.onStop();
+                } catch (Throwable ignored) {}
+            }
         }
-        for (var l : listeners) l.onStop();
     }
 
     public boolean hasPendingSeek() {

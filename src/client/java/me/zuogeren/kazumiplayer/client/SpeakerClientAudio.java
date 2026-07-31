@@ -27,9 +27,34 @@ public class SpeakerClientAudio implements PlayStateListener {
 
     public static void tick(SpeakerBlockEntity speaker) {
         if (speaker.getLevel() == null || !speaker.getLevel().isClientSide()) return;
-        if (!speaker.isLinked()) return;
+        if (!speaker.isLinked()) {
+            // 音响已断开连接：停止音频并清理条目，避免残留
+            remove(speaker.getBlockPos());
+            return;
+        }
         audios.computeIfAbsent(speaker.getBlockPos(), k -> new SpeakerClientAudio())
             .clientTick(speaker);
+    }
+
+    /** 音响方块移除/断开时调用：停止音频播放并清理条目 */
+    public static void remove(BlockPos pos) {
+        SpeakerClientAudio audio = audios.remove(pos);
+        if (audio != null) {
+            audio.onStop();
+        }
+    }
+
+    /** 停止所有音响音频并清空（断线/离开世界时调用） */
+    public static void stopAll() {
+        for (SpeakerClientAudio audio : audios.values()) {
+            audio.onStop();
+        }
+        audios.clear();
+    }
+
+    /** 当前活跃的音响位置（方块移除兜底用） */
+    public static java.util.Set<BlockPos> getActivePositions() {
+        return audios.keySet();
     }
 
     private void clientTick(SpeakerBlockEntity speaker) {
@@ -38,9 +63,14 @@ public class SpeakerClientAudio implements PlayStateListener {
         if (audioPlayer != null) {
             audioPlayer.getPlayer().mute(screen == null);
         }
+        if (screen == null) {
+            // 屏幕已不存在：停止音频（声音无法继续跟随）
+            onStop();
+            return;
+        }
 
         // 漂移校正
-        if (audioPlayer == null || screen == null) return;
+        if (audioPlayer == null) return;
         WaterMediaPlayer screenPlayer = ScreenPlayerManager.getPlayer(screen.getBlockPos());
         if (screenPlayer == null) return;
         if (!audioPlayer.isPlaying()) return;
@@ -54,7 +84,7 @@ public class SpeakerClientAudio implements PlayStateListener {
             long speakerTime = audioPlayer.getTimeMs();
             if (Math.abs(screenTime - speakerTime) > DRIFT_THRESHOLD_MS) {
                 audioPlayer.seek(screenTime);
-                KazumiLog.speaker.debug("Speaker drift corrected: {}ms → {}ms", speakerTime, screenTime);
+                KazumiLog.audio.debug("Speaker drift corrected: {}ms → {}ms", speakerTime, screenTime);
             }
         }
     }

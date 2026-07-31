@@ -23,7 +23,7 @@ public final class KazumiConfigScreen {
 
     private static final List<String> LOG_CATEGORIES = List.of(
             "general", "playback", "sniff", "render", "screen",
-            "speaker", "network", "sync", "command", "search", "rule", "http");
+            "speaker", "audio", "network", "sync", "command", "search", "rule", "http");
 
     private static final java.util.Map<String, String> LOG_LABELS = java.util.Map.ofEntries(
             java.util.Map.entry("general", "生命周期/通用"),
@@ -32,6 +32,7 @@ public final class KazumiConfigScreen {
             java.util.Map.entry("render", "渲染"),
             java.util.Map.entry("screen", "屏幕方块"),
             java.util.Map.entry("speaker", "音响"),
+            java.util.Map.entry("audio", "音频播放"),
             java.util.Map.entry("network", "网络包"),
             java.util.Map.entry("sync", "同步组"),
             java.util.Map.entry("command", "命令"),

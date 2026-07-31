@@ -31,6 +31,7 @@ public final class LogConfig {
         add(builder, "render", "渲染日志");
         add(builder, "screen", "屏幕方块日志");
         add(builder, "speaker", "音响日志");
+        add(builder, "audio", "音频播放日志");
         add(builder, "network", "网络包日志");
         add(builder, "sync", "同步组日志");
         add(builder, "command", "命令日志");
