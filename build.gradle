@@ -86,22 +86,27 @@ neoForge {
     runs {
         client {
             client()
+            // 使用 client source set 的运行时依赖（MCEF/WaterMedia）
+            sourceSet = sourceSets.client
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
         server {
             server()
+            sourceSet = sourceSets.server
             programArgument '--nogui'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
         gameTestServer {
             type = "gameTestServer"
+            sourceSet = sourceSets.server
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
         data {
             clientData()
+            sourceSet = sourceSets.client
             programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
         }
 
@@ -209,9 +214,9 @@ tasks.named('assemble') {
     dependsOn 'serverJar', 'clientJar'
 }
 
-// 默认 jar 仅含 common 类（中间产物，无 mods.toml），重命名避免与正式双 jar 混淆
+// 默认 jar 仅含 common 类（中间产物，无 mods.toml），直接禁用，只产出正式双 jar
 tasks.named('jar') {
-    archiveBaseName = 'kazumiplayer-common'
+    enabled = false
 }
 
 publishing {
