@@ -11,11 +11,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 25
+      # Gradle 8.8 最高支持 Java 22，需用旧 JDK 运行 Gradle；
+      # 项目编译 toolchain 为 Java 25，由 foojay-resolver 自动下载
+      - name: Set up JDK 21 (Gradle runtime)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: '21'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
