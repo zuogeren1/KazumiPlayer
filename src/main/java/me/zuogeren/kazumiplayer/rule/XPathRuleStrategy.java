@@ -145,7 +145,7 @@ public class XPathRuleStrategy {
                     List<String> names = new ArrayList<>();
 
                     try {
-                        Elements episodes = roadNode.selectXpath(config.chapterResult());
+                        Elements episodes = roadNode.selectXpath(relativizeXPath(config.chapterResult()));
                         int epNum = 1;
                         for (Element ep : episodes) {
                             String href = ep.attr("href");
@@ -218,16 +218,54 @@ public class XPathRuleStrategy {
 
     // --- 工具方法 ---
 
+    /**
+     * 将 XPath 转为相对当前节点执行（Kazumi Dart 语义兼容）。
+     *
+     * Jsoup/JAXP 中 "//xxx" 从文档根解析；而 Kazumi(Dart) 中相对容器节点解析为
+     * "容器内所有后代 xxx"。规则里的 searchName/searchResult/chapterResult 通常是
+     * 相对容器编写的（如 //a、//div[2]/text()），故加 "." 前缀使其相对当前节点。
+     * 绝对路径（/xxx 开头）与普通相对路径保持不变。
+     */
+    private static String relativizeXPath(String xpath) {
+        if (xpath == null || xpath.isBlank()) {
+            return xpath;
+        }
+        String trimmed = xpath.trim();
+        if (trimmed.startsWith("//")) {
+            return "." + trimmed;
+        }
+        return xpath;
+    }
+
     private static String extractXPathText(Element node, String xpath) {
-        Elements els = node.selectXpath(xpath);
+        // Jsoup/JAXP 对 "xxx/text()" 步骤支持有坑（返回 0 节点），剥离后缀后取元素文本
+        String nodePath = xpath;
+        if (nodePath != null && nodePath.trim().endsWith("/text()")) {
+            nodePath = nodePath.trim().substring(0, nodePath.trim().length() - "/text()".length());
+        }
+        Elements els = node.selectXpath(relativizeXPath(nodePath));
         if (els.isEmpty()) return null;
-        return els.first().wholeText().trim();
+        // 取第一个非空文本：容器自身作为祖先匹配（如 //div[2] 命中容器）时可能为空文本
+        for (Element el : els) {
+            String text = el.wholeText().trim();
+            if (!text.isEmpty()) {
+                return text;
+            }
+        }
+        return null;
     }
 
     private static String extractXPathHref(Element node, String xpath) {
-        Elements els = node.selectXpath(xpath);
+        Elements els = node.selectXpath(relativizeXPath(xpath));
         if (els.isEmpty()) return null;
-        return els.first().attr("href").trim();
+        // 取第一个带有效 href 的节点（全文档匹配场景下避免取到导航链接）
+        for (Element el : els) {
+            String href = el.attr("href").trim();
+            if (!href.isEmpty()) {
+                return href;
+            }
+        }
+        return null;
     }
 
     private static Map<String, String> parseQueryParams(String query) {

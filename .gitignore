@@ -20,6 +20,9 @@ hs_err_pid*
 # Common working directory
 run
 
+# Game logs
+logs/
+
 # Reference files
 reference/
 CLAUDE.md

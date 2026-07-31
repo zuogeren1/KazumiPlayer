@@ -43,14 +43,21 @@ public class PlaybackManager {
                 });
             })
             .exceptionally(e -> {
-                // 嗅探失败，尝试直接播放
-                KazumiLog.playback.warn("Sniff failed, trying direct play: {}", e.getMessage());
+                // 嗅探失败：仅当 URL 本身像视频直链时才尝试直接播放；
+                // 网页播放页直接喂给播放器只会得到 "Content is not multimedia"
+                KazumiLog.playback.warn("Sniff failed: {}", e.getMessage());
                 Minecraft.getInstance().execute(() -> {
-                    waterMedia.play(url);
-                    screen.setVideoState(VideoState.PLAYING);
                     var mc = Minecraft.getInstance();
-                    mc.gui.getChat().addClientSystemMessage(
-                        net.minecraft.network.chat.Component.literal("§e视频嗅探失败，尝试直接播放..."));
+                    if (looksLikeDirectVideo(url)) {
+                        waterMedia.play(url);
+                        screen.setVideoState(VideoState.PLAYING);
+                        mc.gui.getChat().addClientSystemMessage(
+                            net.minecraft.network.chat.Component.literal("§e视频嗅探失败，尝试直接播放..."));
+                    } else {
+                        screen.setVideoState(VideoState.STOPPED);
+                        mc.gui.getChat().addClientSystemMessage(
+                            net.minecraft.network.chat.Component.literal("§c视频嗅探失败，未能获取视频直链"));
+                    }
                 });
                 return null;
             });
@@ -64,15 +71,20 @@ public class PlaybackManager {
     public WaterMediaPlayer getWaterMedia() { return waterMedia; }
 
     private static boolean isDirectVideoUrl(String url) {
+        return looksLikeDirectVideo(url);
+    }
+
+    /** URL 是否可能为可直接播放的视频（file/盘符/视频扩展名），排除网页播放页 */
+    private static boolean looksLikeDirectVideo(String url) {
+        if (url == null || url.isBlank()) return false;
         String lower = url.toLowerCase();
         boolean hasDrive = url.length() > 2 && (url.charAt(1) == ':' || url.charAt(1) == '：');
         boolean hasVideoExt = lower.endsWith(".mp4") || lower.endsWith(".mkv")
             || lower.endsWith(".m3u8") || lower.endsWith(".avi")
             || lower.endsWith(".webm") || lower.endsWith(".mov");
-        boolean direct = lower.startsWith("file://") || hasDrive
-            || lower.startsWith("/") || hasVideoExt;
-        KazumiLog.playback.debug("isDirectVideoUrl urlLen={} char1='{}' drive={} ext={} direct={}",
-            url.length(), url.length() > 1 ? url.charAt(1) : '?', hasDrive, hasVideoExt, direct);
+        // 注意：不能把 "/xxx" 当作本地文件——网页相对路径（如 /vodplay/x.html）也以 / 开头，
+        // 会被误判为直链直接交给播放器导致 "Content is not multimedia"。本地文件由扩展名覆盖。
+        boolean direct = lower.startsWith("file://") || hasDrive || hasVideoExt;
         return direct;
     }
 }

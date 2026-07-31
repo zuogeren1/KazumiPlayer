@@ -96,6 +96,16 @@ public class WaterMediaPlayer {
         return player != null ? player.texture() : 0;
     }
 
+    /** 当前纹理宽度（解码就绪前可能为 0） */
+    public int getWidth() {
+        return player != null ? player.width() : 0;
+    }
+
+    /** 当前纹理高度（解码就绪前可能为 0） */
+    public int getHeight() {
+        return player != null ? player.height() : 0;
+    }
+
     public long getTimeMs() {
         return player != null ? player.time() : 0;
     }

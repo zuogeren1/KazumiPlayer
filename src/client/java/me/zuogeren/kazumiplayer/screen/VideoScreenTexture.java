@@ -23,9 +23,9 @@ import java.nio.ByteBuffer;
 public class VideoScreenTexture implements AutoCloseable {
     private static final String PREFIX = "video_screen_frame/";
 
-    // 默认分辨率，后续可根据实际视频尺寸调整
-    private static final int DEFAULT_WIDTH = 1920;
-    private static final int DEFAULT_HEIGHT = 1080;
+    // 占位色纹理分辨率（实际视频帧就绪前使用）
+    private static final int PLACEHOLDER_WIDTH = 320;
+    private static final int PLACEHOLDER_HEIGHT = 180;
 
     private final Identifier textureId;
     private DynamicTexture dynamicTexture;
@@ -41,18 +41,38 @@ public class VideoScreenTexture implements AutoCloseable {
     public void ensureRegistered() {
         if (registered) return;
         TextureManager tm = Minecraft.getInstance().getTextureManager();
-        tm.register(textureId, getOrCreateDynamicTexture());
+        tm.register(textureId, getOrCreateDynamicTexture(PLACEHOLDER_WIDTH, PLACEHOLDER_HEIGHT));
         registered = true;
         KazumiLog.render.info("VideoScreenTexture registered: {}", textureId);
     }
 
-    private DynamicTexture getOrCreateDynamicTexture() {
-        if (dynamicTexture == null) {
-            nativeImage = new NativeImage(DEFAULT_WIDTH, DEFAULT_HEIGHT, false);
+    /**
+     * 按目标尺寸创建/重建纹理。
+     * 视频分辨率变化时自动调整，避免固定尺寸读回导致画面错乱（上半部分/重复画面/摩尔纹）。
+     */
+    private DynamicTexture getOrCreateDynamicTexture(int width, int height) {
+        if (dynamicTexture == null
+                || nativeImage == null
+                || nativeImage.getWidth() != width
+                || nativeImage.getHeight() != height) {
+            if (dynamicTexture != null) {
+                dynamicTexture.close();
+                dynamicTexture = null;
+            }
+            if (nativeImage != null) {
+                nativeImage.close();
+                nativeImage = null;
+            }
+            nativeImage = new NativeImage(width, height, false);
             dynamicTexture = new DynamicTexture(
                 () -> "KazumiPlayer Video Frame",
                 nativeImage
             );
+            if (registered) {
+                // 尺寸变化后重新注册（旧 GL 纹理已释放）
+                Minecraft.getInstance().getTextureManager().register(textureId, dynamicTexture);
+            }
+            hasValidFrame = false; // 尺寸变化，旧帧内容不再匹配
         }
         return dynamicTexture;
     }
@@ -66,8 +86,11 @@ public class VideoScreenTexture implements AutoCloseable {
 
         long texId = wmPlayer.getTextureId();
         if (texId == 0) return false;
+        int width = wmPlayer.getWidth();
+        int height = wmPlayer.getHeight();
+        if (width <= 0 || height <= 0) return false; // 解码器尚未就绪
 
-        DynamicTexture dt = getOrCreateDynamicTexture();
+        DynamicTexture dt = getOrCreateDynamicTexture(width, height);
         NativeImage img = nativeImage;
         if (img == null) return false;
 
@@ -95,7 +118,7 @@ public class VideoScreenTexture implements AutoCloseable {
 
     /** 用纯色填充纹理（IDLE/LOADING/ERROR 等非播放状态用） */
     public void fillPlaceholder(int colorABGR) {
-        DynamicTexture dt = getOrCreateDynamicTexture();
+        DynamicTexture dt = getOrCreateDynamicTexture(PLACEHOLDER_WIDTH, PLACEHOLDER_HEIGHT);
         NativeImage img = nativeImage;
         if (img == null) return;
         img.fillRect(0, 0, img.getWidth(), img.getHeight(), colorABGR);
