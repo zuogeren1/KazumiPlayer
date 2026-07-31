@@ -68,7 +68,7 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 ### 屏幕
 | 命令 | 说明 |
 |------|------|
-| `/kazumi screen create <坐标> <宽> <高> <朝向>` | 创建屏幕 |
+| `/kazumi screen create <坐标> <宽> <高> <朝向>` | 创建屏幕（宽高 0.5~128） |
 | `/kazumi screen stop` | 停止屏幕 |
 
 ### 规则管理
