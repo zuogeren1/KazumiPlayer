@@ -98,7 +98,10 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 long targetPos = packet.positionMs() + elapsed;
                 // 周期广播时位置基本一致：仅在漂移超过阈值时 seek，避免每 5 秒无谓跳转
                 long drift = Math.abs(player.getTimeMs() - targetPos);
-                if (!stabilizing && drift > 800) {
+                // seek 后冷却：seek 会导致解码队列清空重缓冲，期间时钟不稳，
+                // 若立即按新广播校正会陷入"seek → 落后 → 又 seek"的循环
+                boolean seekCooldown = System.currentTimeMillis() - player.getLastSeekMs() < 5000;
+                if (!stabilizing && !seekCooldown && drift > 800) {
                     player.seek(targetPos);
                 }
                 if (packet.paused()) player.pause();

@@ -18,6 +18,7 @@ public class WaterMediaPlayer {
     private MediaPlayer player;
     private long pendingSeekMs = -1;
     private boolean pendingPause;
+    private volatile long lastSeekMs; // 最近一次 seek 的时间戳（漂移校正冷却用）
     private final List<PlayStateListener> listeners = new ArrayList<>();
 
     public void addListener(PlayStateListener l) { listeners.add(l); }
@@ -133,6 +134,7 @@ public class WaterMediaPlayer {
     }
 
     public void seek(long ms) {
+        lastSeekMs = System.currentTimeMillis();
         if (player != null && player.playing()) {
             player.seek(ms);
             for (var l : listeners) l.onSeek(ms);
@@ -168,11 +170,21 @@ public class WaterMediaPlayer {
 
     public void applyPendingSeek() {
         if (player != null && player.playing() && pendingSeekMs >= 0) {
-            player.seek(pendingSeekMs);
-            KazumiLog.playback.info("Delayed seek: {}ms (time={})", pendingSeekMs, player.time());
+            long now = player.time();
+            // 播放器已自然播放到目标附近（如缓冲期间时间推进）→ 跳过重复 seek，避免打断
+            if (Math.abs(now - pendingSeekMs) > 500) {
+                lastSeekMs = System.currentTimeMillis();
+                player.seek(pendingSeekMs);
+                KazumiLog.playback.info("Delayed seek: {}ms (time={})", pendingSeekMs, now);
+            }
             pendingSeekMs = -1;
             for (var l : listeners) l.onSeek(player.time());
         }
+    }
+
+    /** 最近一次 seek 的时间戳（毫秒），0 表示从未 seek 过 */
+    public long getLastSeekMs() {
+        return lastSeekMs;
     }
 
     public MediaPlayer getPlayer() { return player; }
