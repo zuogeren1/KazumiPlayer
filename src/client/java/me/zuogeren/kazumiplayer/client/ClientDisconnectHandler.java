@@ -26,9 +26,29 @@ public class ClientDisconnectHandler {
     // ---- 调试：鼠标抓取状态监控（临时诊断用，定位播放时鼠标脱离准心） ----
     private static boolean lastMouseGrabbed = true;
     private static boolean lastWindowActive = true;
+    private static boolean lastDesync;
     private static long lastUngrabTick = -1;
     private static int diagTickCounter;
     private static int mouseStuckTicks;
+
+    // GLFW 光标模式常量（与 InputConstants.grabOrReleaseMouse 使用的值一致）
+    private static final int GLFW_CURSOR = 208897;
+    private static final int GLFW_CURSOR_NORMAL = 212993;
+    private static final int GLFW_CURSOR_DISABLED = 212995;
+
+    /**
+     * 强制恢复鼠标抓取（供嗅探/播放器等外部释放光标的场景调用）。
+     *
+     * 直接 grabMouse() 会因内部 mouseGrabbed 仍为 true 而空转（外部释放未同步标志），
+     * 必须先 releaseMouse() 复位内部标志再抓取。仅在窗口活跃且无 GUI 时生效。
+     */
+    public static void forceRestoreMouseGrab(Minecraft mc) {
+        if (!mc.isWindowActive() || mc.screen != null) {
+            return;
+        }
+        mc.mouseHandler.releaseMouse();
+        mc.mouseHandler.grabMouse();
+    }
 
     @SubscribeEvent
     public static void onClientTickHighFrequency(ClientTickEvent.Post event) {
@@ -39,14 +59,33 @@ public class ClientDisconnectHandler {
         }
         boolean grabbed = mc.mouseHandler.isMouseGrabbed();
         boolean windowActive = mc.isWindowActive();
+        // GLFW 真实光标状态：MCEF/WaterMedia 可能直接操作 GLFW 导致内部标志与实际不一致
+        int realCursorMode = org.lwjgl.glfw.GLFW.glfwGetInputMode(
+                mc.getWindow().handle(), GLFW_CURSOR);
+        boolean realGrabbed = realCursorMode == GLFW_CURSOR_DISABLED;
+
+        // 内部标志与真实状态不同步（鼠标已脱离但 MC 认为仍捕获）→ 状态变化时记录诊断，避免刷屏
+        boolean desync = grabbed != realGrabbed;
+        if (desync != lastDesync) {
+            lastDesync = desync;
+            if (desync) {
+                KazumiLog.general.debug("mouse state desync: internalGrabbed={} realCursorMode={} windowActive={} screen={}",
+                        grabbed, realCursorMode, windowActive,
+                        mc.screen == null ? "null" : mc.screen.getClass().getSimpleName());
+            } else {
+                KazumiLog.general.debug("mouse state resync: internalGrabbed={} realCursorMode={}",
+                        grabbed, realCursorMode);
+            }
+        }
+
         if (windowActive != lastWindowActive) {
             lastWindowActive = windowActive;
             KazumiLog.general.debug("window active changed -> {} (mouseGrabbed={})",
                 windowActive, grabbed);
         }
-        if (grabbed != lastMouseGrabbed) {
-            lastMouseGrabbed = grabbed;
-            if (!grabbed) {
+        if (realGrabbed != lastMouseGrabbed) {
+            lastMouseGrabbed = realGrabbed;
+            if (!realGrabbed) {
                 long now = System.currentTimeMillis();
                 long sinceLast = lastUngrabTick < 0 ? -1 : now - lastUngrabTick;
                 lastUngrabTick = now;
@@ -59,12 +98,20 @@ public class ClientDisconnectHandler {
                     playingScreens);
             }
         }
-        // 防御修复：窗口活跃且无 GUI，但鼠标持续未捕获（如关闭聊天框时抓取被焦点竞争跳过）
+        // 防御修复：窗口活跃且无 GUI，但 GLFW 真实光标未捕获
+        // （覆盖：MCEF/WaterMedia 直接释放光标、失焦期间 grabMouse() 静默失败导致内部标志与真实状态不同步）
         // → 自动重新捕获，避免"鼠标指针出现、需点击窗口才恢复"
-        if (mc.isWindowActive() && mc.screen == null && !grabbed) {
-            if (++mouseStuckTicks > 10) { // 10 tick = 0.5 秒防抖
-                mc.mouseHandler.grabMouse();
-                KazumiLog.general.debug("auto-restored mouse grab (was stuck {} ticks)", mouseStuckTicks);
+        if (windowActive && mc.screen == null && !realGrabbed) {
+            if (++mouseStuckTicks > 2) { // 2 tick = 0.1 秒防抖（条件已足够严格，缩短闪烁时间）
+                forceRestoreMouseGrab(mc);
+                int after = org.lwjgl.glfw.GLFW.glfwGetInputMode(
+                        mc.getWindow().handle(), GLFW_CURSOR);
+                KazumiLog.general.debug("auto-restored mouse grab (was stuck {} ticks, internal={}, after={})",
+                        mouseStuckTicks, mc.mouseHandler.isMouseGrabbed(), after);
+                if (after != GLFW_CURSOR_DISABLED) {
+                    KazumiLog.general.warn("grabMouse did not take effect (realCursorMode={}, windowActive={})",
+                            after, mc.isWindowActive());
+                }
                 mouseStuckTicks = 0;
             }
         } else {
@@ -74,8 +121,8 @@ public class ClientDisconnectHandler {
         if (++diagTickCounter % 40 == 0) {
             int playingScreens = (int) activeScreens.stream()
                 .filter(s -> ScreenPlayerManager.getPlayer(s.getBlockPos()) != null).count();
-            KazumiLog.general.debug("snapshot mouseGrabbed={} windowActive={} screen={} playingScreens={}",
-                grabbed, windowActive,
+            KazumiLog.general.debug("snapshot internalGrabbed={} realGrabbed={} windowActive={} screen={} playingScreens={}",
+                grabbed, realGrabbed, windowActive,
                 mc.screen == null ? "null" : mc.screen.getClass().getSimpleName(),
                 playingScreens);
         }

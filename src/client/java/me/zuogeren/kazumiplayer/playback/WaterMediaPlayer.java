@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.playback;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 
 import me.zuogeren.kazumiplayer.client.PlayStateListener;
 import net.minecraft.client.Minecraft;
@@ -69,7 +70,7 @@ public class WaterMediaPlayer {
             applyVolumeFromOptions();
             KazumiLog.playback.debug("player started, grabbing mouse");
             // 播放器初始化可能抢走窗口焦点（如引擎/上下文创建），恢复鼠标捕获
-            Minecraft.getInstance().mouseHandler.grabMouse();
+            ClientDisconnectHandler.forceRestoreMouseGrab(Minecraft.getInstance());
             KazumiLog.playback.debug("mouse grabbed={}", Minecraft.getInstance().mouseHandler.isMouseGrabbed());
             // seek 交给外部 tick 延迟执行（此时 demuxer 尚未就绪）
         } catch (Exception e) {

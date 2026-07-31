@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.playback;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 
 import com.cinemamod.mcef.MCEF;
 import com.cinemamod.mcef.MCEFBrowser;
@@ -150,7 +151,7 @@ public class VideoSniffer {
                 KazumiLog.sniff.debug("sniff done url={} err={}, restoring mouse", url, err);
                 // 浏览器创建/关闭可能抢走窗口焦点导致鼠标脱离准心，恢复鼠标捕获
                 Minecraft.getInstance().execute(() ->
-                    Minecraft.getInstance().mouseHandler.grabMouse());
+                    ClientDisconnectHandler.forceRestoreMouseGrab(Minecraft.getInstance()));
                 Minecraft.getInstance().execute(() ->
                     KazumiLog.sniff.debug("after grab mouseGrabbed={} windowActive={}",
                         Minecraft.getInstance().mouseHandler.isMouseGrabbed(),
