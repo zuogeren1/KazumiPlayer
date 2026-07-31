@@ -121,7 +121,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
             hasFrame = tex.updateFrame(state.player);
         }
 
-        if (!hasFrame) {
+        // 已有有效帧时保留旧帧（seek/缓冲导致的短暂无帧不闪占位色）
+        if (!hasFrame && !tex.hasValidFrame()) {
             tex.fillPlaceholder(COLOR_LOADING);
         }
 

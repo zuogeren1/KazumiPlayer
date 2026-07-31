@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.client;
 
 import me.zuogeren.kazumiplayer.ClientConfig;
+import me.zuogeren.kazumiplayer.Config;
 import me.zuogeren.kazumiplayer.LogConfig;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
@@ -99,8 +100,12 @@ public final class KazumiConfigScreen {
                 .setSaveConsumer(value -> ClientConfig.CONFIG.autoJoinSync.set(value))
                 .build());
 
-        // 保存时：日志级别即时应用（其余配置项在使用处实时读取，同样即时生效）
-        builder.setSavingRunnable(LogConfig::applyAll);
+        // 保存时：日志级别即时应用 + 显式写盘（ModConfigSpec.set 只改内存，不调 save 重启会重置）
+        builder.setSavingRunnable(() -> {
+            LogConfig.applyAll();
+            Config.SPEC.save();
+            ClientConfig.SPEC.save();
+        });
 
         return builder.build();
     }

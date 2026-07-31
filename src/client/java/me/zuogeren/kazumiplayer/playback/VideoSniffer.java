@@ -110,11 +110,7 @@ public class VideoSniffer {
             }
 
             var mc = Minecraft.getInstance();
-            KazumiLog.sniff.debug("before createBrowser mouseGrabbed={} windowActive={}",
-                mc.mouseHandler.isMouseGrabbed(), mc.isWindowActive());
             MCEFBrowser browser = MCEF.createBrowser(pageUrl, true);
-            KazumiLog.sniff.debug("after createBrowser mouseGrabbed={} windowActive={}",
-                mc.mouseHandler.isMouseGrabbed(), mc.isWindowActive());
             var handler = new CefDisplayHandlerAdapter() {
                 @Override
                 public boolean onConsoleMessage(CefBrowser b, CefSettings.LogSeverity level,
@@ -152,10 +148,6 @@ public class VideoSniffer {
                 // 浏览器创建/关闭可能抢走窗口焦点导致鼠标脱离准心，恢复鼠标捕获
                 Minecraft.getInstance().execute(() ->
                     ClientDisconnectHandler.forceRestoreMouseGrab(Minecraft.getInstance()));
-                Minecraft.getInstance().execute(() ->
-                    KazumiLog.sniff.debug("after grab mouseGrabbed={} windowActive={}",
-                        Minecraft.getInstance().mouseHandler.isMouseGrabbed(),
-                        Minecraft.getInstance().isWindowActive()));
                 if (err != null) {
                     KazumiLog.sniff.warn("Sniff failed: {}", err.getMessage());
                 }

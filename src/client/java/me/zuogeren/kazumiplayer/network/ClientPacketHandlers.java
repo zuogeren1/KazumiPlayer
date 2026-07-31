@@ -48,6 +48,7 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 pm.playUrl(screen, packet.episodeUrl());
                 ScreenPlayerManager.setPlayer(screen.getBlockPos(), pm.getWaterMedia());
                 var sp = ScreenPlayerManager.get(screen.getBlockPos());
+                sp.playbackStartedAt = System.currentTimeMillis();
                 sp.lastEpisodeUrl = packet.episodeUrl();
                 // join 时预置同步位置
                 if (packet.seekMs() >= 0) {
@@ -82,12 +83,16 @@ public class ClientPacketHandlers implements IClientPacketHandler {
             if (mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity screen) {
                 var player = ScreenPlayerManager.getPlayer(screen.getBlockPos());
                 if (player == null) return;
+                var sp = ScreenPlayerManager.get(screen.getBlockPos());
+                // 播放器启动稳定期内（8 秒）跳过漂移校正 seek：
+                // 刚启动/seek 后播放器时钟未稳定（可能短暂倒退），此时强 seek 会反复打断缓冲导致画面闪烁
+                boolean stabilizing = System.currentTimeMillis() - sp.playbackStartedAt < 8000;
                 // 计算实际播放位置: 服务端时间戳 + 本地流逝时间
                 long elapsed = packet.paused() ? 0 : System.currentTimeMillis() - packet.serverTimestamp();
                 long targetPos = packet.positionMs() + elapsed;
                 // 周期广播时位置基本一致：仅在漂移超过阈值时 seek，避免每 5 秒无谓跳转
                 long drift = Math.abs(player.getTimeMs() - targetPos);
-                if (drift > 800) {
+                if (!stabilizing && drift > 800) {
                     player.seek(targetPos);
                 }
                 if (packet.paused()) player.pause();

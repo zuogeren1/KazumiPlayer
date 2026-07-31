@@ -31,6 +31,7 @@ public class VideoScreenTexture implements AutoCloseable {
     private DynamicTexture dynamicTexture;
     private NativeImage nativeImage;
     private boolean registered;
+    private boolean hasValidFrame;
 
     public VideoScreenTexture(String uniqueKey) {
         this.textureId = Identifier.fromNamespaceAndPath(KazumiPlayer.MODID, PREFIX + uniqueKey);
@@ -84,6 +85,7 @@ public class VideoScreenTexture implements AutoCloseable {
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, prevTex);
 
             dt.upload();
+            hasValidFrame = true;
             return true;
         } catch (Exception e) {
             KazumiLog.render.error("Failed to update video frame: {}", e.getMessage());
@@ -98,6 +100,11 @@ public class VideoScreenTexture implements AutoCloseable {
         if (img == null) return;
         img.fillRect(0, 0, img.getWidth(), img.getHeight(), colorABGR);
         dt.upload();
+    }
+
+    /** 是否已有至少一帧有效视频画面（无帧时用于决定是保留旧帧还是填充占位色） */
+    public boolean hasValidFrame() {
+        return hasValidFrame;
     }
 
     public Identifier getTextureId() {
@@ -115,5 +122,6 @@ public class VideoScreenTexture implements AutoCloseable {
             nativeImage = null;
         }
         registered = false;
+        hasValidFrame = false;
     }
 }
