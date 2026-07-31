@@ -24,6 +24,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlockEntity, VideoScreenRenderState> {
@@ -247,5 +248,22 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     @Override
     public boolean shouldRenderOffScreen() {
         return true;
+    }
+
+    /**
+     * 渲染包围盒必须包含伸出方块上方的屏幕面，否则玩家视角看不到方块本体
+     * AABB 时整个 BE 被 frustum 剔除，屏幕面消失（方块本体由 chunk 渲染所以正常）。
+     */
+    @Override
+    public AABB getRenderBoundingBox(VideoScreenBlockEntity blockEntity) {
+        BlockPos pos = blockEntity.getBlockPos();
+        float halfW = blockEntity.getScreenWidth() / 2.0f;
+        float halfH = blockEntity.getScreenHeight() / 2.0f;
+        // 屏幕面：中心在方块上方 1.5+halfH，半宽 halfW，半高 halfH；水平方向按最大半径覆盖
+        double r = Math.max(1.0, halfW) + 0.5;
+        double yTop = pos.getY() + 1.5 + halfH * 2 + 1.0;
+        return new AABB(
+                pos.getX() + 0.5 - r, pos.getY(), pos.getZ() + 0.5 - r,
+                pos.getX() + 0.5 + r, yTop, pos.getZ() + 0.5 + r);
     }
 }

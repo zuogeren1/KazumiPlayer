@@ -24,8 +24,8 @@ public class ScreenCommands {
         return Commands.literal("screen")
             .then(Commands.literal("create")
                 .then(Commands.argument("pos", BlockPosArgument.blockPos())
-                .then(Commands.argument("width", FloatArgumentType.floatArg(0.5f, 20f))
-                .then(Commands.argument("height", FloatArgumentType.floatArg(0.5f, 20f))
+                .then(Commands.argument("width", FloatArgumentType.floatArg(0.5f, 128f))
+                .then(Commands.argument("height", FloatArgumentType.floatArg(0.5f, 128f))
                 .then(Commands.argument("facing", StringArgumentType.string())
                     .suggests((ctx, builder) -> {
                         builder.suggest("north");
