@@ -5,11 +5,12 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 ## 功能
 
 - **番剧搜索**：bgm.tv API 搜索番剧元数据 + KazumiRules 规则引擎查源站
-- **视频播放**：WaterMedia V3 (FFmpeg) 解码，MCEF 浏览器嗅探提取视频直链
+- **视频播放**：WaterMedia V3 (FFmpeg) 解码，MCEF 浏览器嗅探提取视频直链（JS 嗅探 + 原生网络层拦截，支持 iframe 嵌套解析站，任意分辨率自适应）
 - **多人同步**：NBT 驱动播放状态，服务端计时，自动同步进度/切集/暂停
 - **剧集管理**：自动下一集、手动切集、时间快进/快退/跳转
 - **进度条**：视频下方实时进度条
 - **规则测试**：客户端 `/krule test` 直接测试规则连通性
+- **配置系统**：Cloth Config 配置界面（可选），12 个日志分类 DEBUG 开关即时生效
 - **GPL-3.0 开源**
 
 ## 安装
@@ -20,6 +21,20 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 |------|------|
 | MCEF 2.2.0 | Chromium 视频嗅探 |
 | WaterMedia 3.0.0.22 | FFmpeg 解码 + GL 纹理 |
+| Cloth Config 26.1.154（可选） | 游戏内配置界面，不装不影响功能 |
+
+## 配置
+
+配置文件位于 `.minecraft/config/`（单人/服务器共用同一份）：
+
+| 文件 | 内容 |
+|------|------|
+| `kazumiplayer.toml` | 服务端通用配置 + 日志分类 DEBUG 开关（`log.debugGeneral` 等 12 项） |
+| `kazumiplayer-client.toml` | 客户端播放/嗅探配置（音量、并发数、超时、同步等） |
+
+**日志开关**：默认全部关闭，开启后对应分类输出 DEBUG 诊断日志并即时生效，无需重启。
+
+安装了 Cloth Config 后，可在 **Mods 列表 → KazumiPlayer → Config** 打开配置界面修改并保存（保存即写盘，重启保留）。
 
 ## 命令
 
@@ -71,7 +86,7 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 ```bash
 ./gradlew serverJar   # 构建服务端 jar → build/libs/kazumiplayer-server-0.1-alpha.jar
 ./gradlew clientJar   # 构建客户端 jar → build/libs/kazumiplayer-client-0.1-alpha.jar
-./gradlew build       # 构建全部
+./gradlew assemble    # 同时产出服务端 + 客户端两个正式 jar
 ./gradlew runClient # 启动客户端
 ./gradlew runServer # 启动服务端
 ```
