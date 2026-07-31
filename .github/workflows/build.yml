@@ -28,11 +28,16 @@ jobs:
       - name: Build jars
         run: ./gradlew assemble --console=plain
 
-      - name: Upload artifacts
+      - name: Upload server jar
         uses: actions/upload-artifact@v4
         with:
-          name: kazumiplayer-jars
-          path: |
-            build/libs/kazumiplayer-server-*.jar
-            build/libs/kazumiplayer-client-*.jar
+          name: kazumiplayer-server
+          path: build/libs/kazumiplayer-server-*.jar
+          if-no-files-found: error
+
+      - name: Upload client jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: kazumiplayer-client
+          path: build/libs/kazumiplayer-client-*.jar
           if-no-files-found: error
