@@ -1,21 +1,17 @@
 package me.zuogeren.kazumiplayer.network.packet;
 
 import me.zuogeren.kazumiplayer.KazumiPlayer;
-import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
-import me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
-import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
 /**
  * C→S: 连接/断开音响与屏幕
+ * 处理逻辑见服务端模块 ServerPacketHandlers。
  */
 public record SpeakerConnectPacket(BlockPos speakerPos, BlockPos screenPos, UUID screenId, boolean connect) implements CustomPacketPayload {
 
@@ -32,32 +28,4 @@ public record SpeakerConnectPacket(BlockPos speakerPos, BlockPos screenPos, UUID
 
     @Override
     public Type<? extends CustomPacketPayload> type() { return TYPE; }
-
-    public static void handle(SpeakerConnectPacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (!(context.player() instanceof ServerPlayer sp)) return;
-
-            // 校验两个方块都存在
-            var spkBe = sp.level().getBlockEntity(packet.speakerPos);
-            if (!(spkBe instanceof SpeakerBlockEntity spk)) return;
-            var scrBe = sp.level().getBlockEntity(packet.screenPos);
-            if (!(scrBe instanceof VideoScreenBlockEntity screen)) return;
-
-            // 校验 screenId 匹配
-            if (!packet.screenId.equals(screen.getScreenId())) return;
-
-            if (packet.connect) {
-                // 建立连接：双向更新
-                spk.setLink(packet.screenId, packet.screenPos);
-                screen.addConnectedSpeaker(packet.speakerPos);
-                sp.sendSystemMessage(Component.literal("§a音响已连接到屏幕 ("
-                    + packet.screenPos.getX() + ", " + packet.screenPos.getY() + ", " + packet.screenPos.getZ() + ")"));
-            } else {
-                // 断开连接：双向清空
-                spk.clearLink();
-                screen.removeConnectedSpeaker(packet.speakerPos);
-                sp.sendSystemMessage(Component.literal("§e音响已断开连接"));
-            }
-        });
-    }
 }

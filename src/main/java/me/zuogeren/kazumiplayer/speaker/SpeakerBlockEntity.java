@@ -1,10 +1,6 @@
 package me.zuogeren.kazumiplayer.speaker;
-import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import me.zuogeren.kazumiplayer.client.PlayStateListener;
-import me.zuogeren.kazumiplayer.playback.WaterMediaPlayer;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
-import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
@@ -19,17 +15,15 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.UUID;
 
-public class SpeakerBlockEntity extends BlockEntity implements PlayStateListener {
+/**
+ * 音响方块实体（共享代码，只保存服务端连接状态）。
+ * 客户端音频播放逻辑在客户端模块的 SpeakerClientAudio 中。
+ */
+public class SpeakerBlockEntity extends BlockEntity {
 
     // 连接状态
     private UUID linkedScreenId;
     private BlockPos linkedScreenPos;
-
-    // 客户端：音频播放器（纯音频，ALEngine）
-    private WaterMediaPlayer audioPlayer;
-    private int driftTickCounter;
-    private static final int DRIFT_CHECK_INTERVAL = 100; // 5 秒 @20tps
-    private static final long DRIFT_THRESHOLD_MS = 500;
 
     public SpeakerBlockEntity(BlockPos pos, BlockState state) {
         super(SpeakerRegistration.SPEAKER_BLOCK_ENTITY.get(), pos, state);
@@ -54,53 +48,9 @@ public class SpeakerBlockEntity extends BlockEntity implements PlayStateListener
         return linkedScreenId != null && linkedScreenPos != null;
     }
 
-    // ---- 客户端：音频播放管理 ----
-
-    /** 由外部（ConnectionTool/连接建立后）调用来启动音频播放器 */
-    public void startAudio(String videoUrl, WaterMediaPlayer screenPlayer) {
-        if (audioPlayer != null) return;
-        audioPlayer = new WaterMediaPlayer();
-        screenPlayer.addListener(this);
-        audioPlayer.addListener(this); // 也需要监听自己的停止事件做清理
-    }
-
-    public void stopAudio() {
-        if (audioPlayer != null) {
-            audioPlayer.stop();
-            audioPlayer = null;
-        }
-    }
-
-    public void clientTick() {
-        if (level == null || !level.isClientSide()) return;
-        if (!isLinked()) return;
-
-        // 检查屏幕 BE 是否存在（双向判断：存在→取消静音，不存在→静音）
-        VideoScreenBlockEntity screen = getLinkedScreen();
-        if (audioPlayer != null) {
-            audioPlayer.getPlayer().mute(screen == null);
-        }
-
-        // 漂移校正
-        if (audioPlayer == null || screen == null || screen.player == null) return;
-        if (!audioPlayer.isPlaying()) return;
-
-        driftTickCounter++;
-        if (driftTickCounter >= DRIFT_CHECK_INTERVAL) {
-            driftTickCounter = 0;
-            // 暂停时不校正（两者都不动）
-            if (screen.isPlaybackPaused()) return;
-            long screenTime = screen.player.getTimeMs();
-            long speakerTime = audioPlayer.getTimeMs();
-            if (Math.abs(screenTime - speakerTime) > DRIFT_THRESHOLD_MS) {
-                audioPlayer.seek(screenTime);
-                KazumiLog.speaker.debug("Speaker drift corrected: {}ms → {}ms", speakerTime, screenTime);
-            }
-        }
-    }
-
+    /** 根据已保存的连接信息获取屏幕 BE（可能为 null） */
     @Nullable
-    private VideoScreenBlockEntity getLinkedScreen() {
+    public VideoScreenBlockEntity getLinkedScreen() {
         if (level == null || linkedScreenPos == null) return null;
         var be = level.getBlockEntity(linkedScreenPos);
         if (be instanceof VideoScreenBlockEntity screen
@@ -109,31 +59,6 @@ public class SpeakerBlockEntity extends BlockEntity implements PlayStateListener
             return screen;
         }
         return null;
-    }
-
-    // ---- PlayStateListener ----
-
-    @Override
-    public void onPause() {
-        if (audioPlayer != null) audioPlayer.pause();
-    }
-
-    @Override
-    public void onResume() {
-        if (audioPlayer != null) {
-            audioPlayer.resume();
-            driftTickCounter = 0; // 恢复后重置漂移计数器
-        }
-    }
-
-    @Override
-    public void onSeek(long positionMs) {
-        if (audioPlayer != null) audioPlayer.seek(positionMs);
-    }
-
-    @Override
-    public void onStop() {
-        stopAudio();
     }
 
     // ---- NBT ----
@@ -181,9 +106,6 @@ public class SpeakerBlockEntity extends BlockEntity implements PlayStateListener
     @Override
     public void setRemoved() {
         super.setRemoved();
-        if (level != null && level.isClientSide()) {
-            stopAudio();
-        }
         // 服务端：通知屏幕清理反向索引
         if (level != null && !level.isClientSide() && isLinked()) {
             var be = getLinkedScreen();

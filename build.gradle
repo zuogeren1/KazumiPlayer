@@ -47,6 +47,34 @@ configurations.all {
     }
 }
 
+// =====================================================================
+// 多 source set 拆分: main(common) / server / client
+// - main   = 两端共享代码 (方块/网络/规则/工具)
+// - server = 服务端专属 (命令/同步组/搜索/C→S 包处理)
+// - client = 客户端专属 (播放/渲染/tick/S→C 包处理)，编译依赖 main+server
+//           （客户端进程运行集成服务端时同样需要 server 代码）
+// =====================================================================
+sourceSets {
+    server {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    client {
+        compileClasspath += sourceSets.main.output + sourceSets.server.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.server.output + sourceSets.main.runtimeClasspath
+    }
+}
+
+// 依赖传递: server/client 可见 common 的依赖 (gson/jsoup 等)
+configurations {
+    serverImplementation.extendsFrom implementation
+    serverCompileOnly.extendsFrom compileOnly
+    serverRuntimeOnly.extendsFrom runtimeOnly
+    clientImplementation.extendsFrom implementation
+    clientCompileOnly.extendsFrom compileOnly
+    clientRuntimeOnly.extendsFrom runtimeOnly
+}
+
 neoForge {
     version = project.neo_version
 
@@ -86,6 +114,8 @@ neoForge {
     mods {
         "${mod_id}" {
             sourceSet(sourceSets.main)
+            sourceSet(sourceSets.server)
+            sourceSet(sourceSets.client)
         }
     }
 }
@@ -93,22 +123,24 @@ neoForge {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 dependencies {
-    // MCEF - Chromium Embedded Framework for video URL sniffing (client only)
-    implementation("de.keksuccino:mcef-neoforge:2.2.0-26.1.1") {
-        exclude group: "net.neoforged", module: "neoforge"
-    }
-    // WaterMedia - VLC-powered media player (client only, Modrinth)
-    implementation "maven.modrinth:G922NeHS:SytIeSKM"
-    // WaterMedia Binaries - native VLC/FFMPEG (3.0.0.5 matches API 3.0.0.22)
-    implementation "maven.modrinth:4997XcoK:SYiGqsPE"
-
-    // JSON parsing
+    // 共享依赖 (common)
     implementation "com.google.code.gson:gson:2.11.0"
     jarJar(implementation("org.jsoup:jsoup:1.18.1"))
+
+    // 客户端专用依赖 (client only)
+    // MCEF - Chromium Embedded Framework for video URL sniffing
+    clientImplementation("de.keksuccino:mcef-neoforge:2.2.0-26.1.1") {
+        exclude group: "net.neoforged", module: "neoforge"
+    }
+    // WaterMedia - VLC-powered media player (Modrinth)
+    clientImplementation "maven.modrinth:G922NeHS:SytIeSKM"
+    // WaterMedia Binaries - native VLC/FFMPEG (3.0.0.5 matches API 3.0.0.22)
+    clientImplementation "maven.modrinth:4997XcoK:SYiGqsPE"
 }
 
-var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
-    var replaceProperties = [minecraft_version      : minecraft_version,
+// ---- mod 元数据生成（两份 mods.toml） ----
+
+var modMetadataProperties = [minecraft_version      : minecraft_version,
                              minecraft_version_range: minecraft_version_range,
                              neo_version            : neo_version,
                              neo_version_range      : neo_version_range,
@@ -119,14 +151,68 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
                              mod_version            : mod_version,
                              mod_authors            : mod_authors,
                              mod_description        : mod_description]
-    inputs.properties replaceProperties
-    expand replaceProperties
+
+var generateServerModMetadata = tasks.register("generateServerModMetadata", ProcessResources) {
+    filteringCharset = 'UTF-8'
+    inputs.properties modMetadataProperties
+    expand modMetadataProperties
     from "src/main/templates"
-    into "build/generated/sources/modMetadata"
+    into "build/generated/sources/serverModMetadata"
 }
 
-sourceSets.main.resources.srcDir generateModMetadata
-neoForge.ideSyncTask generateModMetadata
+var generateClientModMetadata = tasks.register("generateClientModMetadata", ProcessResources) {
+    filteringCharset = 'UTF-8'
+    inputs.properties modMetadataProperties
+    expand modMetadataProperties
+    from "src/client/templates"
+    into "build/generated/sources/clientModMetadata"
+}
+
+neoForge.ideSyncTask generateServerModMetadata
+neoForge.ideSyncTask generateClientModMetadata
+
+// ---- 双 jar 输出 ----
+
+// 服务端 jar: common + server
+tasks.register('serverJar', Jar) {
+    group = 'build'
+    description = '构建服务端 jar (common + server)，不包含任何客户端类'
+    archiveBaseName = 'kazumiplayer-server'
+    archiveVersion = project.version
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // 开发用 mods.toml（各 source set resources 中的单 modid 版）不进入正式 jar
+    from(sourceSets.main.output) { exclude 'META-INF/neoforge.mods.toml' }
+    from(sourceSets.server.output) { exclude 'META-INF/neoforge.mods.toml' }
+    from generateServerModMetadata.map { it.destinationDir }
+    from(configurations.jarJar) {
+        into 'META-INF/jarjar'
+    }
+}
+
+// 客户端 jar: common + server + client（集成服务端在客户端进程运行，故含 server）
+tasks.register('clientJar', Jar) {
+    group = 'build'
+    description = '构建客户端 jar (common + server + client)'
+    archiveBaseName = 'kazumiplayer-client'
+    archiveVersion = project.version
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(sourceSets.main.output) { exclude 'META-INF/neoforge.mods.toml' }
+    from(sourceSets.server.output) { exclude 'META-INF/neoforge.mods.toml' }
+    from(sourceSets.client.output) { exclude 'META-INF/neoforge.mods.toml' }
+    from generateClientModMetadata.map { it.destinationDir }
+    from(configurations.jarJar) {
+        into 'META-INF/jarjar'
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn 'serverJar', 'clientJar'
+}
+
+// 默认 jar 仅含 common 类（中间产物，无 mods.toml），重命名避免与正式双 jar 混淆
+tasks.named('jar') {
+    archiveBaseName = 'kazumiplayer-common'
+}
 
 publishing {
     publications {

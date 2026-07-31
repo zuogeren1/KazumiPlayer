@@ -1,17 +1,17 @@
 package me.zuogeren.kazumiplayer.network.packet;
 
 import me.zuogeren.kazumiplayer.KazumiPlayer;
-import me.zuogeren.kazumiplayer.playback.PlaybackManager;
-import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
-import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/**
+ * 服务端 → 客户端: 触发指定屏幕开始播放。
+ * 处理逻辑见客户端模块 ClientPacketHandlers。
+ */
 public record PlayStartPacket(
         BlockPos screenPos,
         String episodeUrl,
@@ -51,35 +51,4 @@ public record PlayStartPacket(
 
     @Override
     public Type<? extends CustomPacketPayload> type() { return TYPE; }
-
-    private static PlaybackManager playback;
-
-    private static PlaybackManager getPlayback() {
-        if (playback == null) {
-            playback = new PlaybackManager();
-        }
-        return playback;
-    }
-
-    public static void handle(PlayStartPacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            Minecraft mc = Minecraft.getInstance();
-            if (mc.level == null) return;
-            if (mc.level.getBlockEntity(packet.screenPos) instanceof VideoScreenBlockEntity screen) {
-                var pm = getPlayback();
-                // 如果已在播放，先停止旧的
-                if (screen.player != null) {
-                    screen.player.stop();
-                }
-                pm.stop(screen);
-                pm.playUrl(screen, packet.episodeUrl);
-                screen.player = pm.getWaterMedia();
-                // join 时预置同步位置
-                if (packet.seekMs >= 0) {
-                    screen.player.seek(packet.seekMs);
-                    if (packet.paused) screen.player.pause();
-                }
-            }
-        });
-    }
 }

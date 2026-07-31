@@ -1,0 +1,66 @@
+# 开发环境专用（source set resources）：
+# 三个 source set 合并为同一个 mod file，故三份 toml 内容必须完全一致（声明全部 modid），
+# 否则 JPMS 会因 split package（同一包分散在多个 module）报 ResolutionException。
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "GPL-3.0-only"
+
+[[mods]]
+modId = "kazumiplayer"
+version = "0.1-alpha"
+displayName = "KazumiPlayer"
+description = '''KazumiPlayer (dev)'''
+
+[[mods]]
+modId = "kazumiplayer_server"
+version = "0.1-alpha"
+displayName = "KazumiPlayer Server"
+description = '''KazumiPlayer 服务端附加模块 (dev)'''
+
+[[mods]]
+modId = "kazumiplayer_client"
+version = "0.1-alpha"
+displayName = "KazumiPlayer Client"
+description = '''KazumiPlayer 客户端附加模块 (dev)'''
+
+[[dependencies."kazumiplayer"]]
+modId = "neoforge"
+type = "required"
+versionRange = "[26,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies."kazumiplayer"]]
+modId = "minecraft"
+type = "required"
+versionRange = "[26.1.2,26.2)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies."kazumiplayer"]]
+modId = "mcef"
+type = "optional"
+versionRange = "[2.2.0,)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[dependencies."kazumiplayer"]]
+modId = "watermedia"
+type = "optional"
+versionRange = "[3.0.0,)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[dependencies.kazumiplayer_server]]
+modId = "kazumiplayer"
+type = "required"
+versionRange = "[0.1-alpha,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.kazumiplayer_client]]
+modId = "kazumiplayer"
+type = "required"
+versionRange = "[0.1-alpha,)"
+ordering = "AFTER"
+side = "BOTH"

@@ -25,13 +25,14 @@ public class NetworkManager {
         PayloadRegistrar registrar = event.registrar(VERSION);
 
         // 服务端 -> 客户端
-        registrar.playToClient(RuleSyncPacket.TYPE, RuleSyncPacket.STREAM_CODEC, RuleSyncPacket::handle);
-        registrar.playToClient(ScreenSyncPacket.TYPE, ScreenSyncPacket.STREAM_CODEC, ScreenSyncPacket::handle);
-        registrar.playToClient(PlayStartPacket.TYPE, PlayStartPacket.STREAM_CODEC, PlayStartPacket::handle);
-        registrar.playToClient(SyncStatePacket.TYPE, SyncStatePacket.STREAM_CODEC, SyncStatePacket::handle);
-        registrar.playToClient(PlayStopPacket.TYPE, PlayStopPacket.STREAM_CODEC, PlayStopPacket::handle);
-        registrar.playToServer(NextEpisodePacket.TYPE, NextEpisodePacket.STREAM_CODEC, NextEpisodePacket::handle);
-        registrar.playToServer(PlaybackControlPacket.TYPE, PlaybackControlPacket.STREAM_CODEC, PlaybackControlPacket::handle);
-        registrar.playToServer(SpeakerConnectPacket.TYPE, SpeakerConnectPacket.STREAM_CODEC, SpeakerConnectPacket::handle);
+        // 处理逻辑由 PacketDispatcher 分派到客户端/服务端模块注入的处理器
+        registrar.playToClient(RuleSyncPacket.TYPE, RuleSyncPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
+        registrar.playToClient(ScreenSyncPacket.TYPE, ScreenSyncPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
+        registrar.playToClient(PlayStartPacket.TYPE, PlayStartPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
+        registrar.playToClient(SyncStatePacket.TYPE, SyncStatePacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
+        registrar.playToClient(PlayStopPacket.TYPE, PlayStopPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
+        registrar.playToServer(NextEpisodePacket.TYPE, NextEpisodePacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
+        registrar.playToServer(PlaybackControlPacket.TYPE, PlaybackControlPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
+        registrar.playToServer(SpeakerConnectPacket.TYPE, SpeakerConnectPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
     }
 }

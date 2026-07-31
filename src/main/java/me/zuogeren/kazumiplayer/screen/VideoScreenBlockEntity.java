@@ -37,13 +37,6 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private UUID screenId;                 // 屏幕唯一标识，lazy 生成
     private final List<BlockPos> connectedSpeakers = new ArrayList<>(); // 已连接音响列表
 
-    // 客户端暂存，不持久化
-    public transient me.zuogeren.kazumiplayer.playback.WaterMediaPlayer player;
-    private transient String lastEpisodeUrl;
-    public transient long lastAppliedPosition = -1;
-    public transient long playbackStartedAt; // 防抖：上次启动播放的时间戳
-    public transient boolean endedNotified;
-
     public VideoScreenBlockEntity(BlockPos pos, BlockState blockState) {
         super(VideoScreenRegistration.VIDEO_SCREEN_BLOCK_ENTITY.get(), pos, blockState);
     }
@@ -74,9 +67,6 @@ public class VideoScreenBlockEntity extends BlockEntity {
         }
         return screenId;
     }
-    /** 客户端：检测 episodeUrl 是否刚发生变化（用于检测切换集数） */
-    public boolean justChanged(String url) { return !url.equals(lastEpisodeUrl); }
-    public void markSeen(String url) { this.lastEpisodeUrl = url; }
 
     public void setScreenSize(float width, float height) {
         this.screenWidth = width;
@@ -119,10 +109,6 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.episodeIndex = 1;
         this.episodeData = "";
         this.videoState = VideoState.IDLE;
-        if (player != null) {
-            player.stop();
-            player = null;
-        }
         markDirty();
         KazumiLog.screen.info("clearPlayback side={}",
             level != null && level.isClientSide() ? "client" : "server");
@@ -183,10 +169,6 @@ public class VideoScreenBlockEntity extends BlockEntity {
             }
         });
 
-        if (level != null && level.isClientSide() && episodeUrl.isEmpty() && player != null) {
-            player.stop();
-            player = null;
-        }
     }
 
     @Override
@@ -242,7 +224,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         // 服务端：屏幕被破坏时清理 SyncGroup + 通知所有已连接音响
         if (level != null && !level.isClientSide()) {
             if (screenId != null) {
-                me.zuogeren.kazumiplayer.sync.SyncGroupManager.get().leaveByScreenId(screenId);
+                ScreenRemovalListeners.dispatch(screenId);
             }
             // 通知音响清空连接
             for (BlockPos spkPos : new ArrayList<>(connectedSpeakers)) {
@@ -252,10 +234,6 @@ public class VideoScreenBlockEntity extends BlockEntity {
                 }
             }
             connectedSpeakers.clear();
-        }
-        if (player != null && level != null && level.isClientSide()) {
-            player.stop();
-            player = null;
         }
     }
 

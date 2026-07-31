@@ -28,6 +28,6 @@
 
 ## 项目重构
 
-- [ ] **服务端/客户端拆分**: 当前所有代码在同一个 source set 中，客户端类（WaterMedia/MCEF）用瞬态字段和懒加载规避服务端 `NoClassDefFoundError`。应拆分为 `common`/`client`/`server` 三个 source set
+- [x] **服务端/客户端拆分**: 拆分为 `common`/`client`/`server` 三个 source set，构建输出 `kazumiplayer-server`/`kazumiplayer-client` 两份 jar。客户端类（WaterMedia/MCEF）不再出现在服务端 jar 中
 - [ ] **多版本支持**: 适配不同 Minecraft 版本
 - [ ] **多加载器支持**: 除 NeoForge 外支持 Fabric/Quilt

@@ -1,13 +1,11 @@
 package me.zuogeren.kazumiplayer.network.packet;
 
 import me.zuogeren.kazumiplayer.KazumiPlayer;
-import me.zuogeren.kazumiplayer.client.ClientRuleCache;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
  * 服务端 -> 客户端: 同步已安装的规则列表 (JSON 字符串)
@@ -25,11 +23,5 @@ public record RuleSyncPacket(String rulesJson) implements CustomPacketPayload {
     @Override
     public Type<? extends CustomPacketPayload> type() {
         return TYPE;
-    }
-
-    public static void handle(RuleSyncPacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            ClientRuleCache.updateFromJson(packet.rulesJson);
-        });
     }
 }

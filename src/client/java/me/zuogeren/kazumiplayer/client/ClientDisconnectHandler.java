@@ -84,12 +84,10 @@ public class ClientDisconnectHandler {
 
     private static void stopAllActive() {
         for (var screen : activeScreens) {
-            if (screen.player != null) {
-                screen.player.stop();
-                screen.player = null;
-            }
+            ScreenPlayerManager.remove(screen.getBlockPos());
         }
         activeScreens.clear();
+        ScreenPlayerManager.stopAll();
     }
 
     @SubscribeEvent
@@ -104,63 +102,64 @@ public class ClientDisconnectHandler {
         for (var be : mc.level.getGloballyRenderedBlockEntities()) {
             if (be instanceof VideoScreenBlockEntity screen) {
                 String url = screen.getEpisodeUrl();
+                var sp = ScreenPlayerManager.get(screen.getBlockPos());
                 // 新播放：启动播放器并预置 seek
                 // 只有 WatchingPlayers 中的玩家才自动播放（手动 join 后才能播）
-                if (screen.player == null && !url.isEmpty() && isWatching(screen, mc)
-                        && System.currentTimeMillis() - screen.playbackStartedAt > 3000) {
-                    screen.playbackStartedAt = System.currentTimeMillis();
+                if (sp.player == null && !url.isEmpty() && isWatching(screen, mc)
+                        && System.currentTimeMillis() - sp.playbackStartedAt > 3000) {
+                    sp.playbackStartedAt = System.currentTimeMillis();
                     PlaybackManager pm = new PlaybackManager();
                     pm.playUrl(screen, url);
-                    screen.player = pm.getWaterMedia();
+                    sp.player = pm.getWaterMedia();
                     activeScreens.add(screen);
-                    screen.markSeen(url);
-                    screen.endedNotified = true; // 防止新播放器初始化期间误触发 isEnded()
+                    sp.lastEpisodeUrl = url;
+                    sp.endedNotified = true; // 防止新播放器初始化期间误触发 isEnded()
                     long seekMs = screen.getSyncPositionMs();
-                    if (seekMs > 0) screen.player.seek(seekMs);
+                    if (seekMs > 0) sp.player.seek(seekMs);
                 }
                 // 已启动但 seek 未生效：等播放器就绪后重试
-                if (screen.player != null && screen.player.hasPendingSeek() && screen.player.isPlaying()) {
-                    screen.player.applyPendingSeek();
+                if (sp.player != null && sp.player.hasPendingSeek() && sp.player.isPlaying()) {
+                    sp.player.applyPendingSeek();
                 }
                 // 暂停/恢复
-                if (screen.player != null) {
+                if (sp.player != null) {
                     if (screen.isPlaybackPaused()) {
-                        screen.player.pause();
+                        sp.player.pause();
                     } else {
-                        screen.player.resume();
+                        sp.player.resume();
                     }
-                    screen.player.applyVolumeFromOptions();
+                    sp.player.applyVolumeFromOptions();
                 }
                 // NBT 位置变化 → seek
-                if (screen.player != null && screen.player.isPlaying()) {
+                if (sp.player != null && sp.player.isPlaying()) {
                     long nbtPos = screen.getSyncPositionMs();
-                    if (nbtPos >= 0 && nbtPos != screen.lastAppliedPosition) {
-                        screen.lastAppliedPosition = nbtPos;
-                        screen.player.seek(nbtPos);
+                    if (nbtPos >= 0 && nbtPos != sp.lastAppliedPosition) {
+                        sp.lastAppliedPosition = nbtPos;
+                        sp.player.seek(nbtPos);
                     }
                 }
                 // 检测播放完毕 → 自动下一集
-                if (screen.player != null && screen.player.isEnded() && !screen.endedNotified) {
-                    screen.endedNotified = true;
+                if (sp.player != null && sp.player.isEnded() && !sp.endedNotified) {
+                    sp.endedNotified = true;
                     KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
                     var pkt = new NextEpisodePacket(screen.getBlockPos());
                     mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
                 }
                 // URL 变了 → 停旧播放器，下次 tick 自动启动新的
-                if (!url.isEmpty() && screen.justChanged(url)) {
-                    if (screen.player != null) {
-                        screen.player.stop();
-                        screen.player = null;
+                if (!url.isEmpty() && !url.equals(sp.lastEpisodeUrl)) {
+                    if (sp.player != null) {
+                        sp.player.stop();
+                        sp.player = null;
                     }
-                    screen.markSeen(url);
-                    screen.endedNotified = false;
+                    sp.lastEpisodeUrl = url;
+                    sp.endedNotified = false;
                 }
             }
         }
         // 音响 tick（漂移校正、屏幕连接检查）
         for (var be : mc.level.getGloballyRenderedBlockEntities()) {
             if (be instanceof me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity spk) {
-                spk.clientTick();
+                SpeakerClientAudio.tick(spk);
             }
         }
     }

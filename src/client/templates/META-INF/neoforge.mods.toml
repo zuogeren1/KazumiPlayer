@@ -13,7 +13,13 @@ description = '''${mod_description}'''
 modId = "kazumiplayer_server"
 version = "${mod_version}"
 displayName = "KazumiPlayer Server"
-description = '''KazumiPlayer 服务端附加模块：命令、同步组与 C→S 包处理。'''
+description = '''KazumiPlayer 服务端附加模块：命令、同步组与 C→S 包处理（集成服务端同样需要）。'''
+
+[[mods]]
+modId = "kazumiplayer_client"
+version = "${mod_version}"
+displayName = "KazumiPlayer Client"
+description = '''KazumiPlayer 客户端附加模块：渲染、播放与 S→C 包处理。'''
 
 [[dependencies."${mod_id}"]]
 modId = "neoforge"
@@ -29,7 +35,28 @@ versionRange = "${minecraft_version_range}"
 ordering = "NONE"
 side = "BOTH"
 
+[[dependencies."${mod_id}"]]
+modId = "mcef"
+type = "optional"
+versionRange = "[2.2.0,)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[dependencies."${mod_id}"]]
+modId = "watermedia"
+type = "optional"
+versionRange = "[3.0.0,)"
+ordering = "AFTER"
+side = "CLIENT"
+
 [[dependencies.kazumiplayer_server]]
+modId = "${mod_id}"
+type = "required"
+versionRange = "[${mod_version},)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.kazumiplayer_client]]
 modId = "${mod_id}"
 type = "required"
 versionRange = "[${mod_version},)"

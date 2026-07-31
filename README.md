@@ -69,12 +69,15 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 ## 构建
 
 ```bash
-./gradlew build    # 构建 jar
+./gradlew serverJar   # 构建服务端 jar → build/libs/kazumiplayer-server-0.1-alpha.jar
+./gradlew clientJar   # 构建客户端 jar → build/libs/kazumiplayer-client-0.1-alpha.jar
+./gradlew build       # 构建全部
 ./gradlew runClient # 启动客户端
 ./gradlew runServer # 启动服务端
 ```
 
-构建产物在 `build/libs/kazumiplayer-0.1-alpha.jar`。
+**服务端**安装 `kazumiplayer-server-0.1-alpha.jar`（无需 MCEF/WaterMedia 前置）；
+**客户端**安装 `kazumiplayer-client-0.1-alpha.jar`（需 MCEF 2.2.0 + WaterMedia 3.0.0.22 前置）。
 
 ## 免责声明
 

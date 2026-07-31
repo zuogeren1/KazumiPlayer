@@ -67,7 +67,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         state.screenHeight = be.getScreenHeight();
         state.facing = be.getFacing();
         state.videoState = be.getVideoState();
-        state.player = be.player;
+        state.player = me.zuogeren.kazumiplayer.client.ScreenPlayerManager.getPlayer(be.getBlockPos());
         state.videoTexture = screenTextures.computeIfAbsent(be.getBlockPos(),
             k -> {
                 String key = k.getX() + "_" + k.getY() + "_" + k.getZ();
