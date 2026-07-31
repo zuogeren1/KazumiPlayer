@@ -1,12 +1,16 @@
 package me.zuogeren.kazumiplayer.sync;
 
 import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
+import me.zuogeren.kazumiplayer.network.packet.SyncStatePacket;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.*;
@@ -16,12 +20,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * 服务端同步组管理: 每个屏幕一个 SyncGroup，以 UUID 为 key
  */
 public class SyncGroupManager {
+    /** 周期广播间隔 (tick): 5 秒 @20tps */
+    private static final int SYNC_INTERVAL_TICKS = 100;
+
     private static SyncGroupManager instance;
 
     public static SyncGroupManager get() { return instance; }
     public static void init() { instance = new SyncGroupManager(); }
 
     private final Map<UUID, SyncGroup> groups = new ConcurrentHashMap<>();
+    private int syncTickCounter;
 
     /**
      * 当有玩家开始播放时调用
@@ -79,6 +87,51 @@ public class SyncGroupManager {
         group.positionMs = positionMs;
         group.paused = paused;
         group.serverTimestamp = System.currentTimeMillis();
+    }
+
+    /**
+     * 向指定屏幕组内所有观看者广播权威播放状态（即时操作后调用）。
+     */
+    public void broadcastSyncState(UUID screenId, MinecraftServer server) {
+        SyncGroup g = groups.get(screenId);
+        if (g == null) return;
+        sendSyncState(g, server, System.currentTimeMillis());
+    }
+
+    /**
+     * 周期任务：每 SYNC_INTERVAL_TICKS tick 向所有活跃播放组广播一次权威位置，
+     * 客户端据此校正漂移（替代原来的客户端每秒轮询 NBT seek）。
+     */
+    @SubscribeEvent
+    public void onServerTick(ServerTickEvent.Post event) {
+        if (++syncTickCounter % SYNC_INTERVAL_TICKS != 0) return;
+        MinecraftServer server = event.getServer();
+        long now = System.currentTimeMillis();
+        for (SyncGroup g : groups.values()) {
+            if (g.players.isEmpty()) continue;
+            if (g.videoUrl == null || g.videoUrl.isEmpty()) continue; // 待机组不广播
+            sendSyncState(g, server, now);
+        }
+    }
+
+    private static void sendSyncState(SyncGroup g, MinecraftServer server, long now) {
+        if (server == null || g.players.isEmpty()) return;
+        // 权威实时位置: 基准位置 + 未暂停时的流逝时间
+        long elapsed = g.paused ? 0 : now - g.serverTimestamp;
+        long livePos = Math.max(0, g.positionMs + elapsed);
+        SyncStatePacket pkt = new SyncStatePacket(g.screenPos, g.videoUrl, livePos, g.paused, now);
+        int sent = 0;
+        for (UUID pid : g.players) {
+            ServerPlayer p = server.getPlayerList().getPlayer(pid);
+            if (p != null) {
+                PacketDistributor.sendToPlayer(p, pkt);
+                sent++;
+            }
+        }
+        if (sent > 0) {
+            KazumiLog.sync.debug("Broadcast sync state for screen {} at {}ms (paused={}) to {} players",
+                g.screenId, livePos, g.paused, sent);
+        }
     }
 
     @SubscribeEvent

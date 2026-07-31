@@ -99,6 +99,20 @@ public class ClientDisconnectHandler {
             stopAllActive();
             return;
         }
+        // 兜底：屏幕方块已被移除但播放器残留（如 PlayStopPacket 丢失）→ 停止并清理
+        var iter = activeScreens.iterator();
+        while (iter.hasNext()) {
+            var screen = iter.next();
+            if (screen.isRemoved()) {
+                var orphan = ScreenPlayerManager.getPlayer(screen.getBlockPos());
+                if (orphan != null) {
+                    orphan.stop();
+                }
+                ScreenPlayerManager.remove(screen.getBlockPos());
+                iter.remove();
+                KazumiLog.playback.info("Cleaned up orphan playback at removed screen {}", screen.getBlockPos());
+            }
+        }
         for (var be : mc.level.getGloballyRenderedBlockEntities()) {
             if (be instanceof VideoScreenBlockEntity screen) {
                 String url = screen.getEpisodeUrl();
@@ -116,27 +130,18 @@ public class ClientDisconnectHandler {
                     sp.endedNotified = true; // 防止新播放器初始化期间误触发 isEnded()
                     long seekMs = screen.getSyncPositionMs();
                     if (seekMs > 0) sp.player.seek(seekMs);
+                    // 启动快照：屏幕处于暂停时立即暂停（不再依赖每秒轮询）
+                    if (screen.isPlaybackPaused()) {
+                        sp.player.pause();
+                    }
                 }
                 // 已启动但 seek 未生效：等播放器就绪后重试
                 if (sp.player != null && sp.player.hasPendingSeek() && sp.player.isPlaying()) {
                     sp.player.applyPendingSeek();
                 }
-                // 暂停/恢复
+                // 音量（暂停/恢复状态由 SyncStatePacket 推送，不再每秒轮询 NBT）
                 if (sp.player != null) {
-                    if (screen.isPlaybackPaused()) {
-                        sp.player.pause();
-                    } else {
-                        sp.player.resume();
-                    }
                     sp.player.applyVolumeFromOptions();
-                }
-                // NBT 位置变化 → seek
-                if (sp.player != null && sp.player.isPlaying()) {
-                    long nbtPos = screen.getSyncPositionMs();
-                    if (nbtPos >= 0 && nbtPos != sp.lastAppliedPosition) {
-                        sp.lastAppliedPosition = nbtPos;
-                        sp.player.seek(nbtPos);
-                    }
                 }
                 // 检测播放完毕 → 自动下一集
                 if (sp.player != null && sp.player.isEnded() && !sp.endedNotified) {

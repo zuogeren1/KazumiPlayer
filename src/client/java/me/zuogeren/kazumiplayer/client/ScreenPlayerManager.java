@@ -17,7 +17,6 @@ public final class ScreenPlayerManager {
     public static class ScreenPlayer {
         public WaterMediaPlayer player;
         public String lastEpisodeUrl = "";
-        public long lastAppliedPosition = -1;
         public long playbackStartedAt; // 防抖：上次启动播放的时间戳
         public boolean endedNotified;
     }

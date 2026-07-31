@@ -136,6 +136,8 @@ public class PlayCommands {
                     long currentPos = group.positionMs + elapsed;
                     SyncGroupManager.get().join(player, sid, url);
                     setScreenNbt(screen, url, currentPos);
+                    // 立即向组内广播权威位置（含新加入者），无需等待周期广播
+                    SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
                     SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
                     ctx.getSource().sendSystemMessage(Component.literal(
                         "已加入同步播放 (位置: " + (currentPos / 1000) + "s)"));
@@ -143,6 +145,7 @@ public class PlayCommands {
                     // 有 URL 但无组（异常恢复）：重建组
                     SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
                     setScreenNbt(screen, url, 0);
+                    SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
                     SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
                     ctx.getSource().sendSystemMessage(Component.literal(
                         "已加入同步播放 (位置: 0s)"));
@@ -370,6 +373,8 @@ public class PlayCommands {
         UUID sid = screen.getScreenId();
         SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
         syncWatchingPlayers(screen);
+        // 立即广播新一集状态，观看者无需等 NBT 轮询
+        SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "切换到 " + name);
         src.sendSystemMessage(Component.literal("已切换到: " + name));
         return 1;
@@ -388,6 +393,7 @@ public class PlayCommands {
         screen.updateSyncPosition(newPos);
         UUID sid = screen.getScreenId();
         updateSyncGroupPosition(sid, newPos);
+        SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
         String action = deltaSec >= 0
             ? "快进了 " + deltaSec + "s → " + formatMs(newPos)
             : "快退了 " + (-deltaSec) + "s → " + formatMs(newPos);
@@ -405,6 +411,7 @@ public class PlayCommands {
         screen.updateSyncPosition(ms);
         UUID sid = screen.getScreenId();
         updateSyncGroupPosition(sid, ms);
+        SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "跳转到 " + formatMs(ms));
         src.sendSystemMessage(Component.literal("跳转到: " + formatMs(ms)));
         return 1;
@@ -454,6 +461,8 @@ public class PlayCommands {
         SyncGroupManager.get().updateState(sid, cur, pause);
         screen.updateSyncPosition(cur);
         screen.setPlaybackPaused(pause);
+        // 立即广播暂停/恢复状态（客户端已移除每秒 NBT 轮询暂停逻辑）
+        SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(player, pos, sid, pause ? "暂停了播放" : "恢复了播放");
         src.sendSystemMessage(Component.literal(pause ? "已暂停" : "已恢复"));
         return 1;

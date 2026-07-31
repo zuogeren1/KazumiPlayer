@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.screen;
 
+import net.minecraft.core.BlockPos;
 import java.util.UUID;
 
 /**
@@ -10,7 +11,8 @@ import java.util.UUID;
 public final class ScreenRemovalListeners {
 
     public interface Listener {
-        void onScreenRemoved(UUID screenId);
+        /** @param screenPos 被移除屏幕的位置 */
+        void onScreenRemoved(UUID screenId, BlockPos screenPos);
     }
 
     private static volatile Listener listener;
@@ -21,10 +23,10 @@ public final class ScreenRemovalListeners {
         listener = l;
     }
 
-    public static void dispatch(UUID screenId) {
+    public static void dispatch(UUID screenId, BlockPos screenPos) {
         Listener l = listener;
         if (l != null) {
-            l.onScreenRemoved(screenId);
+            l.onScreenRemoved(screenId, screenPos);
         }
     }
 }

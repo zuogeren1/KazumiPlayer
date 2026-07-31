@@ -62,15 +62,15 @@ public class ClientPacketHandlers implements IClientPacketHandler {
         context.enqueueWork(() -> {
             var mc = Minecraft.getInstance();
             if (mc.level == null) return;
+            // 屏幕方块可能已被移除（BE 已不存在），直接按位置停止本地播放器
+            var player = ScreenPlayerManager.getPlayer(packet.screenPos());
+            if (player != null) {
+                player.stop();
+                ScreenPlayerManager.remove(packet.screenPos());
+            }
             if (mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity screen) {
-                var player = ScreenPlayerManager.getPlayer(screen.getBlockPos());
-                if (player != null) {
-                    player.stop();
-                    ScreenPlayerManager.setPlayer(screen.getBlockPos(), null);
-                }
                 // 清空播放 URL，防止客户端 tick 循环立即重开播放
                 screen.clearPlayback();
-                ScreenPlayerManager.remove(screen.getBlockPos());
             }
         });
     }
@@ -85,7 +85,11 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 // 计算实际播放位置: 服务端时间戳 + 本地流逝时间
                 long elapsed = packet.paused() ? 0 : System.currentTimeMillis() - packet.serverTimestamp();
                 long targetPos = packet.positionMs() + elapsed;
-                player.seek(targetPos);
+                // 周期广播时位置基本一致：仅在漂移超过阈值时 seek，避免每 5 秒无谓跳转
+                long drift = Math.abs(player.getTimeMs() - targetPos);
+                if (drift > 800) {
+                    player.seek(targetPos);
+                }
                 if (packet.paused()) player.pause();
                 else player.resume();
             }

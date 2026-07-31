@@ -224,7 +224,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         // 服务端：屏幕被破坏时清理 SyncGroup + 通知所有已连接音响
         if (level != null && !level.isClientSide()) {
             if (screenId != null) {
-                ScreenRemovalListeners.dispatch(screenId);
+                ScreenRemovalListeners.dispatch(screenId, worldPosition);
             }
             // 通知音响清空连接
             for (BlockPos spkPos : new ArrayList<>(connectedSpeakers)) {
