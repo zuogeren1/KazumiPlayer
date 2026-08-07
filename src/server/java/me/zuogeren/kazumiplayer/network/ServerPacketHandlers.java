@@ -10,9 +10,9 @@ import me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -72,7 +72,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             // 同步 WatchingPlayers NBT
             var g = SyncGroupManager.get().getGroup(sid);
             if (g != null) {
-                screen.setWatchingPlayers(String.join(",", g.players.stream().map(UUID::toString).toList()));
+                screen.setWatchingPlayers(g.watchingPlayersString());
             }
             // 通知所有观看者（包括触发者，因为自动切集没有单独提示）
             String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
@@ -133,10 +133,8 @@ public class ServerPacketHandlers implements IServerPacketHandler {
     private static void handleEpisodeSwitch(VideoScreenBlockEntity screen, String action) {
         String data = screen.getEpisodeData();
         if (data.isEmpty()) return;
-        List<Road> roads = JsonUtil.GSON.fromJson(data,
-            new com.google.gson.reflect.TypeToken<List<Road>>() {}.getType());
-        if (roads == null || roads.isEmpty()) return;
-        Road road = roads.get(0);
+        Road road = JsonUtil.parseFirstRoad(data);
+        if (road == null) return;
 
         int idx = screen.getEpisodeIndex();
         if ("next".equals(action)) idx++;
@@ -165,13 +163,13 @@ public class ServerPacketHandlers implements IServerPacketHandler {
                 // 建立连接：双向更新
                 spk.setLink(packet.screenId(), packet.screenPos());
                 screen.addConnectedSpeaker(packet.speakerPos());
-                sp.sendSystemMessage(Component.literal("§a音响已连接到屏幕 ("
-                    + packet.screenPos().getX() + ", " + packet.screenPos().getY() + ", " + packet.screenPos().getZ() + ")"));
+                KazumiMessages.sendSuccess(sp, "音响已连接到屏幕 ("
+                    + packet.screenPos().getX() + ", " + packet.screenPos().getY() + ", " + packet.screenPos().getZ() + ")");
             } else {
                 // 断开连接：双向清空
                 spk.clearLink();
                 screen.removeConnectedSpeaker(packet.speakerPos());
-                sp.sendSystemMessage(Component.literal("§e音响已断开连接"));
+                KazumiMessages.sendWarn(sp, "音响已断开连接");
             }
         });
     }

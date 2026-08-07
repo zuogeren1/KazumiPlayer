@@ -35,6 +35,40 @@ public class VideoSniffer {
     // 视频 URL 嗅探报告前缀
     private static final String SNIFF_PREFIX = "KAZUMI_VIDEO_URL:";
 
+    // 早期注入的 fetch/XHR hook（onLoadStart）：页面加载过程中 fetch 到的 m3u8
+    // （如解析站先 fetch 带签名的播放地址再设 video.src）在 onLoadEnd 之前就能捕获。
+    // 独立防重标记，与完整脚本分开。
+    private static final String SNIFF_HOOK_SCRIPT = """
+        (function() {
+            if (window.__kazumi_sniffed_hook) return;
+            window.__kazumi_sniffed_hook = true;
+            const report = function(url) {
+                if (url && (url.startsWith('http') || url.startsWith('//'))) {
+                    if (url.startsWith('//')) url = 'https:' + url;
+                    if (/\\.(html?|php)([?#]|$)/i.test(url)) return;
+                    console.log('KAZUMI_VIDEO_URL:' + url);
+                }
+            };
+            // Hook fetch/Response 拦截 m3u8
+            const _fetch = window.fetch;
+            window.fetch = function(...args) {
+                return _fetch.apply(this, args).then(r => {
+                    const clone = r.clone();
+                    clone.text().then(t => { if (t.trim().startsWith('#EXTM3U')) report(clone.url); }).catch(()=>{});
+                    return r;
+                });
+            };
+            // Hook XHR 拦截 m3u8
+            const _open = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(m, url) {
+                this.addEventListener('load', () => {
+                    try { if (this.responseText.trim().startsWith('#EXTM3U')) report(url); } catch(e) {}
+                });
+                return _open.apply(this, arguments);
+            };
+        })();
+        """;
+
     // 注入的嗅探 JS
     private static final String SNIFF_SCRIPT = """
         (function() {
@@ -148,6 +182,8 @@ public class VideoSniffer {
                     return new CefResourceRequestHandlerAdapter() {
                         @Override
                         public boolean onBeforeResourceLoad(CefBrowser br, CefFrame fr, CefRequest req) {
+                            // DEBUG: 打印嗅探期间浏览器的所有请求，排查视频源加载方式
+                            KazumiLog.sniff.debug("[sniff] resource request: {}", req.getURL());
                             if (br.getIdentifier() == browserId && isVideoRequest(req)) {
                                 future.complete(req.getURL());
                             }
@@ -189,12 +225,20 @@ public class VideoSniffer {
             };
             MCEF.getClient().addDisplayHandler(handler);
 
-            // 页面加载完成后注入嗅探脚本
+            // 页面加载开始即注入 fetch/XHR hook，加载完成后注入完整嗅探脚本。
+            // 主页面与所有 iframe 的 onLoadStart/onLoadEnd 都会触发：
+            // 解析站（如 7sefun→lmm35）的视频源可能嵌套在第三方播放页 iframe 中。
             MCEF.getClient().addLoadHandler(new org.cef.handler.CefLoadHandlerAdapter() {
                 @Override
+                public void onLoadStart(CefBrowser b, org.cef.browser.CefFrame frame,
+                        org.cef.network.CefRequest.TransitionType transitionType) {
+                    // 页面加载早期就 hook fetch/XHR，捕获加载过程中的 m3u8 响应
+                    frame.executeJavaScript(SNIFF_HOOK_SCRIPT, pageUrl, 0);
+                }
+
+                @Override
                 public void onLoadEnd(CefBrowser b, org.cef.browser.CefFrame frame, int httpStatusCode) {
-                    // 主页面与所有 iframe 都注入：解析站（如 7sefun→lmm35）的视频源
-                    // 可能嵌套在第三方播放页 iframe 中，仅注入主页面会嗅探超时
+                    // DOM 就绪后注入完整脚本（video 扫描 + MutationObserver + 轮询兜底）
                     frame.executeJavaScript(SNIFF_SCRIPT, pageUrl, 0);
                 }
             });
@@ -226,7 +270,7 @@ public class VideoSniffer {
 
     /**
      * 判断请求是否为视频源（对齐 Kazumi shouldInterceptRequest）：
-     * 1) .m3u8 结尾
+     * 1) .m3u8 结尾（支持带 query 参数，如 xxx.m3u8?token=...）
      * 2) 带 Range: bytes= 且非静态资源（视频流请求）
      */
     private static boolean isVideoRequest(CefRequest request) {
@@ -240,14 +284,29 @@ public class VideoSniffer {
             return false;
         }
 
-        if (lower.endsWith(".m3u8")) {
+        // .m3u8 判断需忽略 query 参数（Kazumi 用 uri.path.endsWith('.m3u8')，
+        // 直接用 lower.endsWith 会漏掉带签名的播放地址）
+        String path = lower;
+        int qIdx = path.indexOf('?');
+        if (qIdx >= 0) path = path.substring(0, qIdx);
+
+        if (path.endsWith(".m3u8")) {
+            return true;
+        }
+
+        // 常见视频扩展名直链：部分站点用 MP4/WebM 直接播放且不带 Range header，
+        // 仅靠 .m3u8 + Range 判断会漏掉这类请求
+        if (path.endsWith(".mp4") || path.endsWith(".mkv") || path.endsWith(".webm")
+                || path.endsWith(".ts") || path.endsWith(".mov") || path.endsWith(".flv")
+                || path.endsWith(".avi") || path.endsWith(".m4s")) {
             return true;
         }
 
         Map<String, String> headers = new HashMap<>();
         request.getHeaderMap(headers);
         if (headers.isEmpty()) return false;
-        String range = headers.get("Range");
+        // MCEF 的 header key 大小写不固定，Range / range 都检查
+        String range = headers.getOrDefault("Range", headers.get("range"));
         if (range == null || !range.startsWith("bytes=")) return false;
         // 排除静态资源（Range 请求但非视频）
         return !(lower.endsWith(".js") || lower.endsWith(".css") || lower.endsWith(".html")

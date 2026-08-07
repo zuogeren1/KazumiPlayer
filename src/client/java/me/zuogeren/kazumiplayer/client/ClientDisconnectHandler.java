@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.client;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
@@ -9,7 +10,6 @@ import me.zuogeren.kazumiplayer.rule.RuleEngine;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.Commands;
-import net.minecraft.network.chat.Component;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
@@ -98,31 +98,30 @@ public class ClientDisconnectHandler {
 
     private static void testAllRules() {
         var names = ClientRuleCache.listAll();
-        if (names.isEmpty()) { chat("§c无规则，请先执行 /kazumi rule pull-all"); return; }
-        chat("§e测试 " + names.size() + " 个规则...");
+        if (names.isEmpty()) { KazumiMessages.chatError("无规则，请先执行 /kazumi rule pull-all"); return; }
+        KazumiMessages.chatInfo("测试 " + names.size() + " 个规则...");
         for (String name : names) {
             Rule rule = ClientRuleCache.get(name);
             if (rule == null) continue;
             String n = name;
             long t0 = System.currentTimeMillis();
             ruleEngine.search(rule, "test")
-                .thenAccept(r -> chat("§a" + n + " §7" + (System.currentTimeMillis() - t0) + "ms"))
-                .exceptionally(e -> { chat("§c" + n + " §7失败"); return null; });
+                .thenAccept(r -> KazumiMessages.chatSuccess(n + " §7" + (System.currentTimeMillis() - t0) + "ms"))
+                .exceptionally(e -> { KazumiMessages.chatError(n + " 失败"); return null; });
         }
     }
 
     private static void testOneRule(String name) {
         Rule rule = ClientRuleCache.get(name);
-        if (rule == null) { chat("§c规则不存在: " + name); return; }
-        chat("§e测试 " + name + " ...");
+        if (rule == null) { KazumiMessages.chatError("规则不存在: " + name); return; }
+        if (rule.isDeprecated()) {
+            KazumiMessages.chatWarn("警告: 规则 " + name + " 已被官方标记为已弃用 (deprecated)，可能已失效");
+        }
+        KazumiMessages.chatInfo("测试 " + name + " ...");
         long t0 = System.currentTimeMillis();
         ruleEngine.search(rule, "test")
-            .thenAccept(r -> chat("§a" + name + " §7" + (System.currentTimeMillis() - t0) + "ms §7" + r.items().size() + "条"))
-            .exceptionally(e -> { chat("§c" + name + " §7失败: " + e.getMessage()); return null; });
-    }
-
-    private static void chat(String msg) {
-        Minecraft.getInstance().gui.getChat().addClientSystemMessage(Component.literal(msg));
+            .thenAccept(r -> KazumiMessages.chatSuccess(name + " §7" + (System.currentTimeMillis() - t0) + "ms §7" + r.items().size() + "条"))
+            .exceptionally(e -> { KazumiMessages.chatError(name + " 失败: " + e.getMessage()); return null; });
     }
 
     // ---- 生命周期（EVENT_BUS） ----

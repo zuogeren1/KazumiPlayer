@@ -58,7 +58,7 @@ public class SyncGroupManager {
         // 同步 WatchingPlayers
         var be = player.level().getBlockEntity(screenPos);
         if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
-            screen.setWatchingPlayers(String.join(",", group.players.stream().map(java.util.UUID::toString).toList()));
+            screen.setWatchingPlayers(group.watchingPlayersString());
         }
     }
 
@@ -172,9 +172,7 @@ public class SyncGroupManager {
                 var be = sp.level().getBlockEntity(pos);
                 if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
                     SyncGroup g = groups.get(screen.getScreenId());
-                    screen.setWatchingPlayers(g != null
-                        ? String.join(",", g.players.stream().map(java.util.UUID::toString).toList())
-                        : "");
+                    screen.setWatchingPlayers(g != null ? g.watchingPlayersString() : "");
                 }
             }
         }
@@ -194,6 +192,11 @@ public class SyncGroupManager {
             this.screenPos = pos;
             this.videoUrl = url;
             this.serverTimestamp = System.currentTimeMillis();
+        }
+
+        /** 观看者 UUID 列表 → 逗号分隔字符串（写入 BE 的 WatchingPlayers NBT） */
+        public String watchingPlayersString() {
+            return String.join(",", players.stream().map(UUID::toString).toList());
         }
     }
 }

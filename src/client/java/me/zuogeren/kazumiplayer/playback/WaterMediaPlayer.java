@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.playback;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 
 import me.zuogeren.kazumiplayer.client.PlayStateListener;
@@ -49,8 +50,7 @@ public class WaterMediaPlayer {
                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
             }
             KazumiLog.playback.error("MRL loading timeout: {} (normalized: {})", videoUrl, url);
-            mc.execute(() -> mc.gui.getChat().addClientSystemMessage(
-                net.minecraft.network.chat.Component.literal("§c视频加载超时，请检查网络或稍后重试")));
+            mc.execute(() -> KazumiMessages.chatError("视频加载超时，请检查网络或稍后重试"));
         }, "KazumiPlayer-MRL-Loader").start();
     }
 
@@ -63,8 +63,7 @@ public class WaterMediaPlayer {
                 () -> MediaAPI.alEngine());
             if (player == null) {
                 KazumiLog.playback.error("Failed to create player for: {}", mrl.uri);
-                mc.execute(() -> mc.gui.getChat().addClientSystemMessage(
-                    net.minecraft.network.chat.Component.literal("§c创建播放器失败")));
+                mc.execute(() -> KazumiMessages.chatError("创建播放器失败"));
                 return;
             }
             player.start();

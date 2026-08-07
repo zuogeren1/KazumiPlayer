@@ -87,7 +87,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public void setPlayback(String url, long positionMs) {
         this.episodeUrl = url;
         this.syncPositionMs = positionMs;
-        this.videoState = VideoState.PLAYING;
+        // 空 URL 视为未播放：状态保持 IDLE，不残留 SyncPositionMs
+        this.videoState = url.isEmpty() ? VideoState.IDLE : VideoState.PLAYING;
+        if (url.isEmpty()) this.syncPositionMs = -1;
         markDirty();
         KazumiLog.screen.info("setPlayback url={} posMs={} side={}", url, positionMs,
             level != null && level.isClientSide() ? "client" : "server");

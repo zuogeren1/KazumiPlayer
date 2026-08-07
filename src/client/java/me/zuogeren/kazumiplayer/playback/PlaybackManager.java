@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.playback;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
 
 import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleEngine;
@@ -47,18 +48,43 @@ public class PlaybackManager {
                 // 网页播放页直接喂给播放器只会得到 "Content is not multimedia"
                 KazumiLog.playback.warn("Sniff failed: {}", e.getMessage());
                 Minecraft.getInstance().execute(() -> {
-                    var mc = Minecraft.getInstance();
                     if (looksLikeDirectVideo(url)) {
                         waterMedia.play(url);
                         screen.setVideoState(VideoState.PLAYING);
-                        mc.gui.getChat().addClientSystemMessage(
-                            net.minecraft.network.chat.Component.literal("§e视频嗅探失败，尝试直接播放..."));
+                        KazumiMessages.chatWarn("视频嗅探失败，尝试直接播放...");
                     } else {
-                        screen.setVideoState(VideoState.STOPPED);
-                        mc.gui.getChat().addClientSystemMessage(
-                            net.minecraft.network.chat.Component.literal("§c视频嗅探失败，未能获取视频直链"));
+                        // 网页型 URL：Cloudflare 等反爬偶发挑战导致嗅探超时（页面 JS 未执行），
+                        // 重试一次新浏览器实例往往能通过；仍失败才真正放弃
+                        retrySniff(screen, url, 0);
                     }
                 });
+                return null;
+            });
+    }
+
+    /**
+     * 网页型 URL 嗅探失败后重试（最多 2 次）。
+     * Cloudflare 挑战/反爬是概率性的，重试常能通过；sniff() 每次创建全新 MCEF 浏览器，
+     * 避免状态残留。
+     */
+    private void retrySniff(VideoScreenBlockEntity screen, String url, int attempt) {
+        if (attempt >= 2) {
+            Minecraft.getInstance().execute(() -> {
+                screen.setVideoState(VideoState.STOPPED);
+                KazumiMessages.chatError("视频嗅探失败，未能获取视频直链");
+            });
+            return;
+        }
+        KazumiLog.playback.warn("Sniff failed (attempt {}), retrying...", attempt + 1);
+        sniffer.sniff(url)
+            .thenAccept(videoUrl -> Minecraft.getInstance().execute(() -> {
+                if (videoUrl != null) {
+                    waterMedia.play(videoUrl);
+                    screen.setVideoState(VideoState.PLAYING);
+                }
+            }))
+            .exceptionally(err -> {
+                Minecraft.getInstance().execute(() -> retrySniff(screen, url, attempt + 1));
                 return null;
             });
     }

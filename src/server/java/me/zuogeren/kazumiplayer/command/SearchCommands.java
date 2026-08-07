@@ -6,9 +6,11 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
 import me.zuogeren.kazumiplayer.search.BangumiApi;
+import me.zuogeren.kazumiplayer.search.RuleSearchSessionCache;
 import me.zuogeren.kazumiplayer.search.SearchManager;
 import me.zuogeren.kazumiplayer.search.SearchSessionCache;
 import me.zuogeren.kazumiplayer.util.ChatComponentUtil;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -20,6 +22,7 @@ import java.util.Map;
 public class SearchCommands {
     private static final BangumiApi bangumiApi = new BangumiApi();
     private static final SearchSessionCache sessionCache = new SearchSessionCache();
+    private static final RuleSearchSessionCache ruleSessionCache = new RuleSearchSessionCache();
     private static final int PAGE_SIZE = 8;
 
     // /kazumi search <keyword> - 搜索 bgm.tv (创建会话，缓存全量结果)
@@ -32,7 +35,7 @@ public class SearchCommands {
                     CommandSourceStack src = ctx.getSource();
                     String sessionId = sessionCache.createSession(keyword);
 
-                    src.sendSystemMessage(Component.literal("正在搜索: " + keyword + " ..."));
+                    KazumiMessages.sendInfo(src, "正在搜索: " + keyword + " ...");
                     // 首次拉取 20 条，后续翻页从缓存读取
                     bangumiApi.search(keyword, 20, 0).thenAccept(subjects -> {
                         sessionCache.addResults(sessionId, subjects);
@@ -40,7 +43,7 @@ public class SearchCommands {
                         if (page == null) return;
                         showBangumiPage(src, page, ruleManager);
                     }).exceptionally(e -> {
-                        src.sendSystemMessage(Component.literal("搜索失败: " + e.getMessage()));
+                        KazumiMessages.sendError(src, "搜索失败: " + e.getMessage());
                         return null;
                     });
                     return 1;
@@ -59,7 +62,7 @@ public class SearchCommands {
                         CommandSourceStack src = ctx.getSource();
                         var result = sessionCache.getPage(sessionId, page, PAGE_SIZE);
                         if (result == null) {
-                            src.sendFailure(Component.literal("会话已过期，请重新搜索"));
+                            src.sendFailure(KazumiMessages.error("会话已过期，请重新搜索"));
                             return 0;
                         }
                         showBangumiPage(src, result, ruleManager);
@@ -70,9 +73,10 @@ public class SearchCommands {
     private static void showBangumiPage(CommandSourceStack src,
                                          SearchSessionCache.PageResult page, RuleManager ruleManager) {
         if (!page.hasResults() || page.items().isEmpty()) {
-            src.sendSystemMessage(Component.literal("未找到 '" + page.keyword() + "' 的结果"));
+            KazumiMessages.sendWarn(src, "未找到 '" + page.keyword() + "' 的结果");
             return;
         }
+        src.sendSystemMessage(KazumiMessages.separator());
         src.sendSystemMessage(Component.literal(
             "=== 搜索: " + page.keyword() + " (第 " + page.page() + "/" + page.totalPages() + " 页, 共 " + page.total() + " 个) ==="));
         int base = (page.page() - 1) * PAGE_SIZE;
@@ -135,7 +139,24 @@ public class SearchCommands {
                     StringArgumentType.getString(ctx, "rule"),
                     StringArgumentType.getString(ctx, "name"), 1)));
 
-        return Commands.literal("search-rule").then(all).then(one);
+        // /kazumi search-rule page <sessionId> <page> - 规则搜索结果翻页
+        var page = Commands.literal("page")
+            .then(Commands.argument("sessionId", StringArgumentType.string())
+                .then(Commands.argument("page", IntegerArgumentType.integer(1))
+                    .executes(ctx -> {
+                        CommandSourceStack src = ctx.getSource();
+                        String sessionId = StringArgumentType.getString(ctx, "sessionId");
+                        int p = IntegerArgumentType.getInteger(ctx, "page");
+                        var session = ruleSessionCache.getSession(sessionId);
+                        if (session == null) {
+                            src.sendFailure(KazumiMessages.error("搜索会话已过期，请重新搜索"));
+                            return 0;
+                        }
+                        showRulePage(src, session, p);
+                        return 1;
+                    })));
+
+        return Commands.literal("search-rule").then(all).then(one).then(page);
     }
 
     private static int doRuleSearch(CommandSourceStack src, RuleManager ruleManager,
@@ -144,34 +165,44 @@ public class SearchCommands {
         Map<String, Rule> rules;
         if (ruleName == null) {
             rules = ruleManager.getRules();
-            src.sendSystemMessage(Component.literal("正在所有规则中搜索: " + keyword + " ..."));
+            KazumiMessages.sendInfo(src, "正在所有规则中搜索: " + keyword + " ...");
         } else {
             Rule rule = ruleManager.get(ruleName);
             if (rule == null) {
-                src.sendFailure(Component.literal("规则不存在: " + ruleName));
+                src.sendFailure(KazumiMessages.error("规则不存在: " + ruleName));
                 return 0;
             }
             rules = Map.of(ruleName, rule);
-            src.sendSystemMessage(Component.literal("正在 " + ruleName + " 中搜索: " + keyword + " ..."));
+            if (rule.isDeprecated()) {
+                KazumiMessages.sendWarn(src,
+                    "警告: 规则 " + ruleName + " 已被官方标记为已弃用 (deprecated)，可能已失效，建议改用其他规则");
+            }
+            KazumiMessages.sendInfo(src, "正在 " + ruleName + " 中搜索: " + keyword + " ...");
         }
         int p = Math.max(1, page);
         searchManager.searchAll(rules, keyword)
-            .thenAccept(data -> showRulePage(src, data, p))
-            .exceptionally(e -> { src.sendSystemMessage(Component.literal("搜索出错")); return null; });
+            .thenAccept(data -> {
+                // 缓存全量结果，翻页走 /kazumi search-rule page 从缓存读
+                String sessionId = ruleSessionCache.createSession(ruleName, keyword, data);
+                var session = ruleSessionCache.getSession(sessionId);
+                showRulePage(src, session, p);
+            })
+            .exceptionally(e -> { KazumiMessages.sendError(src, "搜索出错"); return null; });
         return 1;
     }
 
     private static void showRulePage(CommandSourceStack src,
-                                      SearchManager.SearchResultData data, int page) {
+                                      RuleSearchSessionCache.Session session, int page) {
         List<ResultEntry> all = new ArrayList<>();
-        for (var entry : data.results().entrySet()) {
+        for (var entry : session.data.results().entrySet()) {
             for (var item : entry.getValue()) {
                 all.add(new ResultEntry(entry.getKey(), item));
             }
         }
-        if (all.isEmpty()) { src.sendSystemMessage(Component.literal("未找到结果")); return; }
+        if (all.isEmpty()) { KazumiMessages.sendWarn(src, "未找到结果"); return; }
         int totalPages = (all.size() + PAGE_SIZE - 1) / PAGE_SIZE;
         final int cp = page > totalPages ? totalPages : page;
+        src.sendSystemMessage(KazumiMessages.separator());
         src.sendSystemMessage(ChatComponentUtil.header(
             "=== 搜索结果 第 " + cp + "/" + totalPages + " 页 (共 " + all.size() + " 个) ==="));
         int start = (cp - 1) * PAGE_SIZE;
@@ -186,12 +217,14 @@ public class SearchCommands {
         if (cp > 1) {
             int prev = cp - 1;
             nav.append(ChatComponentUtil.clickable("<<< 上一页  ",
-                "/kazumi search-rule all 翻页 " + prev, "切换到第 " + prev + " 页"));
+                "/kazumi search-rule page " + session.sessionId + " " + prev,
+                "切换到第 " + prev + " 页"));
         }
         if (cp < totalPages) {
             int next = cp + 1;
             nav.append(ChatComponentUtil.clickable(">>> 下一页",
-                "/kazumi search-rule all 翻页 " + next, "切换到第 " + next + " 页"));
+                "/kazumi search-rule page " + session.sessionId + " " + next,
+                "切换到第 " + next + " 页"));
         }
         if (cp > 1 || cp < totalPages) {
             src.sendSystemMessage(nav);

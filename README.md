@@ -4,13 +4,15 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 
 ## 功能
 
-- **番剧搜索**：bgm.tv API 搜索番剧元数据 + KazumiRules 规则引擎查源站
-- **视频播放**：WaterMedia V3 (FFmpeg) 解码，MCEF 浏览器嗅探提取视频直链（JS 嗅探 + 原生网络层拦截，支持 iframe 嵌套解析站，任意分辨率自适应）
+- **番剧搜索**：bgm.tv API 搜索番剧元数据 + KazumiRules 规则引擎查源站（`search-rule` 支持会话翻页）
+- **视频播放**：WaterMedia V3 (FFmpeg) 解码，MCEF 浏览器嗅探提取视频直链（JS 嗅探 + 原生网络层拦截，支持 iframe 嵌套解析站，任意分辨率自适应，嗅探失败自动重试）
 - **多人同步**：NBT 驱动播放状态，服务端计时，自动同步进度/切集/暂停
 - **剧集管理**：自动下一集、手动切集、时间快进/快退/跳转
 - **进度条**：视频下方实时进度条
 - **规则测试**：客户端 `/krule test` 直接测试规则连通性
+- **规则管理**：安装/更新/删除/列表，已弃用（deprecated）规则在使用/列表时黄色警告
 - **配置系统**：Cloth Config 配置界面（可选），13 个日志分类 DEBUG 开关即时生效
+- **统一消息**：所有聊天提示带绿色 `[KazumiPlayer]` 前缀，按严重程度着色（成功绿/信息白/警告黄/错误红）
 - **GPL-3.0 开源**
 
 ## 安装
@@ -76,6 +78,7 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 |------|------|
 | `/kazumi rule pull <规则名>` | 安装规则 |
 | `/kazumi rule pull-all` | 安装全部规则 |
+| `/kazumi rule update [规则名]` | 更新已安装规则（不填则更新全部） |
 | `/kazumi rule list [page]` | 列出规则 |
 | `/kazumi rule delete <规则名>` | 删除规则 |
 | `/kazumi rule test <规则名>` | 服务端测试规则 |

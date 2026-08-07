@@ -3,10 +3,10 @@ package me.zuogeren.kazumiplayer.item;
 import me.zuogeren.kazumiplayer.network.packet.SpeakerConnectPacket;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -42,8 +42,8 @@ public class ConnectionToolItem extends Item {
             tag.putInt("TargetZ", pos.getZ());
             CustomData.set(DataComponents.CUSTOM_DATA, stack, tag);
             if (level.isClientSide()) {
-                player.sendSystemMessage(Component.literal("§a已选中屏幕 ("
-                    + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")"));
+                KazumiMessages.sendSuccess(player, "已选中屏幕 ("
+                    + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
             }
             return InteractionResult.SUCCESS;
         }
@@ -52,7 +52,7 @@ public class ConnectionToolItem extends Item {
             CompoundTag tag = readSelection(stack);
             if (tag == null || !tag.contains("TargetId")) {
                 if (level.isClientSide()) {
-                    player.sendSystemMessage(Component.literal("§c请先右键一个屏幕来选中目标"));
+                    KazumiMessages.sendError(player, "请先右键一个屏幕来选中目标");
                 }
                 return InteractionResult.FAIL;
             }
@@ -84,14 +84,14 @@ public class ConnectionToolItem extends Item {
         if (player.isShiftKeyDown()) {
             stack.remove(DataComponents.CUSTOM_DATA);
             if (level.isClientSide()) {
-                player.sendSystemMessage(Component.literal("§e已清除选中的屏幕"));
+                KazumiMessages.sendWarn(player, "已清除选中的屏幕");
             }
             return InteractionResult.SUCCESS;
         }
         CompoundTag tag = readSelection(stack);
         if (tag != null && tag.contains("TargetX") && level.isClientSide()) {
-            player.sendSystemMessage(Component.literal("§a当前已选中屏幕 ("
-                + tag.getInt("TargetX").orElse(0) + ", " + tag.getInt("TargetY").orElse(0) + ", " + tag.getInt("TargetZ").orElse(0) + ")"));
+            KazumiMessages.sendSuccess(player, "当前已选中屏幕 ("
+                + tag.getInt("TargetX").orElse(0) + ", " + tag.getInt("TargetY").orElse(0) + ", " + tag.getInt("TargetZ").orElse(0) + ")");
         }
         return InteractionResult.PASS;
     }

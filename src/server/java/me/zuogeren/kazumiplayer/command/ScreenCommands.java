@@ -7,13 +7,13 @@ import me.zuogeren.kazumiplayer.screen.VideoScreenBlock;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.screen.VideoScreenRegistration;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import java.util.UUID;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
@@ -53,15 +53,14 @@ public class ScreenCommands {
             .then(Commands.literal("stop")
                 .executes(ctx -> {
                     ServerPlayer player = ctx.getSource().getPlayerOrException();
-                    var hit = player.pick(5.0, 0, false);
-                    if (!(hit instanceof net.minecraft.world.phys.BlockHitResult blockHit)) {
-                        ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                    BlockPos pos = PlayCommands.getTargetScreen(player);
+                    if (pos == null) {
+                        ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
                         return 0;
                     }
-                    BlockPos pos = blockHit.getBlockPos();
                     var be = player.level().getBlockEntity(pos);
                     if (!(be instanceof VideoScreenBlockEntity screen)) {
-                        ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                        ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
                         return 0;
                     }
                     UUID sid = screen.getScreenId();
@@ -73,7 +72,7 @@ public class ScreenCommands {
                     }
                     screen.clearPlayback();
                     SyncGroupManager.get().leaveByScreenId(sid);
-                    ctx.getSource().sendSuccess(() -> Component.literal("屏幕已停止"), true);
+                    ctx.getSource().sendSuccess(() -> KazumiMessages.success("屏幕已停止"), true);
                     return 1;
                 }));
     }
@@ -83,7 +82,7 @@ public class ScreenCommands {
         ServerLevel level = src.getLevel();
         Direction facing = Direction.byName(facingName);
         if (facing == null) {
-            src.sendFailure(Component.literal("无效方向: " + facingName + " (可用: north/south/east/west)"));
+            src.sendFailure(KazumiMessages.error("无效方向: " + facingName + " (可用: north/south/east/west)"));
             return 0;
         }
 
@@ -96,7 +95,7 @@ public class ScreenCommands {
         if (level.getBlockEntity(pos) instanceof VideoScreenBlockEntity be) {
             be.setScreenSize(width, height);
             be.setFacing(facing);
-            src.sendSuccess(() -> Component.literal(
+            src.sendSuccess(() -> KazumiMessages.success(
                 "屏幕已创建: " + pos.toShortString() + " (" + width + "x" + height + " 面向 " + facing + ")"), true);
         }
         return 1;

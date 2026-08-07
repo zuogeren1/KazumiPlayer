@@ -13,6 +13,7 @@ import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.ChatComponentUtil;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -44,29 +45,33 @@ public class PlayCommands {
 
                             BlockPos screenPos = getTargetScreen(player);
                             if (screenPos == null) {
-                                ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                                ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
                                 return 0;
                             }
 
                             Rule rule = ruleManager.get(ruleName);
                             if (rule == null) {
-                                ctx.getSource().sendFailure(Component.literal("规则不存在: " + ruleName));
+                                ctx.getSource().sendFailure(KazumiMessages.error("规则不存在: " + ruleName));
                                 return 0;
+                            }
+                            if (rule.isDeprecated()) {
+                                KazumiMessages.sendWarn(ctx.getSource(),
+                                    "警告: 规则 " + ruleName + " 已被官方标记为已弃用 (deprecated)，可能已失效，建议改用其他规则");
                             }
 
                             var entry = searchManager.getCache().lookup(resultId);
                             if (entry == null) {
-                                ctx.getSource().sendFailure(Component.literal("搜索结果已过期，请重新搜索"));
+                                ctx.getSource().sendFailure(KazumiMessages.error("搜索结果已过期，请重新搜索"));
                                 return 0;
                             }
 
                             String source = entry.item().src();
-                            ctx.getSource().sendSystemMessage(Component.literal("正在获取剧集列表..."));
+                            KazumiMessages.sendInfo(ctx.getSource(), "正在获取剧集列表...");
 
                             ruleManager.getEngine().queryChapters(rule, source)
                                 .thenAccept(result -> {
                                     if (result.roads().isEmpty()) {
-                                        ctx.getSource().sendFailure(Component.literal("未找到剧集列表"));
+                                        ctx.getSource().sendFailure(KazumiMessages.error("未找到剧集列表"));
                                         return;
                                     }
                                     Road road = result.roads().get(0);
@@ -81,11 +86,11 @@ public class PlayCommands {
                                             setScreenFull(screen, epUrl, 0, episode, roadJson);
                                         }
                                     });
-                                    ctx.getSource().sendSystemMessage(Component.literal(
-                                        "正在播放: " + road.identifier().get(idx) + " (第" + episode + "集)"));
+                                    KazumiMessages.sendSuccess(ctx.getSource(),
+                                        "正在播放: " + road.identifier().get(idx) + " (第" + episode + "集)");
                                 })
                                 .exceptionally(e -> {
-                                    ctx.getSource().sendFailure(Component.literal(
+                                    ctx.getSource().sendFailure(KazumiMessages.error(
                                         "获取剧集失败: " + e.getMessage()));
                                     return null;
                                 });
@@ -101,7 +106,7 @@ public class PlayCommands {
                     String url = StringArgumentType.getString(ctx, "url");
                     BlockPos screenPos = getTargetScreen(player);
                     if (screenPos == null) {
-                        ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                        ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
                         return 0;
                     }
                     var be = player.level().getBlockEntity(screenPos);
@@ -109,7 +114,7 @@ public class PlayCommands {
                         SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, url);
                         setScreenNbt(screen, url, 0);
                     }
-                    ctx.getSource().sendSystemMessage(Component.literal("已开始播放: " + url));
+                    KazumiMessages.sendSuccess(ctx.getSource(), "已开始播放: " + url);
                     return 1;
                 }));
 
@@ -119,18 +124,24 @@ public class PlayCommands {
                 ServerPlayer player = ctx.getSource().getPlayerOrException();
                 BlockPos screenPos = getTargetScreen(player);
                 if (screenPos == null) {
-                    ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                    ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
                     return 0;
                 }
                 var be = player.level().getBlockEntity(screenPos);
                 if (!(be instanceof VideoScreenBlockEntity screen)) {
-                    ctx.getSource().sendFailure(Component.literal("目标方块不是屏幕"));
+                    ctx.getSource().sendFailure(KazumiMessages.error("目标方块不是屏幕"));
                     return 0;
                 }
                 UUID sid = screen.getScreenId();
                 String url = screen.getEpisodeUrl();
                 var group = SyncGroupManager.get().getGroup(sid);
-                if (group != null) {
+                if (url.isEmpty()) {
+                    // 屏幕未在播放：加入待机组（joinStandby 是 computeIfAbsent，
+                    // 已存在的待机组不会重复创建，只把玩家加入），等开始播放时自动生效
+                    SyncGroupManager.get().joinStandby(player, sid, screenPos);
+                    SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
+                    KazumiMessages.sendSuccess(ctx.getSource(), "已加入同步播放（等待播放开始）");
+                } else if (group != null) {
                     // 已在播放：加入现有组
                     long elapsed = group.paused ? 0 : System.currentTimeMillis() - group.serverTimestamp;
                     long currentPos = group.positionMs + elapsed;
@@ -139,22 +150,16 @@ public class PlayCommands {
                     // 立即向组内广播权威位置（含新加入者），无需等待周期广播
                     SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
                     SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
-                    ctx.getSource().sendSystemMessage(Component.literal(
-                        "已加入同步播放 (位置: " + (currentPos / 1000) + "s)"));
-                } else if (!url.isEmpty()) {
+                    KazumiMessages.sendSuccess(ctx.getSource(),
+                        "已加入同步播放 (位置: " + (currentPos / 1000) + "s)");
+                } else {
                     // 有 URL 但无组（异常恢复）：重建组
                     SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
                     setScreenNbt(screen, url, 0);
                     SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
                     SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
-                    ctx.getSource().sendSystemMessage(Component.literal(
-                        "已加入同步播放 (位置: 0s)"));
-                } else {
-                    // 屏幕未在播放：创建待机组，等开始播放时自动生效
-                    SyncGroupManager.get().joinStandby(player, sid, screenPos);
-                    SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "加入了同步播放");
-                    ctx.getSource().sendSystemMessage(Component.literal(
-                        "已加入同步播放（等待播放开始）"));
+                    KazumiMessages.sendSuccess(ctx.getSource(),
+                        "已加入同步播放 (位置: 0s)");
                 }
                 return 1;
             });
@@ -165,7 +170,7 @@ public class PlayCommands {
                 ServerPlayer player = ctx.getSource().getPlayerOrException();
                 BlockPos screenPos = getTargetScreen(player);
                 if (screenPos == null) {
-                    ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                    ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
                     return 0;
                 }
                 // 离开前保存实时位置
@@ -184,7 +189,7 @@ public class PlayCommands {
                 // 同步 WatchingPlayers（leave 后若组被删则清空）
                 var be1 = player.level().getBlockEntity(screenPos);
                 if (be1 instanceof VideoScreenBlockEntity sc) syncWatchingPlayersOrClear(sc);
-                ctx.getSource().sendSystemMessage(Component.literal("已停止当前客户端播放"));
+                KazumiMessages.sendSuccess(ctx.getSource(), "已停止当前客户端播放");
                 return 1;
             });
 
@@ -194,7 +199,7 @@ public class PlayCommands {
                 ServerPlayer player = ctx.getSource().getPlayerOrException();
                 BlockPos screenPos = getTargetScreen(player);
                 if (screenPos == null) {
-                    ctx.getSource().sendFailure(Component.literal("请瞄准一个屏幕!"));
+                    ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
                     return 0;
                 }
                 // 离开前保存实时位置
@@ -212,7 +217,7 @@ public class PlayCommands {
                 PacketDistributor.sendToPlayer(player, new PlayStopPacket(screenPos));
                 var be1 = player.level().getBlockEntity(screenPos);
                 if (be1 instanceof VideoScreenBlockEntity sc) syncWatchingPlayersOrClear(sc);
-                ctx.getSource().sendSystemMessage(Component.literal("已离开同步播放"));
+                KazumiMessages.sendSuccess(ctx.getSource(), "已离开同步播放");
                 return 1;
             });
 
@@ -258,7 +263,7 @@ public class PlayCommands {
                         .executes(ctx -> {
                             long ms = parseTime(StringArgumentType.getString(ctx, "time"));
                             if (ms < 0) {
-                                ctx.getSource().sendFailure(Component.literal("格式错误, 例: 2:30 或 1:05:00"));
+                                ctx.getSource().sendFailure(KazumiMessages.error("格式错误, 例: 2:30 或 1:05:00"));
                                 return 0;
                             }
                             return adjustTimeAbs(ctx.getSource(), ms);
@@ -286,14 +291,14 @@ public class PlayCommands {
     private static int showEpisodes(CommandSourceStack src, String ruleName, String resultId,
                                      int page, RuleManager ruleManager, SearchManager searchManager) {
         Rule rule = ruleManager.get(ruleName);
-        if (rule == null) { src.sendFailure(Component.literal("规则不存在: " + ruleName)); return 0; }
+        if (rule == null) { src.sendFailure(KazumiMessages.error("规则不存在: " + ruleName)); return 0; }
         var entry = searchManager.getCache().lookup(resultId);
-        if (entry == null) { src.sendFailure(Component.literal("搜索结果已过期")); return 0; }
+        if (entry == null) { src.sendFailure(KazumiMessages.error("搜索结果已过期")); return 0; }
 
-        src.sendSystemMessage(Component.literal("正在获取集数列表..."));
+        KazumiMessages.sendInfo(src, "正在获取集数列表...");
         ruleManager.getEngine().queryChapters(rule, entry.item().src())
             .thenAccept(result -> {
-                if (result.roads().isEmpty()) { src.sendFailure(Component.literal("未找到集数")); return; }
+                if (result.roads().isEmpty()) { src.sendFailure(KazumiMessages.error("未找到集数")); return; }
                 Road road = result.roads().get(0);
                 int total = road.data().size();
                 int perPage = 36; // 每页36集 (6列×6行)
@@ -303,6 +308,7 @@ public class PlayCommands {
                 int end = Math.min(start + perPage, total);
                 String roadJson = JsonUtil.GSON.toJson(result.roads());
 
+                src.sendSystemMessage(KazumiMessages.separator());
                 src.sendSystemMessage(Component.literal("=== " + entry.item().name()
                     + " 共" + total + "集 (第" + cp + "/" + totalPages + "页) ==="));
 
@@ -338,7 +344,7 @@ public class PlayCommands {
                     src.sendSystemMessage(nav);
                 }
             })
-            .exceptionally(e -> { src.sendFailure(Component.literal("获取失败: " + e.getMessage())); return null; });
+            .exceptionally(e -> { src.sendFailure(KazumiMessages.error("获取失败: " + e.getMessage())); return null; });
         return 1;
     }
 
@@ -348,12 +354,12 @@ public class PlayCommands {
         ServerPlayer player = src.getPlayerOrException();
         BlockPos screenPos = getTargetScreen(player);
         if (screenPos == null) {
-            src.sendFailure(Component.literal("请瞄准一个屏幕!"));
+            src.sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
             return 0;
         }
         var be = player.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen) || screen.getEpisodeData().isEmpty()) {
-            src.sendFailure(Component.literal("该屏幕无可切换的集数"));
+            src.sendFailure(KazumiMessages.error("该屏幕无可切换的集数"));
             return 0;
         }
         List<Road> roads = JsonUtil.GSON.fromJson(screen.getEpisodeData(),
@@ -363,7 +369,7 @@ public class PlayCommands {
         int idx = screen.getEpisodeIndex();
         idx = next ? idx + 1 : idx - 1;
         if (idx < 1 || idx > road.data().size()) {
-            src.sendFailure(Component.literal(next ? "已是最后一集" : "已是第一集"));
+            src.sendFailure(KazumiMessages.error(next ? "已是最后一集" : "已是第一集"));
             return 0;
         }
         String url = road.data().get(idx - 1);
@@ -376,7 +382,7 @@ public class PlayCommands {
         // 立即广播新一集状态，观看者无需等 NBT 轮询
         SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "切换到 " + name);
-        src.sendSystemMessage(Component.literal("已切换到: " + name));
+        KazumiMessages.sendSuccess(src, "已切换到: " + name);
         return 1;
     }
 
@@ -385,35 +391,40 @@ public class PlayCommands {
     private static int adjustTime(CommandSourceStack src, int deltaSec) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = src.getPlayerOrException();
         BlockPos screenPos = getTargetScreen(player);
-        if (screenPos == null) { src.sendFailure(Component.literal("请瞄准一个屏幕!")); return 0; }
+        if (screenPos == null) { src.sendFailure(KazumiMessages.error("请瞄准一个屏幕!")); return 0; }
         var be = player.level().getBlockEntity(screenPos);
-        if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(Component.literal("目标方块不是屏幕")); return 0; }
+        if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(KazumiMessages.error("目标方块不是屏幕")); return 0; }
+        UUID sid = screen.getScreenId();
+        var g = SyncGroupManager.get().getGroup(sid);
+        if (g == null) { src.sendFailure(KazumiMessages.error("该屏幕未在播放")); return 0; }
         long cur = getLivePosition(screen);
         long newPos = Math.max(0, cur + deltaSec * 1000L);
         screen.updateSyncPosition(newPos);
-        UUID sid = screen.getScreenId();
         updateSyncGroupPosition(sid, newPos);
         SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
         String action = deltaSec >= 0
-            ? "快进了 " + deltaSec + "s → " + formatMs(newPos)
-            : "快退了 " + (-deltaSec) + "s → " + formatMs(newPos);
+            ? "快进了 " + deltaSec + "s → " + KazumiMessages.formatMs(newPos)
+            : "快退了 " + (-deltaSec) + "s → " + KazumiMessages.formatMs(newPos);
         SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, action);
-        src.sendSystemMessage(Component.literal("时间调整: " + (deltaSec >= 0 ? "+" : "") + deltaSec + "s → " + formatMs(newPos)));
+        KazumiMessages.sendSuccess(src,
+            "时间调整: " + (deltaSec >= 0 ? "+" : "") + deltaSec + "s → " + KazumiMessages.formatMs(newPos));
         return 1;
     }
 
     private static int adjustTimeAbs(CommandSourceStack src, long ms) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = src.getPlayerOrException();
         BlockPos screenPos = getTargetScreen(player);
-        if (screenPos == null) { src.sendFailure(Component.literal("请瞄准一个屏幕!")); return 0; }
+        if (screenPos == null) { src.sendFailure(KazumiMessages.error("请瞄准一个屏幕!")); return 0; }
         var be = player.level().getBlockEntity(screenPos);
-        if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(Component.literal("目标方块不是屏幕")); return 0; }
-        screen.updateSyncPosition(ms);
+        if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(KazumiMessages.error("目标方块不是屏幕")); return 0; }
         UUID sid = screen.getScreenId();
+        var g = SyncGroupManager.get().getGroup(sid);
+        if (g == null) { src.sendFailure(KazumiMessages.error("该屏幕未在播放")); return 0; }
+        screen.updateSyncPosition(ms);
         updateSyncGroupPosition(sid, ms);
         SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
-        SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "跳转到 " + formatMs(ms));
-        src.sendSystemMessage(Component.literal("跳转到: " + formatMs(ms)));
+        SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "跳转到 " + KazumiMessages.formatMs(ms));
+        KazumiMessages.sendSuccess(src, "跳转到: " + KazumiMessages.formatMs(ms));
         return 1;
     }
 
@@ -450,12 +461,12 @@ public class PlayCommands {
     private static int togglePause(CommandSourceStack src, boolean pause) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = src.getPlayerOrException();
         BlockPos pos = getTargetScreen(player);
-        if (pos == null) { src.sendFailure(Component.literal("请瞄准一个屏幕!")); return 0; }
+        if (pos == null) { src.sendFailure(KazumiMessages.error("请瞄准一个屏幕!")); return 0; }
         var be = player.level().getBlockEntity(pos);
-        if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(Component.literal("目标方块不是屏幕")); return 0; }
+        if (!(be instanceof VideoScreenBlockEntity screen)) { src.sendFailure(KazumiMessages.error("目标方块不是屏幕")); return 0; }
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
-        if (g == null) { src.sendFailure(Component.literal("该屏幕未在播放")); return 0; }
+        if (g == null) { src.sendFailure(KazumiMessages.error("该屏幕未在播放")); return 0; }
         long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
         long cur = g.positionMs + elapsed;
         SyncGroupManager.get().updateState(sid, cur, pause);
@@ -464,15 +475,8 @@ public class PlayCommands {
         // 立即广播暂停/恢复状态（客户端已移除每秒 NBT 轮询暂停逻辑）
         SyncGroupManager.get().broadcastSyncState(sid, player.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(player, pos, sid, pause ? "暂停了播放" : "恢复了播放");
-        src.sendSystemMessage(Component.literal(pause ? "已暂停" : "已恢复"));
+        KazumiMessages.sendSuccess(src, pause ? "已暂停" : "已恢复");
         return 1;
-    }
-
-    private static String formatMs(long ms) {
-        long totalSec = ms / 1000;
-        long h = totalSec / 3600, m = (totalSec % 3600) / 60, s = totalSec % 60;
-        if (h > 0) return String.format("%d:%02d:%02d", h, m, s);
-        return String.format("%d:%02d", m, s);
     }
 
     // ---- 辅助 ----
@@ -491,20 +495,17 @@ public class PlayCommands {
     private static void syncWatchingPlayers(VideoScreenBlockEntity screen) {
         var g = SyncGroupManager.get().getGroup(screen.getScreenId());
         if (g != null) {
-            String list = String.join(",", g.players.stream().map(java.util.UUID::toString).toList());
-            screen.setWatchingPlayers(list);
+            screen.setWatchingPlayers(g.watchingPlayersString());
         }
     }
 
     /** 同步 WatchingPlayers；组被删（最后一人离开）时清空 */
     private static void syncWatchingPlayersOrClear(VideoScreenBlockEntity screen) {
         var g = SyncGroupManager.get().getGroup(screen.getScreenId());
-        screen.setWatchingPlayers(g != null
-            ? String.join(",", g.players.stream().map(java.util.UUID::toString).toList())
-            : "");
+        screen.setWatchingPlayers(g != null ? g.watchingPlayersString() : "");
     }
 
-    private static BlockPos getTargetScreen(ServerPlayer player) {
+    static BlockPos getTargetScreen(ServerPlayer player) {
         HitResult hit = player.pick(5.0, 0, false);
         if (hit instanceof BlockHitResult blockHit) {
             BlockPos pos = blockHit.getBlockPos();

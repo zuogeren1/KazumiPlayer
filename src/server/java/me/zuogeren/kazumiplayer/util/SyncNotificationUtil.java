@@ -9,7 +9,9 @@ import net.minecraft.server.level.ServerPlayer;
 import java.util.UUID;
 
 /**
- * 同步播放通知工具：向观看者发送操作提示
+ * 同步播放通知工具：向观看者发送操作提示（消息格式统一走 KazumiMessages）。
+ * <p>
+ * notifyOtherWatchers 为他人操作提醒（黄色 warn），broadcastToGroup 为中性广播通知（白色 info）。
  */
 public class SyncNotificationUtil {
 
@@ -18,7 +20,7 @@ public class SyncNotificationUtil {
         var g = SyncGroupManager.get().getGroup(screenId);
         if (g == null) return;
         String actorName = actor.getName().getString();
-        Component msg = Component.literal("§e" + actorName + " " + action + " §7("
+        Component msg = KazumiMessages.warn(actorName + " " + action + " §7("
             + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
         var server = ((ServerLevel) actor.level()).getServer();
         UUID actorId = actor.getUUID();
@@ -33,7 +35,7 @@ public class SyncNotificationUtil {
     public static void broadcastToGroup(ServerPlayer contextPlayer, BlockPos pos, UUID screenId, String action) {
         var g = SyncGroupManager.get().getGroup(screenId);
         if (g == null) return;
-        Component msg = Component.literal("§e" + action + " §7("
+        Component msg = KazumiMessages.info(action + " §7("
             + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
         var server = ((ServerLevel) contextPlayer.level()).getServer();
         for (UUID pid : g.players) {
