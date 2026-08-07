@@ -49,5 +49,28 @@
 - [x] **服务端/客户端拆分**: 拆分为 `common`/`client`/`server` 三个 source set，构建输出 `kazumiplayer-server`/`kazumiplayer-client` 两份 jar。客户端类（WaterMedia/MCEF）不再出现在服务端 jar 中
 - [x] **统一消息系统重构**: 新增 `KazumiMessages` 统一前缀与分级颜色，替换命令层/客户端全部散落消息（含 sendFailure/sendSystemMessage/客户端 chat），删除 ChatComponentUtil 未使用的 info/error 死代码路径
 - [x] **重复逻辑抽取**: `JsonUtil.parseFirstRoad`（Road 解析）、`SyncGroup.watchingPlayersString()`（观看者序列化）、`KazumiMessages.formatMs`（时间格式化）、`ScreenCommands` 复用 `getTargetScreen`
+- [ ] **seek 权威状态同步（潜在 bug）**: `ServerPacketHandlers.handlePlaybackControl` 的 seek_forward/back/goto 只改 `screen.updateSyncPosition` 不更新 SyncGroupManager，客户端 seek 后 5 秒内被周期广播用旧位置覆盖——应同步调用 `updateState` 更新权威位置
+- [ ] **RuleManager 重复实例**: `SyncGroupManager.onPlayerJoin` 每次玩家进服 `new RuleManager().loadAll()`，绕过 KazumiPlayerServer 已初始化实例——应注入复用单例
+- [ ] **ClientDisconnectHandler 拆分（god class）**: 259 行混杂鼠标恢复/命令注册/生命周期/核心调度四大职责——拆为 MouseGrabRestorer / ClientCommandRegistration / ClientLifecycleHandler / ClientPlaybackScheduler
+- [ ] **播放器启动逻辑去重**: `onClientTick` 与 `handlePlayStart` 两处各自 `new PlaybackManager()` 启动流程重复；`handlePlayStart` 服务端从不发 PlayStartPacket（死路径）——提取 `startPlayback()` 统一入口
+- [ ] **删除死代码**: `MCEFBrowserLifecycle`、`dto/VideoSource` 无任何调用方；`PlayStateListener` 接口+WaterMediaPlayer listener 列表从未注册——确认后删除
+- [ ] **VideoSniffer handler 泄漏**: `addRequestHandler(requestHandler)` 带参注册但 `removeRequestHandler()` 无参清理——确认 MCEF API 是否需传同一引用，修复清理逻辑
+- [ ] **三份 dev mods.toml 去重**: main/server/client resources 下 `META-INF/neoforge.mods.toml` 内容一字不差——保留一份或 processResources 动态生成
+- [ ] **build.gradle configurations.all 篡改**: 全局强制 Usage=JAVA_RUNTIME 破坏变体感知解析——排查 moddev universalJar 变体冲突根因，改为 configuration 级 attributes
+- [ ] **PlaybackControlPacket action 改枚举**: 用 String 表示 action（next/prev/seek_forward 等）无编译期检查——定义 `PlaybackAction` enum + STRING_UTF8 映射 codec
+- [ ] **RuleEngine 策略接口**: RuleEngine if-else 分派 + 两策略参数类型不统一（RuleExecutionConfig vs Rule）——抽取 `RuleStrategy` 接口统一参数
+- [ ] **setPlayback/setPlaybackFull 重叠**: 两个方法职责重叠，调用方易误用——合并或加明确 Javadoc
+- [ ] **getScreenId 延迟副作用**: getter 首次调用生成 UUID 并 markDirty 触发网络同步——提供 ensureScreenId() 显式初始化
+- [ ] **ConnectedSpeakers 编解码去重**: BlockPos 列表编码在 saveAdditional/loadAdditional/getUpdateTag 三处重复——提取 encode/decode 工具
+- [ ] **BE 双轨序列化统一**: load/saveAdditional 用 ValueOutput，getUpdateTag 用旧式 CompoundTag——统一或至少抽字段名常量
+- [ ] **SpeakerBlockEntity chunk 加载误清连接**: loadAdditional 中 `getLinkedScreen()==null` 自动 clearLink，屏幕 chunk 未加载时误清——推迟到服务端 tick 验证
+- [ ] **SpeakerConnectPacket UUID 序列化**: STRING_UTF8 存 36 字符膨胀——改 mostSignificantBits+leastSignificantBits VAR_LONG
+- [ ] **HttpUtil.fetch 双重异步**: runAsync 再包一层 CompletableFuture——直接返回 supplyAsync 结果简化异常链
+- [ ] **PlayCommands 拆分**: 515 行含 10+ 子命令+辅助函数，stop/leave 重复、切集逻辑与 ServerPacketHandlers 重复——拆命令类+EpisodeSwitcher 服务
+- [ ] **搜索缓存抽象**: SearchResultCache / SearchSessionCache / RuleSearchSessionCache 结构重复（Map+定时清理）——提取 `TimedCache<T>` 泛型基类；shutdown() 从未调用
+- [ ] **BangumiApi HttpClient 复用**: 每次 search() new HttpClient/Gson——提升为类级 final 字段
+- [ ] **SNIFF_SCRIPT 外部化**: 70 行 JS 内联字符串——提取为 resources 资源文件
+- [ ] **extractRenderState 跨包引用**: screen 包完全限定名调用 client.ScreenPlayerManager——解耦（注入播放器或独立查询机制）
+- [ ] **onClientTick 魔法数字**: 3000/8000/5000/800/500/100 散落——提为 TimingConstants 命名常量
 - [ ] **多版本支持**: 适配不同 Minecraft 版本
 - [ ] **多加载器支持**: 除 NeoForge 外支持 Fabric/Quilt
