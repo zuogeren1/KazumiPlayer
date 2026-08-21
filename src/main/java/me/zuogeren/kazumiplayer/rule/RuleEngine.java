@@ -16,7 +16,8 @@ public class RuleEngine {
     public CompletableFuture<RuleSearchResult> search(Rule rule, String keyword) {
         if (!rule.isXPathSearch()) {
             PreparedRuleRequest req = apiStrategy.prepareSearchRequest(rule, keyword);
-            return HttpUtil.fetch(req.url(), req.method(), req.headers(), req.query())
+            return HttpUtil.fetch(req.url(), req.method(),
+                    RuleRequestEnhancer.enhance(req.url(), req.headers()), req.query())
                 .thenApply(raw -> apiStrategy.parseSearch(raw, rule))
                 .exceptionally(e -> {
                     KazumiLog.rule.warn("Search {} failed: {}", rule.getName(), e.getMessage());
@@ -35,7 +36,8 @@ public class RuleEngine {
     public CompletableFuture<RuleChapterResult> queryChapters(Rule rule, String source) {
         if (!rule.isXPathChapter()) {
             PreparedRuleRequest req = apiStrategy.prepareChapterRequest(rule, source);
-            return HttpUtil.fetch(req.url(), req.method(), req.headers(), req.query())
+            return HttpUtil.fetch(req.url(), req.method(),
+                    RuleRequestEnhancer.enhance(req.url(), req.headers()), req.query())
                 .thenApply(raw -> apiStrategy.parseChapters(raw, rule, source))
                 .exceptionally(e -> {
                     KazumiLog.rule.warn("Chapter {} failed: {}", rule.getName(), e.getMessage());

@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer;
 
 import me.zuogeren.kazumiplayer.command.KazumiCommand;
+import me.zuogeren.kazumiplayer.network.GuiRequestHandlers;
 import me.zuogeren.kazumiplayer.network.PacketDispatcher;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.ServerPacketHandlers;
@@ -51,6 +52,9 @@ public class KazumiPlayerServer {
         // 初始化命令系统
         KazumiCommand.init(ruleManager, searchManager);
         NeoForge.EVENT_BUS.register(KazumiCommand.class);
+
+        // 初始化 GUI 通用请求处理
+        GuiRequestHandlers.init(ruleManager, searchManager);
 
         // 注入 C→S 网络包处理器
         PacketDispatcher.setServerHandler(new ServerPacketHandlers());

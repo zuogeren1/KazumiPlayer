@@ -53,4 +53,27 @@ public class RuleDownloader {
                     return rule;
                 });
     }
+
+    /**
+     * 把下载/解析链路的异常翻译成用户可读的提示。
+     * CompletableFuture 会把原始异常包进 CompletionException，需先解包再匹配。
+     */
+    public static String friendlyError(String ruleName, Throwable e) {
+        Throwable t = e;
+        while (t.getCause() != null && t.getCause() != t) t = t.getCause();
+        String msg = String.valueOf(t.getMessage());
+        if (msg.contains("HTTP 404")) {
+            return "仓库中不存在规则 \"" + ruleName + "\"（注意名称区分大小写）";
+        }
+        if (t instanceof com.google.gson.JsonSyntaxException || msg.contains("Expected BEGIN_OBJECT")) {
+            return "规则文件内容异常（仓库返回了错误页面而非规则 JSON）";
+        }
+        if (msg.contains("超时")) {
+            return "下载超时，请检查网络后重试";
+        }
+        if (msg.contains("DNS")) {
+            return "无法连接规则仓库（DNS 解析失败），请检查网络";
+        }
+        return msg.isEmpty() ? t.getClass().getSimpleName() : msg;
+    }
 }

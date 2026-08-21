@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.network;
 
+import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayUrlPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
@@ -20,25 +21,37 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
  * 服务端网络包处理器：处理所有 C→S 数据包。
+ * 分派采用注册表（包类型 → 处理方法），新增操作只需 static 块注册一行。
  */
 public class ServerPacketHandlers implements IServerPacketHandler {
 
+    private static final Map<Class<?>, java.util.function.BiConsumer<CustomPacketPayload, IPayloadContext>> HANDLERS =
+        new HashMap<>();
+
+    static {
+        register(NextEpisodePacket.class, ServerPacketHandlers::handleNextEpisode);
+        register(PlaybackControlPacket.class, ServerPacketHandlers::handlePlaybackControl);
+        register(SpeakerConnectPacket.class, ServerPacketHandlers::handleSpeakerConnect);
+        register(PlayUrlPacket.class, ServerPacketHandlers::handlePlayUrl);
+        register(GuiActionPacket.class, GuiRequestHandlers::handle);
+    }
+
+    private static <T extends CustomPacketPayload> void register(Class<T> cls,
+            java.util.function.BiConsumer<T, IPayloadContext> handler) {
+        HANDLERS.put(cls, (pkt, ctx) -> handler.accept(cls.cast(pkt), ctx));
+    }
+
     @Override
     public void handle(CustomPacketPayload packet, IPayloadContext context) {
-        if (packet instanceof NextEpisodePacket pkt) {
-            handleNextEpisode(pkt, context);
-        } else if (packet instanceof PlaybackControlPacket pkt) {
-            handlePlaybackControl(pkt, context);
-        } else if (packet instanceof SpeakerConnectPacket pkt) {
-            handleSpeakerConnect(pkt, context);
-        } else if (packet instanceof PlayUrlPacket pkt) {
-            handlePlayUrl(pkt, context);
-        }
+        var h = HANDLERS.get(packet.getClass());
+        if (h != null) h.accept(packet, context);
     }
 
     /** GUI 提交的自定义链接：与 /kazumi play-url 同链路（建组 + 写 NBT + 同步观看者） */
@@ -144,17 +157,29 @@ public class ServerPacketHandlers implements IServerPacketHandler {
 
             switch (packet.action()) {
                 case "next", "prev" -> handleEpisodeSwitch(screen, packet.action());
+                case "pause", "resume" -> togglePause(sp, screen, "pause".equals(packet.action()));
                 case "seek_forward" -> {
-                    long newPos = screen.getSyncPositionMs() + packet.value() * 1000;
-                    screen.updateSyncPosition(Math.max(0, newPos));
+                    long newPos = Math.max(0, screen.getSyncPositionMs() + packet.value() * 1000);
+                    applySeek(sp, screen, newPos);
                 }
                 case "seek_back" -> {
-                    long newPos = screen.getSyncPositionMs() - packet.value() * 1000;
-                    screen.updateSyncPosition(Math.max(0, newPos));
+                    long newPos = Math.max(0, screen.getSyncPositionMs() - packet.value() * 1000);
+                    applySeek(sp, screen, newPos);
                 }
-                case "seek_goto" -> screen.updateSyncPosition(packet.value());
+                case "seek_goto" -> applySeek(sp, screen, packet.value());
             }
         });
+    }
+
+    /** seek 后同步权威位置并立即广播，否则周期广播会用旧位置把进度拉回去 */
+    private static void applySeek(ServerPlayer sp, VideoScreenBlockEntity screen, long newPos) {
+        UUID sid = screen.getScreenId();
+        screen.updateSyncPosition(Math.max(0, newPos));
+        var g = SyncGroupManager.get().getGroup(sid);
+        if (g != null) {
+            SyncGroupManager.get().updateState(sid, Math.max(0, newPos), g.paused);
+            SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
+        }
     }
 
     private static void handleEpisodeSwitch(VideoScreenBlockEntity screen, String action) {
@@ -171,6 +196,19 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         String url = road.data().get(idx - 1);
         screen.setPlaybackFull(url, 0, idx, data);
         KazumiLog.network.info("Episode switch to {}: {}", idx, url);
+    }
+
+    /** GUI/包触发的暂停/恢复：与 /kazumi pause|resume 同逻辑（更新权威状态并立即广播） */
+    private static void togglePause(ServerPlayer sp, VideoScreenBlockEntity screen, boolean pause) {
+        UUID sid = screen.getScreenId();
+        var g = SyncGroupManager.get().getGroup(sid);
+        if (g == null) return;
+        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+        long cur = g.positionMs + elapsed;
+        SyncGroupManager.get().updateState(sid, cur, pause);
+        screen.updateSyncPosition(cur);
+        screen.setPlaybackPaused(pause);
+        SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
     }
 
     private static void handleSpeakerConnect(SpeakerConnectPacket packet, IPayloadContext context) {

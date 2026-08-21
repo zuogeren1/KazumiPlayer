@@ -58,10 +58,13 @@ public class BangumiApi {
                     return sr != null && sr.data != null ? sr.data : Collections.emptyList();
                 }
                 KazumiLog.search.warn("Bangumi search returned {}", response.statusCode());
-                return Collections.<BangumiSubject>emptyList();
+                throw new RuntimeException("bgm API 返回 " + response.statusCode());
+            } catch (java.net.http.HttpTimeoutException e) {
+                KazumiLog.search.warn("Bangumi search timeout: {}", e.getMessage());
+                throw new RuntimeException("连接 api.bgm.tv 超时（当前网络不可达，可尝试配置代理）", e);
             } catch (Exception e) {
                 KazumiLog.search.warn("Bangumi search failed: {}", e.getMessage());
-                return Collections.emptyList();
+                throw new RuntimeException("bgm 搜索失败: " + e.getMessage(), e);
             }
         });
     }

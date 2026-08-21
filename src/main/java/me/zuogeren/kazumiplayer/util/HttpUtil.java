@@ -93,6 +93,15 @@ public class HttpUtil {
                         requestBuilder.build(),
                         HttpResponse.BodyHandlers.ofInputStream());
 
+                int status = response.statusCode();
+                if (status >= 400) {
+                    // 非 2xx 不再静默解析成 0 条结果，如实上报（站点宕机/反爬可辨别）
+                    KazumiLog.http.warn("HTTP {} {} -> {}", method, fullUrl, status);
+                    future.completeExceptionally(
+                            new RuntimeException("站点返回 HTTP " + status + "（可能宕机或被反爬拦截）"));
+                    return;
+                }
+
                 int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
                 String body = readResponseBody(response, maxBytes);
 

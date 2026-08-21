@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.playback;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.client.BrowserCookieStore;
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 
 import com.cinemamod.mcef.MCEF;
@@ -35,6 +36,33 @@ public class VideoSniffer {
     // 视频 URL 嗅探报告前缀
     private static final String SNIFF_PREFIX = "KAZUMI_VIDEO_URL:";
 
+    // 页面 Cookie 收割前缀（payload 格式：host|document.cookie）
+    private static final String COOKIE_PREFIX = "KAZUMI_COOKIES:";
+
+    // MCEF 内嵌 CEF 的 Chromium 版本较旧，部分站点的 Cloudflare WAF 会按 UA 拦截
+    // （同站点 java HttpClient 用新 Chrome UA 却能 200）。嗅探期间统一伪装成现代 Chrome，
+    // HTTP 头与页面内 navigator.userAgent 同时覆盖，保持一致性。
+    private static final String SPOOFED_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+    /** 嗅探浏览器实际使用的伪装 UA——收割的 Cookie 与它绑定，HTTP 请求复用 Cookie 时必须成对使用 */
+    public static String getSpoofedUa() {
+        return SPOOFED_UA;
+    }
+
+    // 嗅探期间是否出现过 Cloudflare 挑战/拦截页特征资源（跨重试累积；
+    // 用于失败时给出"站点反爬/不稳定"的针对性提示。新一轮播放由 PlaybackManager 重置）
+    private static volatile boolean cfChallengeDetected;
+
+    // ---- 常驻共享浏览器（Kazumi 同款实例复用策略）----
+    // 浏览器只创建一次、嗅探间隙导航到 about:blank，Cookie（含 CF 的 cf_clearance）
+    // 跨嗅探保留：挑战通过一次后，同站点后续集数/重试不再被拦。
+    // handler 只注册一次，回调统一路由到 activeFuture。
+    private static MCEFBrowser sharedBrowser;
+    private static int sharedBrowserId = -1;
+    private static volatile CompletableFuture<String> activeFuture;
+    private static volatile String activePageUrl;
+
     // 早期注入的 fetch/XHR hook（onLoadStart）：页面加载过程中 fetch 到的 m3u8
     // （如解析站先 fetch 带签名的播放地址再设 video.src）在 onLoadEnd 之前就能捕获。
     // 独立防重标记，与完整脚本分开。
@@ -49,6 +77,12 @@ public class VideoSniffer {
                     console.log('KAZUMI_VIDEO_URL:' + url);
                 }
             };
+            // 与 HTTP 头伪装保持一致：页面/挑战 JS 读到的 UA 也必须是新版本
+            try {
+                Object.defineProperty(navigator, 'userAgent', {get: function() { return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'; }});
+                Object.defineProperty(navigator, 'appVersion', {get: function() { return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'.replace('Mozilla/', ''); }});
+            } catch(e) {}
+
             // Hook fetch/Response 拦截 m3u8
             const _fetch = window.fetch;
             window.fetch = function(...args) {
@@ -140,8 +174,27 @@ public class VideoSniffer {
         })();
         """;
 
+    /** 外部停止播放时取消在途嗅探（优雅释放，不触发重试） */
+    public static void cancelActiveSniff() {
+        CompletableFuture<String> f = activeFuture;
+        if (f != null) {
+            KazumiLog.sniff.debug("cancelling active sniff by external request");
+            f.complete(null);
+        }
+    }
+
+    /** 本轮播放流程中是否出现过 Cloudflare 挑战/拦截页特征 */
+    public boolean isCfChallengeDetected() {
+        return cfChallengeDetected;
+    }
+
+    /** 新一轮播放开始前重置检测状态 */
+    public void resetCfChallengeDetection() {
+        cfChallengeDetected = false;
+    }
+
     /**
-     * 嗅探视频直链
+     * 嗅探视频直链（复用常驻浏览器；新任务接管式取代在途旧任务）
      * @param pageUrl 剧集播放页 URL
      * @return CompletableFuture<String> 视频直链 (m3u8/mp4)
      */
@@ -156,116 +209,186 @@ public class VideoSniffer {
                 return future;
             }
 
-            var mc = Minecraft.getInstance();
-            MCEFBrowser browser = MCEF.createBrowser(pageUrl, true);
+            // 接管式并发控制：停止后快速重播/换集时，上一轮嗅探可能仍在超时窗口内，
+            // 新任务直接取代（旧等待方收到 null 静默收尾，不触发重试）
+            CompletableFuture<String> previous = activeFuture;
+            activeFuture = future;
+            if (previous != null) {
+                KazumiLog.sniff.debug("superseding in-flight sniff task");
+                previous.complete(null);
+            }
 
-            // 原生网络层拦截（Kazumi shouldInterceptRequest 同款通用方案）：
-            // 视频源可能嵌套在 iframe/第三方播放页中，JS 嗅探够不到时，
-            // 只要浏览器发出 .m3u8 请求或带 Range 的视频流请求，就在这里报告。
-            int browserId = browser.getIdentifier();
-            CefRequestHandler requestHandler = new CefRequestHandler() {
-                @Override
-                public boolean onBeforeBrowse(CefBrowser b, CefFrame frame, CefRequest request,
-                        boolean isRedirect, boolean isMainFrame) {
-                    return false;
-                }
+            // 首次创建时直接以目标页初始化（原生浏览器异步就绪，过早 loadURL 会丢失导航）
+            boolean created = ensureBrowser(pageUrl);
 
-                @Override
-                public boolean onOpenURLFromTab(CefBrowser b, CefFrame frame, String url, boolean isUserGesture) {
-                    return false;
-                }
-
-                @Override
-                public CefResourceRequestHandler getResourceRequestHandler(CefBrowser b, CefFrame frame,
-                        CefRequest request, boolean isNavigation, boolean isDownload, String requestInitiator,
-                        BoolRef disableDefaultHandling) {
-                    return new CefResourceRequestHandlerAdapter() {
-                        @Override
-                        public boolean onBeforeResourceLoad(CefBrowser br, CefFrame fr, CefRequest req) {
-                            // DEBUG: 打印嗅探期间浏览器的所有请求，排查视频源加载方式
-                            KazumiLog.sniff.debug("[sniff] resource request: {}", req.getURL());
-                            if (br.getIdentifier() == browserId && isVideoRequest(req)) {
-                                future.complete(req.getURL());
-                            }
-                            return false; // 不阻止请求，仅观察
-                        }
-                    };
-                }
-
-                @Override
-                public boolean getAuthCredentials(CefBrowser b, String originUrl, boolean isProxy, String host,
-                        int port, String realm, String scheme, CefAuthCallback callback) {
-                    return false;
-                }
-
-                @Override
-                public boolean onCertificateError(CefBrowser b, CefLoadHandler.ErrorCode errorCode,
-                        String requestUrl, CefCallback callback) {
-                    return false;
-                }
-
-                @Override
-                public void onRenderProcessTerminated(CefBrowser b, TerminationStatus status) {
-                }
-            };
-            MCEF.getClient().getHandle().addRequestHandler(requestHandler);
-
-            var handler = new CefDisplayHandlerAdapter() {
-                @Override
-                public boolean onConsoleMessage(CefBrowser b, CefSettings.LogSeverity level,
-                        String message, String source, int line) {
-                    if (message.startsWith(SNIFF_PREFIX)) {
-                        String videoUrl = message.substring(SNIFF_PREFIX.length());
-                        KazumiLog.sniff.info("Sniffed video URL: {}", videoUrl);
-                        future.complete(videoUrl);
-                        return true;
-                    }
-                    return false;
-                }
-            };
-            MCEF.getClient().addDisplayHandler(handler);
-
-            // 页面加载开始即注入 fetch/XHR hook，加载完成后注入完整嗅探脚本。
-            // 主页面与所有 iframe 的 onLoadStart/onLoadEnd 都会触发：
-            // 解析站（如 7sefun→lmm35）的视频源可能嵌套在第三方播放页 iframe 中。
-            MCEF.getClient().addLoadHandler(new org.cef.handler.CefLoadHandlerAdapter() {
-                @Override
-                public void onLoadStart(CefBrowser b, org.cef.browser.CefFrame frame,
-                        org.cef.network.CefRequest.TransitionType transitionType) {
-                    // 页面加载早期就 hook fetch/XHR，捕获加载过程中的 m3u8 响应
-                    frame.executeJavaScript(SNIFF_HOOK_SCRIPT, pageUrl, 0);
-                }
-
-                @Override
-                public void onLoadEnd(CefBrowser b, org.cef.browser.CefFrame frame, int httpStatusCode) {
-                    // DOM 就绪后注入完整脚本（video 扫描 + MutationObserver + 轮询兜底）
-                    frame.executeJavaScript(SNIFF_SCRIPT, pageUrl, 0);
-                }
-            });
+            activePageUrl = pageUrl;
+            if (!created) {
+                sharedBrowser.loadURL(pageUrl);
+            }
 
             // 超时处理
             future.orTimeout(timeoutSec, TimeUnit.SECONDS)
                 .exceptionally(e -> null);
 
-            // 清理
+            // 结束清理：只解除路由并导航到空白页，不销毁浏览器（保留 Cookie 供下次复用）
             future.whenComplete((url, err) -> {
-                MCEF.getClient().removeDisplayHandler(handler);
-                MCEF.getClient().getHandle().removeRequestHandler();
-                browser.close();
-                KazumiLog.sniff.debug("sniff done url={} err={}, restoring mouse", url, err);
-                // 浏览器创建/关闭可能抢走窗口焦点导致鼠标脱离准心，恢复鼠标捕获
-                Minecraft.getInstance().execute(() ->
-                    ClientDisconnectHandler.forceRestoreMouseGrab(Minecraft.getInstance()));
+                // 仅当自己仍是当前任务时才清理——被新任务接管后不得触碰浏览器状态
+                if (activeFuture == future) {
+                    activeFuture = null;
+                    KazumiLog.sniff.debug("sniff done url={} err={}", url, err);
+                    Minecraft.getInstance().execute(() -> {
+                        // 若重试已接管（activeFuture 非空），不能覆盖刚发起的导航
+                        if (activeFuture != null) return;
+                        try {
+                            if (sharedBrowser != null) {
+                                sharedBrowser.loadURL("about:blank");
+                            }
+                        } catch (Exception ignored) {
+                        }
+                        // 浏览器加载可能抢走窗口焦点导致鼠标脱离准心，恢复鼠标捕获
+                        ClientDisconnectHandler.forceRestoreMouseGrab(Minecraft.getInstance());
+                    });
+                }
                 if (err != null) {
                     KazumiLog.sniff.warn("Sniff failed: {}", err.getMessage());
                 }
             });
 
         } catch (Exception e) {
+            if (activeFuture == future) {
+                activeFuture = null;
+            }
             future.completeExceptionally(e);
         }
 
         return future;
+    }
+
+    /** 创建常驻浏览器（首个嗅探页初始化）并注册一次性 handler；返回是否为本次新建 */
+    private static synchronized boolean ensureBrowser(String initialUrl) {
+        if (sharedBrowser != null) return false;
+
+        sharedBrowser = MCEF.createBrowser(initialUrl, true);
+        sharedBrowserId = sharedBrowser.getIdentifier();
+
+        // 原生网络层拦截（Kazumi shouldInterceptRequest 同款通用方案）：
+        // 视频源可能嵌套在 iframe/第三方播放页中，JS 嗅探够不到时，
+        // 只要浏览器发出 .m3u8 请求或带 Range 的视频流请求，就在这里报告。
+        MCEF.getClient().getHandle().addRequestHandler(new CefRequestHandler() {
+            @Override
+            public boolean onBeforeBrowse(CefBrowser b, CefFrame frame, CefRequest request,
+                    boolean isRedirect, boolean isMainFrame) {
+                return false;
+            }
+
+            @Override
+            public boolean onOpenURLFromTab(CefBrowser b, CefFrame frame, String url, boolean isUserGesture) {
+                return false;
+            }
+
+            @Override
+            public CefResourceRequestHandler getResourceRequestHandler(CefBrowser b, CefFrame frame,
+                    CefRequest request, boolean isNavigation, boolean isDownload, String requestInitiator,
+                    BoolRef disableDefaultHandling) {
+                return new CefResourceRequestHandlerAdapter() {
+                    @Override
+                    public boolean onBeforeResourceLoad(CefBrowser br, CefFrame fr, CefRequest req) {
+                        // UA 统一伪装（含空闲期）：mcef.properties 可能未配置（走 CEF 默认旧版 UA）
+                        // 或配置了平台不符的值，一律强制重写，保证浏览器所有流量指纹一致
+                        String ua = req.getHeaderByName("User-Agent");
+                        if (!SPOOFED_UA.equals(ua)) {
+                            req.setHeaderByName("User-Agent", SPOOFED_UA, true);
+                        }
+                        String url = req.getURL();
+                        CompletableFuture<String> active = activeFuture;
+                        if (active == null) return false;
+                        KazumiLog.sniff.debug("[sniff] resource request: {}", url);
+                        // Cloudflare 挑战/拦截页特征：出现即说明没到真正的播放器页面
+                        if (url != null && (url.contains("/cdn-cgi/challenge-platform/")
+                                || url.contains("cf-chl") || url.contains("cf-icon-"))) {
+                            cfChallengeDetected = true;
+                        }
+                        if (br.getIdentifier() == sharedBrowserId && isVideoRequest(req)) {
+                            active.complete(url);
+                        }
+                        return false; // 不阻止请求，仅观察
+                    }
+                };
+            }
+
+            @Override
+            public boolean getAuthCredentials(CefBrowser b, String originUrl, boolean isProxy, String host,
+                    int port, String realm, String scheme, CefAuthCallback callback) {
+                return false;
+            }
+
+            @Override
+            public boolean onCertificateError(CefBrowser b, CefLoadHandler.ErrorCode errorCode,
+                    String requestUrl, CefCallback callback) {
+                return false;
+            }
+
+            @Override
+            public void onRenderProcessTerminated(CefBrowser b, TerminationStatus status) {
+            }
+        });
+
+        // 控制台消息路由：JS 嗅探脚本通过 KAZUMI_VIDEO_URL: 前缀报告直链
+        MCEF.getClient().addDisplayHandler(new CefDisplayHandlerAdapter() {
+            @Override
+            public boolean onConsoleMessage(CefBrowser b, CefSettings.LogSeverity level,
+                    String message, String source, int line) {
+                if (message != null && message.startsWith(COOKIE_PREFIX)) {
+                    String payload = message.substring(COOKIE_PREFIX.length());
+                    int sep = payload.indexOf('|');
+                    if (sep > 0) {
+                        BrowserCookieStore.saveFromBrowser(
+                            payload.substring(0, sep), payload.substring(sep + 1));
+                    }
+                    return false;
+                }
+                CompletableFuture<String> active = activeFuture;
+                if (active == null) return false;
+                if (message.startsWith(SNIFF_PREFIX)) {
+                    String videoUrl = message.substring(SNIFF_PREFIX.length());
+                    KazumiLog.sniff.info("Sniffed video URL: {}", videoUrl);
+                    active.complete(videoUrl);
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        // 页面加载开始即注入 fetch/XHR hook，加载完成后注入完整嗅探脚本。
+        // 主页面与所有 iframe 的 onLoadStart/onLoadEnd 都会触发：
+        // 解析站（如 7sefun→lmm35）的视频源可能嵌套在第三方播放页 iframe 中。
+        MCEF.getClient().addLoadHandler(new org.cef.handler.CefLoadHandlerAdapter() {
+            @Override
+            public void onLoadStart(CefBrowser b, org.cef.browser.CefFrame frame,
+                    org.cef.network.CefRequest.TransitionType transitionType) {
+                String pageUrl = activePageUrl;
+                if (pageUrl == null) return;
+                // 页面加载早期就 hook fetch/XHR，捕获加载过程中的 m3u8 响应
+                frame.executeJavaScript(SNIFF_HOOK_SCRIPT, pageUrl, 0);
+            }
+
+            @Override
+            public void onLoadEnd(CefBrowser b, org.cef.browser.CefFrame frame, int httpStatusCode) {
+                KazumiLog.sniff.info("[sniff] page load end: status={} url={}", httpStatusCode, frame.getURL());
+                String pageUrl = activePageUrl;
+                if (pageUrl == null) return;
+                // DOM 就绪后注入完整脚本（video 扫描 + MutationObserver + 轮询兜底）
+                frame.executeJavaScript(SNIFF_SCRIPT, pageUrl, 0);
+                // 收割本 frame 的 Cookie（含挑战通过后的 cf_clearance）供 java HTTP 请求桥接复用；
+                // host 编码进 payload——控制台回调拿不到 frame 信息
+                frame.executeJavaScript(
+                    "try{console.log('KAZUMI_COOKIES:' + location.host + '|' + document.cookie);}catch(e){}",
+                    pageUrl, 0);
+            }
+        });
+
+        KazumiLog.sniff.debug("shared sniff browser created (id={})", sharedBrowserId);
+        return true;
     }
 
     /**

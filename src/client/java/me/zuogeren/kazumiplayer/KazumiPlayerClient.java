@@ -3,8 +3,10 @@ package me.zuogeren.kazumiplayer;
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
 import me.zuogeren.kazumiplayer.client.KazumiConfigScreen;
-import me.zuogeren.kazumiplayer.client.gui.UrlInputScreen;
+import me.zuogeren.kazumiplayer.client.BrowserCookieStore;
+import me.zuogeren.kazumiplayer.client.gui.KazumiPlayerScreen;
 import me.zuogeren.kazumiplayer.network.ClientPacketHandlers;
+import me.zuogeren.kazumiplayer.rule.RuleRequestEnhancer;
 import me.zuogeren.kazumiplayer.network.PacketDispatcher;
 import me.zuogeren.kazumiplayer.screen.ScreenGuiOpeners;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
@@ -52,8 +54,11 @@ public class KazumiPlayerClient {
         // 注入 S→C 网络包处理器
         PacketDispatcher.setClientHandler(new ClientPacketHandlers());
 
-        // 注入屏幕右键 GUI 打开器（common 方块经此钩子打开客户端界面）
-        ScreenGuiOpeners.set(screenPos -> Minecraft.getInstance().setScreen(new UrlInputScreen(screenPos)));
+        // 注入屏幕右键 GUI 打开器（common 方块经此钩子打开播放器主界面）
+        ScreenGuiOpeners.set(screenPos -> Minecraft.getInstance().setScreen(new KazumiPlayerScreen(screenPos)));
+
+        // 注入规则请求头增强器（浏览器收割的 Cookie 桥接到规则 HTTP 请求）
+        RuleRequestEnhancer.set(BrowserCookieStore::headersFor);
 
         KazumiLog.general.info("KazumiPlayer client side initialized");
     }

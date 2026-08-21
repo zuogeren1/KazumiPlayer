@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import me.zuogeren.kazumiplayer.rule.Rule;
+import me.zuogeren.kazumiplayer.rule.RuleDownloader;
 import me.zuogeren.kazumiplayer.rule.RuleIndex;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
 import me.zuogeren.kazumiplayer.search.SearchManager;
@@ -49,7 +50,7 @@ public class RuleCommands {
                                 broadcastRuleSync(ruleManager);
                             })
                             .exceptionally(e -> {
-                                KazumiMessages.sendError(src, "下载规则失败: " + e.getMessage());
+                                KazumiMessages.sendError(src, "下载规则失败: " + RuleDownloader.friendlyError(name, e));
                                 return null;
                             });
 
@@ -171,7 +172,7 @@ public class RuleCommands {
                             broadcastRuleSync(ruleManager);
                         })
                         .exceptionally(e -> {
-                            KazumiMessages.sendError(src, "下载失败: " + e.getMessage());
+                            KazumiMessages.sendError(src, "下载失败: " + RuleDownloader.friendlyError("规则目录", e));
                             return null;
                         });
 
@@ -210,7 +211,7 @@ public class RuleCommands {
                 broadcastRuleSync(ruleManager);
             })
             .exceptionally(e -> {
-                KazumiMessages.sendError(src, "更新规则失败: " + e.getMessage());
+                KazumiMessages.sendError(src, "更新规则失败: " + RuleDownloader.friendlyError(name, e));
                 return null;
             });
         return 1;

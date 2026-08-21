@@ -185,7 +185,8 @@ public class XPathRuleStrategy {
      */
     public CompletableFuture<RuleSearchResult> search(RuleExecutionConfig config, String keyword) {
         PreparedRuleRequest req = prepareSearchRequest(config, keyword);
-        return HttpUtil.fetch(req.url(), req.method(), req.headers(), req.query())
+        var searchHeaders = RuleRequestEnhancer.enhance(req.url(), req.headers());
+        return HttpUtil.fetch(req.url(), req.method(), searchHeaders, req.query())
                 .thenApply(raw -> {
                     int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
                     if (raw.length() > maxBytes) {
@@ -203,7 +204,11 @@ public class XPathRuleStrategy {
      */
     public CompletableFuture<RuleChapterResult> queryChapters(RuleExecutionConfig config, String source) {
         PreparedRuleRequest req = prepareChapterRequest(config, source);
-        return HttpUtil.fetch(req.url())
+        // 与搜索请求一致带 Referer（对齐 Kazumi：referer = baseUrl + "/"），部分 WAF 会校验
+        var headers = new java.util.HashMap<>(req.headers());
+        headers.putIfAbsent("Referer", config.baseUrl() + "/");
+        headers = new java.util.HashMap<>(RuleRequestEnhancer.enhance(req.url(), headers));
+        return HttpUtil.fetch(req.url(), req.method(), headers, req.query())
                 .thenApply(raw -> {
                     int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
                     if (raw.length() > maxBytes) {

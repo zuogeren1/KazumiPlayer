@@ -38,7 +38,16 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     private final Map<BlockPos, VideoScreenTexture> screenTextures = new java.util.HashMap<>();
     private final ItemModelResolver itemModelResolver;
 
+    private static VideoScreenRenderer instance;
+
+    /** GUI 视频预览用：取指定屏幕的动态纹理（未创建过时返回 null） */
+    public static VideoScreenTexture getScreenTexture(BlockPos pos) {
+        VideoScreenRenderer r = instance;
+        return r == null ? null : r.screenTextures.get(pos);
+    }
+
     public VideoScreenRenderer(BlockEntityRendererProvider.Context context) {
+        instance = this;
         ensureProgressBarTexture();
         this.itemModelResolver = context.itemModelResolver();
     }

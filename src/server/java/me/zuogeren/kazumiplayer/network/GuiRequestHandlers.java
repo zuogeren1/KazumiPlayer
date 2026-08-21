@@ -1,0 +1,293 @@
+package me.zuogeren.kazumiplayer.network;
+
+import me.zuogeren.kazumiplayer.network.gui.GuiPayloads;
+import me.zuogeren.kazumiplayer.network.gui.GuiProtocol;
+import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
+import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
+import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
+import me.zuogeren.kazumiplayer.rule.Rule;
+import me.zuogeren.kazumiplayer.rule.RuleManager;
+import me.zuogeren.kazumiplayer.rule.dto.Road;
+import me.zuogeren.kazumiplayer.search.BangumiApi;
+import me.zuogeren.kazumiplayer.search.RuleSearchSessionCache;
+import me.zuogeren.kazumiplayer.search.SearchManager;
+import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
+import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
+import me.zuogeren.kazumiplayer.util.JsonUtil;
+import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.util.KazumiMessages;
+import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * 服务端 GUI 通用请求处理：search_bangumi / search_rule / query_chapters /
+ * play_episode / join / leave。
+ * 与聊天命令共用同一批管理器与会话缓存（GUI 搜到的 resultId 对 /kazumi play 同样有效）。
+ */
+public class GuiRequestHandlers {
+
+    private static RuleManager ruleManager;
+    private static SearchManager searchManager;
+    private static final BangumiApi bangumiApi = new BangumiApi();
+    private static final RuleSearchSessionCache ruleSessionCache = new RuleSearchSessionCache();
+
+    public static void init(RuleManager rm, SearchManager sm) {
+        ruleManager = rm;
+        searchManager = sm;
+    }
+
+    public static void handle(GuiActionPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer sp)) return;
+            KazumiLog.network.info("GUI action '{}' at {} from {}", packet.action(),
+                packet.screenPos().toShortString(), sp.getName().getString());
+            switch (packet.action()) {
+                case GuiProtocol.ACTION_SEARCH_BANGUMI -> searchBangumi(sp, packet.payloadJson());
+                case GuiProtocol.ACTION_SEARCH_RULE -> searchRule(sp, packet.payloadJson());
+                case GuiProtocol.ACTION_QUERY_CHAPTERS -> queryChapters(sp, packet.payloadJson());
+                case GuiProtocol.ACTION_PLAY_EPISODE -> playEpisode(sp, packet.screenPos(), packet.payloadJson());
+                case GuiProtocol.ACTION_JOIN -> join(sp, packet.screenPos());
+                case GuiProtocol.ACTION_LEAVE -> leave(sp, packet.screenPos());
+                case GuiProtocol.ACTION_STOP_SCREEN -> stopScreen(sp, packet.screenPos());
+                default -> sendError(sp, "未知操作: " + packet.action());
+            }
+        });
+    }
+
+    // ---- 搜索 ----
+
+    private static void searchBangumi(ServerPlayer sp, String payloadJson) {
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.SearchBangumiPayload.class);
+        if (payload == null || payload.keyword().isBlank()) return;
+        bangumiApi.search(payload.keyword(), 50, 0)
+            .thenAccept(subjects -> {
+                List<GuiPayloads.BangumiResultItem> items = new ArrayList<>();
+                for (var s : subjects) {
+                    items.add(new GuiPayloads.BangumiResultItem(
+                        s.getDisplayName(),
+                        s.getDate() != null ? s.getDate() : "",
+                        s.getSummary() != null ? s.getSummary() : ""));
+                }
+                KazumiLog.network.info("GUI bangumi search '{}': {} results", payload.keyword(), items.size());
+                send(sp, GuiProtocol.DATA_BANGUMI_RESULTS, GuiPayloads.toJson(items));
+            })
+            .exceptionally(e -> {
+                KazumiLog.network.warn("GUI bangumi search '{}' failed: {}", payload.keyword(), e.getMessage());
+                return sendError(sp, "bgm 搜索失败: " + e.getMessage());
+            });
+    }
+
+    private static void searchRule(ServerPlayer sp, String payloadJson) {
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.SearchRulePayload.class);
+        if (payload == null || payload.keyword().isBlank()) return;
+
+        Map<String, Rule> rules;
+        if (payload.rule().isEmpty()) {
+            rules = ruleManager.getRules();
+        } else {
+            Rule rule = ruleManager.get(payload.rule());
+            if (rule == null) {
+                sendError(sp, "规则不存在: " + payload.rule());
+                return;
+            }
+            rules = Map.of(payload.rule(), rule);
+        }
+        Map<String, Rule> finalRules = rules;
+        searchManager.searchAll(finalRules, payload.keyword())
+            .thenAccept(data -> {
+                String sessionId = ruleSessionCache.createSession(payload.rule(), payload.keyword(), data);
+                var session = ruleSessionCache.getSession(sessionId);
+                List<GuiPayloads.RuleResultItem> items = new ArrayList<>();
+                for (var entry : session.data.results().entrySet()) {
+                    for (var e : entry.getValue()) {
+                        items.add(new GuiPayloads.RuleResultItem(entry.getKey(), e.id(), e.item().name()));
+                    }
+                }
+                send(sp, GuiProtocol.DATA_RULE_RESULTS, GuiPayloads.toJson(items));
+            })
+            .exceptionally(e -> sendError(sp, "规则搜索失败: " + e.getMessage()));
+    }
+
+    private static void queryChapters(ServerPlayer sp, String payloadJson) {
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.QueryChaptersPayload.class);
+        if (payload == null) return;
+        var entry = searchManager.getCache().lookup(payload.id());
+        if (entry == null) {
+            sendError(sp, "搜索结果已过期，请重新搜索");
+            return;
+        }
+        Rule rule = ruleManager.get(payload.rule());
+        if (rule == null) {
+            sendError(sp, "规则不存在: " + payload.rule());
+            return;
+        }
+        ruleManager.getEngine().queryChapters(rule, entry.item().src())
+            .thenAccept(result -> {
+                if (result.roads().isEmpty()) {
+                    sendError(sp, "未找到剧集列表");
+                    return;
+                }
+                Road road = result.roads().get(0);
+                int total = road.data().size();
+                List<String> names = new ArrayList<>();
+                for (int i = 0; i < total; i++) {
+                    names.add(road.identifier().size() > i ? road.identifier().get(i) : ("第" + (i + 1) + "集"));
+                }
+                send(sp, GuiProtocol.DATA_CHAPTERS,
+                    GuiPayloads.toJson(new GuiPayloads.ChaptersPayload(names, total)));
+            })
+            .exceptionally(e -> sendError(sp, "获取剧集失败: " + e.getMessage()));
+    }
+
+    // ---- 播放 ----
+
+    /** 与 /kazumi play 同路径：查缓存 → 取剧集 → 写 BE NBT + 建同步组 */
+    private static void playEpisode(ServerPlayer sp, BlockPos screenPos, String payloadJson) {
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.PlayEpisodePayload.class);
+        if (payload == null) return;
+        var be = sp.level().getBlockEntity(screenPos);
+        if (!(be instanceof VideoScreenBlockEntity)) return;
+
+        var entry = searchManager.getCache().lookup(payload.id());
+        if (entry == null) {
+            sendError(sp, "搜索结果已过期，请重新搜索");
+            return;
+        }
+        Rule rule = ruleManager.get(payload.rule());
+        if (rule == null) {
+            sendError(sp, "规则不存在: " + payload.rule());
+            return;
+        }
+        ruleManager.getEngine().queryChapters(rule, entry.item().src())
+            .thenAccept(result -> {
+                if (result.roads().isEmpty()) {
+                    sendError(sp, "未找到剧集列表");
+                    return;
+                }
+                Road road = result.roads().get(0);
+                int idx = Math.max(1, Math.min(payload.episode(), road.data().size()));
+                String epUrl = road.data().get(idx - 1);
+                String roadJson = JsonUtil.GSON.toJson(result.roads());
+
+                MinecraftServer server = sp.level().getServer();
+                server.execute(() -> {
+                    var beNow = sp.level().getBlockEntity(screenPos);
+                    if (!(beNow instanceof VideoScreenBlockEntity screen)) return;
+                    UUID sid = screen.getScreenId();
+                    SyncGroupManager.get().onPlayStart(sp, sid, screenPos, epUrl);
+                    screen.setPlaybackFull(epUrl, 0, idx, roadJson);
+                    var g = SyncGroupManager.get().getGroup(sid);
+                    if (g != null) screen.setWatchingPlayers(g.watchingPlayersString());
+                    SyncGroupManager.get().broadcastSyncState(sid, server);
+                });
+                String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
+                send(sp, GuiProtocol.DATA_PLAY_OK,
+                    GuiPayloads.toJson(new GuiPayloads.PlayOkPayload(entry.item().name() + " " + name)));
+            })
+            .exceptionally(e -> sendError(sp, "播放失败: " + e.getMessage()));
+    }
+
+    // ---- 加入 / 离开（与 /kazumi join、/kazumi play stop 同逻辑）----
+
+    private static void join(ServerPlayer sp, BlockPos screenPos) {
+        var be = sp.level().getBlockEntity(screenPos);
+        if (!(be instanceof VideoScreenBlockEntity screen)) return;
+        UUID sid = screen.getScreenId();
+        String url = screen.getEpisodeUrl();
+        var group = SyncGroupManager.get().getGroup(sid);
+
+        if (url.isEmpty()) {
+            SyncGroupManager.get().joinStandby(sp, sid, screenPos);
+            SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "加入了同步播放");
+            sendOk(sp, "已加入同步播放（等待播放开始）");
+        } else if (group != null) {
+            long elapsed = group.paused ? 0 : System.currentTimeMillis() - group.serverTimestamp;
+            long currentPos = group.positionMs + elapsed;
+            SyncGroupManager.get().join(sp, sid, url);
+            screen.setPlayback(url, currentPos);
+            screen.setWatchingPlayers(group.watchingPlayersString());
+            SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
+            SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "加入了同步播放");
+            sendOk(sp, "已加入同步播放 (位置: " + (currentPos / 1000) + "s)");
+        } else {
+            SyncGroupManager.get().onPlayStart(sp, sid, screenPos, url);
+            screen.setPlayback(url, 0);
+            var g2 = SyncGroupManager.get().getGroup(sid);
+            if (g2 != null) screen.setWatchingPlayers(g2.watchingPlayersString());
+            SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
+            SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "加入了同步播放");
+            sendOk(sp, "已加入同步播放 (位置: 0s)");
+        }
+    }
+
+    private static void leave(ServerPlayer sp, BlockPos screenPos) {
+        var be = sp.level().getBlockEntity(screenPos);
+        if (!(be instanceof VideoScreenBlockEntity screen)) return;
+        UUID sid = screen.getScreenId();
+        var g = SyncGroupManager.get().getGroup(sid);
+        if (g != null) {
+            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+            screen.updateSyncPosition(g.positionMs + elapsed);
+            SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "离开了同步播放");
+        }
+        SyncGroupManager.get().leave(sp.getUUID());
+        PacketDistributor.sendToPlayer(sp, new PlayStopPacket(screenPos));
+        var g2 = SyncGroupManager.get().getGroup(sid);
+        screen.setWatchingPlayers(g2 != null ? g2.watchingPlayersString() : "");
+        sendOk(sp, "已离开同步播放");
+    }
+
+    /** 停止整块屏幕的播放：保存进度 → 清 NBT → 删组 → 向所有观看者发 PlayStopPacket（比 /kazumi screen stop 多通知步骤） */
+    private static void stopScreen(ServerPlayer sp, BlockPos screenPos) {
+        var be = sp.level().getBlockEntity(screenPos);
+        if (!(be instanceof VideoScreenBlockEntity screen)) return;
+        UUID sid = screen.getScreenId();
+        var g = SyncGroupManager.get().getGroup(sid);
+        if (g != null) {
+            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+            screen.updateSyncPosition(g.positionMs + elapsed);
+        }
+        List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
+
+        screen.clearPlayback();
+        screen.setWatchingPlayers("");
+        SyncGroupManager.get().leaveByScreenId(sid);
+
+        var server = sp.level().getServer();
+        for (UUID pid : watchers) {
+            ServerPlayer p = server.getPlayerList().getPlayer(pid);
+            if (p != null) {
+                PacketDistributor.sendToPlayer(p, new PlayStopPacket(screenPos));
+                KazumiMessages.sendInfo(p, sp.getName().getString() + " 停止了屏幕播放");
+            }
+        }
+        KazumiLog.network.info("GUI stop screen {} ({} watchers notified)", screenPos.toShortString(), watchers.size());
+        sendOk(sp, "已停止屏幕播放");
+    }
+
+    // ---- 辅助 ----
+
+    private static void send(ServerPlayer sp, String dataType, String payloadJson) {
+        PacketDistributor.sendToPlayer(sp, new GuiDataPacket(dataType, payloadJson));
+    }
+
+    private static void sendOk(ServerPlayer sp, String message) {
+        send(sp, GuiProtocol.DATA_PLAY_OK, GuiPayloads.toJson(new GuiPayloads.PlayOkPayload(message)));
+    }
+
+    private static Void sendError(ServerPlayer sp, String message) {
+        send(sp, GuiProtocol.DATA_ERROR, GuiPayloads.toJson(new GuiPayloads.ErrorPayload(message)));
+        KazumiLog.network.debug("GUI request error for {}: {}", sp.getName().getString(), message);
+        return null;
+    }
+}
