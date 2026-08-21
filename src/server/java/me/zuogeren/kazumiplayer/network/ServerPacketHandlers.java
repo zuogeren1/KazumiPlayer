@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.network;
 
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
+import me.zuogeren.kazumiplayer.network.packet.PlayUrlPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
 import me.zuogeren.kazumiplayer.network.packet.SpeakerConnectPacket;
@@ -35,7 +36,33 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             handlePlaybackControl(pkt, context);
         } else if (packet instanceof SpeakerConnectPacket pkt) {
             handleSpeakerConnect(pkt, context);
+        } else if (packet instanceof PlayUrlPacket pkt) {
+            handlePlayUrl(pkt, context);
         }
+    }
+
+    /** GUI 提交的自定义链接：与 /kazumi play-url 同链路（建组 + 写 NBT + 同步观看者） */
+    private static void handlePlayUrl(PlayUrlPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer sp)) return;
+            String url = packet.url().trim();
+            if (url.isEmpty() || url.length() > 2048) {
+                KazumiMessages.sendError(sp, "链接为空或过长");
+                return;
+            }
+            var be = sp.level().getBlockEntity(packet.screenPos());
+            if (!(be instanceof VideoScreenBlockEntity screen)) return;
+
+            UUID sid = screen.getScreenId();
+            SyncGroupManager.get().onPlayStart(sp, sid, packet.screenPos(), url);
+            screen.setPlayback(url, 0);
+            var g = SyncGroupManager.get().getGroup(sid);
+            if (g != null) {
+                screen.setWatchingPlayers(g.watchingPlayersString());
+            }
+            KazumiMessages.sendSuccess(sp, "已开始播放: " + url);
+            KazumiLog.network.info("GUI play-url at {}: {}", packet.screenPos().toShortString(), url);
+        });
     }
 
     private static void handleNextEpisode(NextEpisodePacket packet, IPayloadContext context) {

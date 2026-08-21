@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.network;
 
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
+import me.zuogeren.kazumiplayer.network.packet.PlayUrlPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStartPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
@@ -34,5 +35,6 @@ public class NetworkManager {
         registrar.playToServer(NextEpisodePacket.TYPE, NextEpisodePacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(PlaybackControlPacket.TYPE, PlaybackControlPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(SpeakerConnectPacket.TYPE, SpeakerConnectPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
+        registrar.playToServer(PlayUrlPacket.TYPE, PlayUrlPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
     }
 }

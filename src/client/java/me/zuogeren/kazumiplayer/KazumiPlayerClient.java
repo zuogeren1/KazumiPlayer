@@ -3,9 +3,12 @@ package me.zuogeren.kazumiplayer;
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
 import me.zuogeren.kazumiplayer.client.KazumiConfigScreen;
+import me.zuogeren.kazumiplayer.client.gui.UrlInputScreen;
 import me.zuogeren.kazumiplayer.network.ClientPacketHandlers;
 import me.zuogeren.kazumiplayer.network.PacketDispatcher;
+import me.zuogeren.kazumiplayer.screen.ScreenGuiOpeners;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -48,6 +51,9 @@ public class KazumiPlayerClient {
 
         // 注入 S→C 网络包处理器
         PacketDispatcher.setClientHandler(new ClientPacketHandlers());
+
+        // 注入屏幕右键 GUI 打开器（common 方块经此钩子打开客户端界面）
+        ScreenGuiOpeners.set(screenPos -> Minecraft.getInstance().setScreen(new UrlInputScreen(screenPos)));
 
         KazumiLog.general.info("KazumiPlayer client side initialized");
     }

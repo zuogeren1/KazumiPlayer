@@ -65,7 +65,18 @@ public class VideoScreenBlock extends Block implements EntityBlock {
                 }
             }
         }
-        return InteractionResult.PASS;
+        // 非皮肤方块：允许后续 useWithoutItem（空手打开 URL 输入界面）
+        return InteractionResult.TRY_WITH_EMPTY_HAND;
+    }
+
+    @Override
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
+            Player player, BlockHitResult hit) {
+        if (!level.isClientSide()) return InteractionResult.PASS;
+        // 主手持有物品（如连接工具）时不打开，交给物品自身逻辑
+        if (!player.getMainHandItem().isEmpty()) return InteractionResult.PASS;
+        ScreenGuiOpeners.openUrlInput(pos);
+        return InteractionResult.SUCCESS;
     }
 
     @Nullable
