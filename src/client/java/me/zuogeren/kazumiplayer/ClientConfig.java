@@ -19,6 +19,10 @@ public class ClientConfig {
     public final ModConfigSpec.IntValue sniffTimeoutSeconds;
     // 瞄准屏幕时自动加入同步播放
     public final ModConfigSpec.BooleanValue autoJoinSync;
+    // 全屏观影画面覆盖窗口的百分比 (1-100)
+    public final ModConfigSpec.IntValue fullscreenCoverage;
+    // 全屏观影画面不透明度百分比 (10-100)
+    public final ModConfigSpec.IntValue fullscreenOpacity;
 
     public enum McefLifecycle {
         ON_DEMAND,
@@ -56,6 +60,14 @@ public class ClientConfig {
         autoJoinSync = builder
                 .comment("瞄准屏幕时自动加入同步播放")
                 .define("autoJoinSync", true);
+
+        fullscreenCoverage = builder
+                .comment("全屏观影画面占窗口的百分比 (1-100)，居中显示，小于 100 时四周透出游戏世界")
+                .defineInRange("fullscreenCoverage", 100, 1, 100);
+
+        fullscreenOpacity = builder
+                .comment("全屏观影画面不透明度百分比 (10-100)")
+                .defineInRange("fullscreenOpacity", 100, 10, 100);
 
         builder.pop();
     }

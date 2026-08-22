@@ -27,6 +27,7 @@
 - [x] **播放多级容错**: HTTP 直取播放页解析直链优先（java 路径与浏览器路径对源站可达性互补）→ MCEF 常驻浏览器嗅探（UA 伪装+Cookie 保留+接管式并发+取消入口）→ 重试归因提示；带签名 query 的直链去参后直判快速播放
 - [x] **Cookie 桥接**: 嗅探期间收割 document.cookie 按 host 存入 BrowserCookieStore，RuleRequestEnhancer 钩子使直取/规则请求成对附加 Cookie+伪装 UA
 - [x] **停止屏幕全量通知**: GUI 停止屏幕向全部观看者发 PlayStopPacket + 聊天提示（原 /kazumi screen stop 不通知观看者端）
+- [x] **全屏观影模式**: GUI 预览右下角「全屏」按钮 → 关闭 GUI 由 HUD 层接管画面（RenderGuiLayerEvent.Post@HOTBAR，盖住准心/血条、聊天层浮于其上——T 键原生可用）。覆盖度 fullscreenCoverage(1-100)/不透明度 fullscreenOpacity(10-100) 可配，底部进度条+时间；右上角「退出」按钮点击返回世界（鼠标全程可见可点，InputEvent.MouseButton.Pre 拦截按钮命中点击不下发世界）
 - [ ] **渲染性能优化**: 多屏幕同时播放时帧率优化
 - [x] **直链队列**: 队列复用 EpisodeData 存合成 Road（name="直链队列"，util/DirectLinkQueue），自动下一集/上一集/下一集零改动在队列内推进、无新增 NBT 字段与 S→C 包（BE markDirty 自动同步）。顶栏单按钮：空闲"播放"、播放中"排队"追加；队列面板行=[名称点击切播][插=移到下一个][删]；与规则剧集互斥（剧集中提交拒绝，点选集播放覆盖队列）；queue_add/jump/move/remove 经 GuiProtocol 通用通道，GUI 与 /kazumi play-url 共用 QueueRequestHandlers。顺带修复：旧 handlePlayUrl 不写 episodeData 导致直链播完误切到残留剧集下一集
 

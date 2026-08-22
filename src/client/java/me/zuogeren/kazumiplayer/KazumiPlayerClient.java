@@ -55,6 +55,9 @@ public class KazumiPlayerClient {
         // 时钟同步探测（播放位置插值依赖）
         NeoForge.EVENT_BUS.register(ClientClockSync.class);
 
+        // 全屏观影模式（HUD 画面渲染 + 退出按钮 + 光标保持）
+        NeoForge.EVENT_BUS.register(me.zuogeren.kazumiplayer.client.ClientFullscreenState.class);
+
         // 注入 S→C 网络包处理器
         PacketDispatcher.setClientHandler(new ClientPacketHandlers());
 

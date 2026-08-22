@@ -222,6 +222,11 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.rebuildEpisodeList();
         this.rebuildQueueList();
         this.rebuildWatchList();
+        // 预览区右下角：全屏观影（关闭 GUI，由 HUD 层接管画面，聊天键仍可用）
+        this.addRenderableWidget(Button.builder(Component.literal("全屏"), b -> {
+                me.zuogeren.kazumiplayer.client.ClientFullscreenState.enter(this.screenPos);
+                this.onClose();
+            }).bounds(L.rightX() + L.rightW() - 44, 30 + L.previewH() - 18, 40, 16).build());
         GuiClientState.setListener(this);
     }
 
@@ -262,11 +267,12 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
         int w = this.width, h = this.height;
         var L = this.layout(w, h);
 
+        // 预览须先于 super（控件层）绘制，否则视频会盖住预览区内悬浮的全屏按钮
         this.drawPreview(graphics, L.rightX(), 30, L.rightW(), L.previewH());
+        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 
         // 最右列面板标题（「观看中」与中列选集按钮行平齐）
         graphics.text(this.font, Component.literal("队列").withStyle(ChatFormatting.GRAY), L.sideX(), 30, -1);
