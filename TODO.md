@@ -28,7 +28,7 @@
 - [x] **Cookie 桥接**: 嗅探期间收割 document.cookie 按 host 存入 BrowserCookieStore，RuleRequestEnhancer 钩子使直取/规则请求成对附加 Cookie+伪装 UA
 - [x] **停止屏幕全量通知**: GUI 停止屏幕向全部观看者发 PlayStopPacket + 聊天提示（原 /kazumi screen stop 不通知观看者端）
 - [ ] **渲染性能优化**: 多屏幕同时播放时帧率优化
-- [ ] **直链队列**: 完善队列系统
+- [x] **直链队列**: 队列复用 EpisodeData 存合成 Road（name="直链队列"，util/DirectLinkQueue），自动下一集/上一集/下一集零改动在队列内推进、无新增 NBT 字段与 S→C 包（BE markDirty 自动同步）。顶栏单按钮：空闲"播放"、播放中"排队"追加；队列面板行=[名称点击切播][插=移到下一个][删]；与规则剧集互斥（剧集中提交拒绝，点选集播放覆盖队列）；queue_add/jump/move/remove 经 GuiProtocol 通用通道，GUI 与 /kazumi play-url 共用 QueueRequestHandlers。顺带修复：旧 handlePlayUrl 不写 episodeData 导致直链播完误切到残留剧集下一集
 
 ## BUG
 

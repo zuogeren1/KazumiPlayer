@@ -24,6 +24,12 @@ public final class GuiPayloads {
 
     public record PlayEpisodePayload(String rule, String id, int episode, int road) {}
 
+    /** 直链队列提交：一次可携带多条 URL */
+    public record QueueAddPayload(List<String> urls) {}
+
+    /** 队列按序号操作（jump/move/remove 共用），index 为 1-based */
+    public record QueueIndexPayload(int index) {}
+
     // ---- S→C 响应 ----
 
     public record BangumiResultItem(String name, String date, String summary) {}

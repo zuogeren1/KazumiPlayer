@@ -42,7 +42,7 @@ public class PlayCommands {
                             .executes(ctx -> executePlay(ctx, ruleManager, searchManager,
                                 IntegerArgumentType.getInteger(ctx, "road")))))));
 
-    // /kazumi play-url <url>
+    // /kazumi play-url <url>  与 GUI 直链队列同语义：空闲起播 / 队列播放中追加 / 剧集播放中拒绝
         var playUrl = Commands.literal("play-url")
             .then(Commands.argument("url", StringArgumentType.greedyString())
                 .executes(ctx -> {
@@ -53,13 +53,12 @@ public class PlayCommands {
                         ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
                         return 0;
                     }
-                    var be = player.level().getBlockEntity(screenPos);
-                    if (be instanceof VideoScreenBlockEntity screen) {
-                        SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, url);
-                        setScreenNbt(screen, url, 0);
-                        screen.setPlayingTitle(""); // 直链播放：清空番剧名，GUI 不显示"正在播放"行
+                    String err = me.zuogeren.kazumiplayer.network.QueueRequestHandlers.submit(
+                        player, screenPos, List.of(url));
+                    if (err != null) {
+                        ctx.getSource().sendFailure(KazumiMessages.error(err));
+                        return 0;
                     }
-                    KazumiMessages.sendSuccess(ctx.getSource(), "已开始播放: " + url);
                     return 1;
                 }));
 

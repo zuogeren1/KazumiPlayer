@@ -132,6 +132,18 @@ public class VideoScreenBlockEntity extends BlockEntity {
         markDirty();
     }
 
+    /** 只更新剧集/队列数据（如队列插队、移除项），不动当前播放状态 */
+    public void setEpisodeData(String episodeDataJson) {
+        this.episodeData = episodeDataJson == null ? "" : episodeDataJson;
+        markDirty();
+    }
+
+    /** 只更新当前项序号（1-based），如队列移除待播区之前项后的序号修正 */
+    public void setEpisodeIndex(int index) {
+        this.episodeIndex = index;
+        markDirty();
+    }
+
     public void setWatchingPlayers(String players) {
         this.watchingPlayers = players;
         markDirty();

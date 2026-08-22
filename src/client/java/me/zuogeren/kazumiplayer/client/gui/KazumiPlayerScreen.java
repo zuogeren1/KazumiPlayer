@@ -37,6 +37,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private static final long SEEK_SYNC_GRACE_MS = 5000;
     /** 操作提示条自动隐藏时长 */
     private static final long STATUS_TOAST_MS = 6000;
+    /** 队列行尾缀按钮格宽（插/删） */
+    private static final int QUEUE_TAIL_W = 20;
 
     private final BlockPos screenPos;
 
@@ -79,9 +81,10 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private Button summaryTab;
     private Button roadButton;
     private boolean roadDropdownOpen;
-    private SimpleList queueList;      // 直链播放队列（占位，未来支持多直链排队）
+    private Button playUrlButton;      // 直链提交：空闲时"播放"、播放中变"排队"
+    private SimpleList queueList;      // 直链播放队列
     private SimpleList watchList;      // 当前正在观看的玩家
-    private int watchRefreshCounter;
+    private int sideRefreshCounter;
     private Button pauseButton;
     private SeekSlider seekSlider;
 
@@ -96,31 +99,49 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         return false;
     }
 
+    /** 三列布局度量：init 与渲染共用同一份计算，避免两处公式漂移 */
+    private record Layout(int leftW, int sideW, int rightX, int rightW, int sideX,
+                          int listBottom, int previewH, int splitY, int detailTop) {}
+
+    /**
+     * 左列搜索流 | 中列预览 + 选集/简介/线路 | 右列队列 + 观看玩家。
+     * 预览高度按中列宽锁定 16:9（主流视频比例，避免竖长条黑边），
+     * 剩余高度全部让给选集列表（至少保留 3 行）。
+     */
+    private Layout layout(int w, int h) {
+        int leftW = Math.max(140, w / 3);
+        int sideW = Math.min(220, Math.max(175, w / 4));
+        int rightX = 6 + leftW + 8;
+        int rightW = w - rightX - sideW - 14;
+        int sideX = w - sideW - 6;
+        int listBottom = h - 78;
+        int previewH = Math.min(Math.max(63, rightW * 9 / 16),
+            listBottom - 30 - 20 - ROW_HEIGHT * 3);
+        int splitY = 30 + previewH;
+        return new Layout(leftW, sideW, rightX, rightW, sideX, listBottom, previewH, splitY, splitY + 20);
+    }
+
     @Override
     public void init() {
         int w = this.width, h = this.height;
-        int leftW = Math.max(150, w * 2 / 5);
-        int sideW = Math.min(140, Math.max(104, w / 5));   // 最右列（队列/观看玩家），压缩显示区宽度
-        int rightX = 6 + leftW + 8;
-        int rightW = w - rightX - sideW - 14;              // 中列（预览+选集/简介/线路）
-        int sideX = w - sideW - 6;
-        int listBottom = h - 78;
+        var L = this.layout(w, h);
 
         // ---- 顶栏：直链 ----
         this.urlEdit = new EditBox(this.font, 6, 6, w - 118, 16, Component.literal("直链"));
         this.urlEdit.setMaxLength(2048);
         this.urlEdit.setHint(Component.literal("粘贴视频直链地址..."));
         this.addRenderableWidget(this.urlEdit);
-        this.addRenderableWidget(Button.builder(Component.literal("播放"), b -> this.playDirectUrl())
-            .bounds(w - 106, 6, 50, 16).build());
+        this.playUrlButton = Button.builder(Component.literal("播放"), b -> this.playDirectUrl())
+            .bounds(w - 106, 6, 50, 16).build();
+        this.addRenderableWidget(this.playUrlButton);
         this.addRenderableWidget(Button.builder(Component.literal("关闭"), b -> this.onClose())
             .bounds(w - 52, 6, 46, 16).build());
 
         // ---- 左列：搜索行 + 结果列表 ----
         // 四个操作：搜索(bgm 番剧) / 搜源(跳过 bgm 直接搜全部规则源，bgm 不可达时用) / 清空 / 返回
         int btnW = 32;
-        int rowBtnsX = 6 + leftW - (btnW * 4 + 12);
-        this.searchEdit = new EditBox(this.font, 6, 30, leftW - (btnW * 4 + 12) - 4, 16, Component.literal("搜索"));
+        int rowBtnsX = 6 + L.leftW() - (btnW * 4 + 12);
+        this.searchEdit = new EditBox(this.font, 6, 30, L.leftW() - (btnW * 4 + 12) - 4, 16, Component.literal("搜索"));
         this.searchEdit.setMaxLength(128);
         this.searchEdit.setHint(Component.literal("搜索番剧或直接搜源..."));
         this.addRenderableWidget(this.searchEdit);
@@ -133,46 +154,43 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.addRenderableWidget(Button.builder(Component.literal("返回"), b -> this.showBangumiView())
             .bounds(rowBtnsX + (btnW + 4) * 3, 30, btnW, 16).build());
 
-        this.searchList = new SimpleList(this.minecraft, leftW, listBottom - 50, 50, ROW_HEIGHT);
+        this.searchList = new SimpleList(this.minecraft, L.leftW(), L.listBottom() - 50, 50, ROW_HEIGHT);
         this.searchList.setX(6);
         this.addRenderableWidget(this.searchList);
 
-        // ---- 右上：视频预览区（extractRenderState 自绘）----
-        int previewH = Math.max(56, (listBottom - 30 - 22) * 9 / 20);
-        int splitY = 30 + previewH;
-
-        // ---- 右下：选集 / 简介 / 线路下拉 ----
+        // ---- 右下：选集 / 简介 / 线路下拉（预览区由 extractRenderState 自绘）----
         this.episodesTab = Button.builder(Component.literal("选集"), b -> this.switchDetail(DetailView.EPISODES))
-            .bounds(rightX, splitY, 52, 16).build();
+            .bounds(L.rightX(), L.splitY(), 52, 16).build();
         this.summaryTab = Button.builder(Component.literal("简介"), b -> this.switchDetail(DetailView.SUMMARY))
-            .bounds(rightX + 56, splitY, 52, 16).build();
+            .bounds(L.rightX() + 56, L.splitY(), 52, 16).build();
         this.roadButton = Button.builder(Component.literal("线路"), b -> this.roadDropdownOpen = !this.roadDropdownOpen)
-            .bounds(rightX + 112, splitY, Math.min(72, rightW - 112), 16).build();
+            .bounds(L.rightX() + 112, L.splitY(), Math.min(72, L.rightW() - 112), 16).build();
         this.addRenderableWidget(this.episodesTab);
         this.addRenderableWidget(this.summaryTab);
         this.addRenderableWidget(this.roadButton);
 
-        int detailTop = splitY + 20;
-        this.episodeList = new SimpleList(this.minecraft, rightW, listBottom - detailTop, detailTop, ROW_HEIGHT);
-        this.episodeList.setX(rightX);
+        this.episodeList = new SimpleList(this.minecraft, L.rightW(),
+            L.listBottom() - L.detailTop(), L.detailTop(), ROW_HEIGHT);
+        this.episodeList.setX(L.rightX());
         this.addRenderableWidget(this.episodeList);
 
         this.summaryWidget = new MultiLineTextWidget(
             Component.literal(this.subjectSummary.isEmpty() ? "（在左侧选择番剧后显示简介）" : this.subjectSummary),
             this.font);
-        this.summaryWidget.setMaxWidth(rightW - 8);
-        this.summaryWidget.setPosition(rightX + 2, detailTop + 2);
+        this.summaryWidget.setMaxWidth(L.rightW() - 8);
+        this.summaryWidget.setPosition(L.rightX() + 2, L.detailTop() + 2);
         this.addRenderableWidget(this.summaryWidget);
 
-        // ---- 最右列：播放队列（占位）+ 正在观看的玩家 ----
+        // ---- 最右列：播放队列 + 正在观看的玩家 ----
         // 与中列节奏对齐：队列面板顶(44)/底(splitY)与预览区完全重合，
         // 「观看中」标题与选集按钮行平齐(splitY+4)，列表与集数列表同高同底
-        int sideQueueH = Math.max(40, splitY - 44);
-        this.queueList = new SimpleList(this.minecraft, sideW, sideQueueH, 44, ROW_HEIGHT);
-        this.queueList.setX(sideX);
+        int sideQueueH = Math.max(40, L.splitY() - 44);
+        this.queueList = new SimpleList(this.minecraft, L.sideW(), sideQueueH, 44, ROW_HEIGHT);
+        this.queueList.setX(L.sideX());
         this.addRenderableWidget(this.queueList);
-        this.watchList = new SimpleList(this.minecraft, sideW, listBottom - detailTop, detailTop, ROW_HEIGHT);
-        this.watchList.setX(sideX);
+        this.watchList = new SimpleList(this.minecraft, L.sideW(),
+            L.listBottom() - L.detailTop(), L.detailTop(), ROW_HEIGHT);
+        this.watchList.setX(L.sideX());
         this.addRenderableWidget(this.watchList);
 
         // ---- 底部：状态行 + 进度条 + 控制按钮 ----
@@ -228,8 +246,16 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.seekSlider.syncWithPlayer();
         var player = this.getPlayer();
         this.pauseButton.setMessage(Component.literal(player != null && player.isPlaying() ? "暂停" : "播放"));
-        // 观看者名单低频刷新（TabList 名字解析 + BE 同步均有延迟）
-        if (++this.watchRefreshCounter % 20 == 0) this.rebuildWatchList();
+        // 直链提交按钮随屏幕状态切换语义；右侧两面板低频刷新（BE NBT 同步与 TabList 解析均有延迟）
+        var screen = this.boundScreen();
+        if (this.playUrlButton != null) {
+            boolean idle = screen == null || screen.getEpisodeUrl().isEmpty();
+            this.playUrlButton.setMessage(Component.literal(idle ? "播放" : "排队"));
+        }
+        if (++this.sideRefreshCounter % 10 == 0) {
+            this.rebuildQueueList();
+            this.rebuildWatchList();
+        }
     }
 
     // ---- 渲染 ----
@@ -238,22 +264,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
         int w = this.width, h = this.height;
-        int leftW = Math.max(150, w * 2 / 5);
-        int sideW = Math.min(140, Math.max(104, w / 5));
-        int rightX = 6 + leftW + 8;
-        int rightW = w - rightX - sideW - 14;
-        int sideX = w - sideW - 6;
-        int listBottom = h - 78;
-        int previewH = Math.max(56, (listBottom - 30 - 22) * 9 / 20);
+        var L = this.layout(w, h);
 
-        this.drawPreview(graphics, rightX, 30, rightW, previewH);
+        this.drawPreview(graphics, L.rightX(), 30, L.rightW(), L.previewH());
 
         // 最右列面板标题（「观看中」与中列选集按钮行平齐）
-        int splitY = 30 + previewH;
-        graphics.text(this.font, Component.literal("队列").withStyle(ChatFormatting.GRAY), sideX, 30, -1);
-        graphics.text(this.font, Component.literal("观看中").withStyle(ChatFormatting.GRAY), sideX, splitY + 4, -1);
-
-        this.drawPreview(graphics, rightX, 30, rightW, previewH);
+        graphics.text(this.font, Component.literal("队列").withStyle(ChatFormatting.GRAY), L.sideX(), 30, -1);
+        graphics.text(this.font, Component.literal("观看中").withStyle(ChatFormatting.GRAY), L.sideX(), L.splitY() + 4, -1);
 
         // 线路下拉展开层（渲染在预览区之上）
         if (this.roadDropdownOpen && !this.roadNames.isEmpty()) {
@@ -299,11 +316,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
      * 直链播放时番剧名为空，整行不显示。
      */
     private String buildNowPlayingLine() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return "";
-        var beEntity = mc.level.getBlockEntity(this.screenPos);
-        if (!(beEntity instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vsb)
-                || vsb.getPlayingTitle().isEmpty()) {
+        var vsb = this.boundScreen();
+        if (vsb == null || vsb.getPlayingTitle().isEmpty()) {
             return "";
         }
         StringBuilder sb = new StringBuilder("正在播放: ").append(vsb.getPlayingTitle());
@@ -503,21 +517,60 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
     // ---- 最右列面板 ----
 
-    /** 播放队列（占位）：未来支持输入多个直链排队依次播放 */
+    /** 绑定屏幕的客户端 BE（NBT 随服务端 markDirty 自动同步）；未加载返回 null */
+    private me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity boundScreen() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return null;
+        var be = mc.level.getBlockEntity(this.screenPos);
+        return be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vsb ? vsb : null;
+    }
+
+    /**
+     * 播放队列：读绑定屏幕同步过来的队列 NBT（合成 Road，见 DirectLinkQueue）。
+     * 当前播放项永远置顶第一行、金色文字高亮；已播完的项不再显示；
+     * 待播项按相对序号排列，行尾为原版按钮样式的 插（下一个就播）/ 删。
+     * 名称区双击才切播（防误触），插/删按钮单击生效。
+     */
     private void rebuildQueueList() {
         this.queueList.clearEntries();
-        this.queueList.addRow(
-            Component.literal("（直链队列 · 开发中）").withStyle(ChatFormatting.DARK_GRAY), -1, null);
+        var screen = this.boundScreen();
+        java.util.List<String> urls = screen == null ? null
+            : me.zuogeren.kazumiplayer.util.DirectLinkQueue.parseUrls(screen.getEpisodeData());
+        if (urls == null || urls.isEmpty()) {
+            this.queueList.addRow(
+                Component.literal("（队列为空）").withStyle(ChatFormatting.DARK_GRAY), -1, null);
+            return;
+        }
+        int cur = Math.max(1, Math.min(screen.getEpisodeIndex(), urls.size()));
+        // 置顶当前项（金色文字，点击无动作）
+        String curLabel = me.zuogeren.kazumiplayer.util.DirectLinkQueue.makeLabel(urls.get(cur - 1), cur);
+        this.queueList.addRowWithTail(
+            Component.literal("▶ " + curLabel).withStyle(ChatFormatting.YELLOW), -1, 0, null,
+            List.of(), 0);
+        int pending = 0;
+        for (int i = cur; i < urls.size(); i++) {
+            final int index = i + 1;
+            String label = me.zuogeren.kazumiplayer.util.DirectLinkQueue.makeLabel(urls.get(i), index);
+            Runnable onName = () -> this.sendQueueOp(GuiProtocol.ACTION_QUEUE_JUMP, index);
+            Runnable onMove = () -> this.sendQueueOp(GuiProtocol.ACTION_QUEUE_MOVE, index);
+            Runnable onRemove = () -> this.sendQueueOp(GuiProtocol.ACTION_QUEUE_REMOVE, index);
+            this.queueList.addRowWithTail(
+                Component.literal((++pending) + ". " + label), -1, 0, onName,
+                List.of(new SimpleList.Cell("插", onMove), new SimpleList.Cell("删", onRemove)),
+                QUEUE_TAIL_W);
+        }
+    }
+
+    private void sendQueueOp(String action, int index) {
+        this.sendAction(action, new GuiPayloads.QueueIndexPayload(index));
     }
 
     /** 观看者列表：BE 同步的 WatchingPlayers UUID 经客户端 TabList 解析为玩家名 */
     private void rebuildWatchList() {
         this.watchList.clearEntries();
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return;
-        var beEntity = mc.level.getBlockEntity(this.screenPos);
-        if (!(beEntity instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen)
-                || screen.getWatchingPlayers().isEmpty()) {
+        var screen = this.boundScreen();
+        if (screen == null || screen.getWatchingPlayers().isEmpty()) {
             this.watchList.addRow(
                 Component.literal("（暂无观看者）").withStyle(ChatFormatting.DARK_GRAY), -1, null);
             return;
@@ -542,12 +595,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private void playDirectUrl() {
         String url = this.urlEdit.getValue().trim();
         if (url.isEmpty()) return;
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.getConnection() != null) {
-            mc.getConnection().send(new ServerboundCustomPayloadPacket(
-                new me.zuogeren.kazumiplayer.network.packet.PlayUrlPacket(this.screenPos, url)));
-        }
-        setStatus("已提交直链播放");
+        this.sendAction(GuiProtocol.ACTION_QUEUE_ADD, new GuiPayloads.QueueAddPayload(List.of(url)));
+        setStatus("已提交直链");
     }
 
     private void doBangumiSearch() {

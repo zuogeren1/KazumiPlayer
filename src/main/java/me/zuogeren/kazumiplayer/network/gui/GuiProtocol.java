@@ -24,6 +24,14 @@ public final class GuiProtocol {
     public static final String ACTION_LEAVE = "leave";
     /** {} 停止绑定屏幕的播放（清除 NBT + 通知所有观看者） */
     public static final String ACTION_STOP_SCREEN = "stop_screen";
+    /** {urls} 提交直链：屏幕空闲则立即起播，队列播放中则追加到队尾，规则剧集中拒绝 */
+    public static final String ACTION_QUEUE_ADD = "queue_add";
+    /** {index} 立即切播队列第 index 项（1-based） */
+    public static final String ACTION_QUEUE_JUMP = "queue_jump";
+    /** {index} 把队列第 index 项移到当前项之后（下一个就播它），仅待播项有效 */
+    public static final String ACTION_QUEUE_MOVE = "queue_move";
+    /** {index} 从队列移除第 index 项（当前项不可移除） */
+    public static final String ACTION_QUEUE_REMOVE = "queue_remove";
 
     // ---- S→C dataTypes ----
     /** [BangumiResultItem] */

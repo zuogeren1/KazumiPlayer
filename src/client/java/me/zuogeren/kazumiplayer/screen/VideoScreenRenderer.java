@@ -126,13 +126,14 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
 
         // 决定显示视频帧还是占位色
         VideoScreenTexture tex = state.videoTexture;
+        boolean switched = tex.checkPlayerChanged(state.player); // 换片：作废上一部影片残帧
         boolean hasFrame = false;
         if (state.player.isPlaying()) {
             hasFrame = tex.updateFrame(state.player);
         }
 
-        // 已有有效帧时保留旧帧（seek/缓冲导致的短暂无帧不闪占位色）
-        if (!hasFrame && !tex.hasValidFrame()) {
+        // 已有有效帧时保留旧帧（同片 seek/缓冲导致的短暂无帧不闪占位色）；换片后立即显示加载占位
+        if (!hasFrame && (!tex.hasValidFrame() || switched)) {
             tex.fillPlaceholder(COLOR_LOADING);
         }
 

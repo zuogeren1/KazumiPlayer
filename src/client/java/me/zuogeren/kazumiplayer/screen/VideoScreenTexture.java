@@ -32,6 +32,7 @@ public class VideoScreenTexture implements AutoCloseable {
     private NativeImage nativeImage;
     private boolean registered;
     private boolean hasValidFrame;
+    private WaterMediaPlayer boundPlayer; // 上次写入帧的播放器实例，用于识别换片
 
     public VideoScreenTexture(String uniqueKey) {
         this.textureId = Identifier.fromNamespaceAndPath(KazumiPlayer.MODID, PREFIX + uniqueKey);
@@ -49,31 +50,29 @@ public class VideoScreenTexture implements AutoCloseable {
     /**
      * 按目标尺寸创建/重建纹理。
      * 视频分辨率变化时自动调整，避免固定尺寸读回导致画面错乱（上半部分/重复画面/摩尔纹）。
+     *
+     * 重建必须采用「先建新、后覆盖注册」顺序：旧纹理由 TextureManager.register 替换时
+     * 统一 safeClose，保证 textureId 在 manager 中任何时刻都指向完好的纹理——
+     * GUI 预览在 extract 阶段抓取 GpuTextureView 引用、帧末才实际绘制，
+     * 若 textureId 一度指向已关闭视图会导致 "Texture view has been closed" 崩溃。
+     * （注意 DynamicTexture.close() 会连带关闭传入的 NativeImage，禁止再手动关闭）
      */
     private DynamicTexture getOrCreateDynamicTexture(int width, int height) {
-        if (dynamicTexture == null
-                || nativeImage == null
-                || nativeImage.getWidth() != width
-                || nativeImage.getHeight() != height) {
-            if (dynamicTexture != null) {
-                dynamicTexture.close();
-                dynamicTexture = null;
-            }
-            if (nativeImage != null) {
-                nativeImage.close();
-                nativeImage = null;
-            }
-            nativeImage = new NativeImage(width, height, false);
-            dynamicTexture = new DynamicTexture(
-                () -> "KazumiPlayer Video Frame",
-                nativeImage
-            );
-            if (registered) {
-                // 尺寸变化后重新注册（旧 GL 纹理已释放）
-                Minecraft.getInstance().getTextureManager().register(textureId, dynamicTexture);
-            }
-            hasValidFrame = false; // 尺寸变化，旧帧内容不再匹配
+        if (dynamicTexture != null && nativeImage != null
+                && nativeImage.getWidth() == width
+                && nativeImage.getHeight() == height) {
+            return dynamicTexture;
         }
+        nativeImage = new NativeImage(width, height, false);
+        dynamicTexture = new DynamicTexture(
+            () -> "KazumiPlayer Video Frame",
+            nativeImage
+        );
+        if (registered) {
+            // 覆盖注册：manager 自动 safeClose 被替换的旧纹理（含其 pixels）
+            Minecraft.getInstance().getTextureManager().register(textureId, dynamicTexture);
+        }
+        hasValidFrame = false; // 尺寸变化，旧帧内容不再匹配
         return dynamicTexture;
     }
 
@@ -130,21 +129,34 @@ public class VideoScreenTexture implements AutoCloseable {
         return hasValidFrame;
     }
 
+    /**
+     * 检测播放器实例是否更换（切集/自动连播会重建播放器）。
+     * 更换时立即作废上一部影片的残帧——否则新视频解码就绪前
+     * 屏幕上一直定格着上一部的最后一帧；同一播放器的 seek/缓冲不受影响。
+     *
+     * @return true 表示刚发生了换片（调用方通常需要填充占位色）
+     */
+    public boolean checkPlayerChanged(WaterMediaPlayer current) {
+        if (this.boundPlayer == current) return false;
+        this.boundPlayer = current;
+        this.hasValidFrame = false;
+        return true;
+    }
+
     public Identifier getTextureId() {
         return textureId;
     }
 
     @Override
     public void close() {
-        if (dynamicTexture != null) {
-            dynamicTexture.close();
-            dynamicTexture = null;
+        // 从 TextureManager 正规注销（移除条目并 safeClose 纹理），
+        // 避免留下指向已关闭纹理的死 id——后续按 id 寻址的绘制会命中已关闭视图
+        if (registered) {
+            Minecraft.getInstance().getTextureManager().release(textureId);
+            registered = false;
         }
-        if (nativeImage != null) {
-            nativeImage.close();
-            nativeImage = null;
-        }
-        registered = false;
+        dynamicTexture = null;
+        nativeImage = null;
         hasValidFrame = false;
     }
 }

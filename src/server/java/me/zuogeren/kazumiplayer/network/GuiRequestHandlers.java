@@ -59,6 +59,10 @@ public class GuiRequestHandlers {
                 case GuiProtocol.ACTION_JOIN -> join(sp, packet.screenPos());
                 case GuiProtocol.ACTION_LEAVE -> leave(sp, packet.screenPos());
                 case GuiProtocol.ACTION_STOP_SCREEN -> stopScreen(sp, packet.screenPos());
+                case GuiProtocol.ACTION_QUEUE_ADD -> queueAdd(sp, packet.screenPos(), packet.payloadJson());
+                case GuiProtocol.ACTION_QUEUE_JUMP -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.JUMP);
+                case GuiProtocol.ACTION_QUEUE_MOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.MOVE);
+                case GuiProtocol.ACTION_QUEUE_REMOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.REMOVE);
                 default -> sendError(sp, "未知操作: " + packet.action());
             }
         });
@@ -283,6 +287,29 @@ public class GuiRequestHandlers {
         }
         KazumiLog.network.info("GUI stop screen {} ({} watchers notified)", screenPos.toShortString(), watchers.size());
         sendOk(sp, "已停止屏幕播放");
+    }
+
+    // ---- 直链队列（实现见 QueueRequestHandlers）----
+
+    private enum QueueOp { JUMP, MOVE, REMOVE }
+
+    private static void queueAdd(ServerPlayer sp, BlockPos screenPos, String payloadJson) {
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.QueueAddPayload.class);
+        if (payload == null || payload.urls() == null || payload.urls().isEmpty()) return;
+        String err = QueueRequestHandlers.submit(sp, screenPos, payload.urls());
+        if (err != null) sendError(sp, err);
+    }
+
+    /** jump/move/remove 共用：payload 均为 {index}，成功反馈经队列面板 NBT 同步与聊天通知体现 */
+    private static void queueIndexOp(ServerPlayer sp, BlockPos screenPos, String payloadJson, QueueOp op) {
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.QueueIndexPayload.class);
+        if (payload == null) return;
+        String err = switch (op) {
+            case JUMP -> QueueRequestHandlers.jump(sp, screenPos, payload.index());
+            case MOVE -> QueueRequestHandlers.moveAfterCurrent(sp, screenPos, payload.index());
+            case REMOVE -> QueueRequestHandlers.remove(sp, screenPos, payload.index());
+        };
+        if (err != null) sendError(sp, err);
     }
 
     // ---- 辅助 ----

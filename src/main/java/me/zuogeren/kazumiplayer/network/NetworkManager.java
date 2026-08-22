@@ -3,7 +3,6 @@ package me.zuogeren.kazumiplayer.network;
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
-import me.zuogeren.kazumiplayer.network.packet.PlayUrlPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
@@ -37,7 +36,6 @@ public class NetworkManager {
         registrar.playToServer(NextEpisodePacket.TYPE, NextEpisodePacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(PlaybackControlPacket.TYPE, PlaybackControlPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(SpeakerConnectPacket.TYPE, SpeakerConnectPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
-        registrar.playToServer(PlayUrlPacket.TYPE, PlayUrlPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(GuiActionPacket.TYPE, GuiActionPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToClient(GuiDataPacket.TYPE, GuiDataPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
         registrar.playToServer(TimeSyncPacket.TYPE, TimeSyncPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
