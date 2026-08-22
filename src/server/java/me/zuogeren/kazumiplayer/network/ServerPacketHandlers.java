@@ -82,6 +82,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             UUID sid = screen.getScreenId();
             SyncGroupManager.get().onPlayStart(sp, sid, packet.screenPos(), url);
             screen.setPlayback(url, 0);
+            screen.setPlayingTitle(""); // 直链播放：清空番剧名，GUI 不显示"正在播放"行
             var g = SyncGroupManager.get().getGroup(sid);
             if (g != null) {
                 screen.setWatchingPlayers(g.watchingPlayersString());

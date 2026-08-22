@@ -33,6 +33,10 @@ import java.util.List;
 public class KazumiPlayerScreen extends Screen implements GuiClientState.Listener {
 
     private static final int ROW_HEIGHT = 18;
+    /** seek 提交后滑块反向同步的豁免窗口（等播放器真正完成跳转） */
+    private static final long SEEK_SYNC_GRACE_MS = 5000;
+    /** 操作提示条自动隐藏时长 */
+    private static final long STATUS_TOAST_MS = 6000;
 
     private final BlockPos screenPos;
 
@@ -56,8 +60,14 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
     // 底部控制状态
     private String statusTitle = "";
+    private long statusTitleAt;        // 提示设置时刻（操作提示条超时自动隐藏）
     private long pendingSeekMs = -1;
     private long lastSeekSentAt;
+
+    private void setStatus(String text) {
+        this.statusTitle = text == null ? "" : text;
+        this.statusTitleAt = System.currentTimeMillis();
+    }
 
     // 组件
     private EditBox urlEdit;
@@ -84,12 +94,12 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     }
 
     @Override
-    protected void init() {
+    public void init() {
         int w = this.width, h = this.height;
         int leftW = Math.max(150, w * 2 / 5);
         int rightX = 6 + leftW + 8;
         int rightW = w - rightX - 6;
-        int listBottom = h - 66;
+        int listBottom = h - 78;
 
         // ---- 顶栏：直链 ----
         this.urlEdit = new EditBox(this.font, 6, 6, w - 118, 16, Component.literal("直链"));
@@ -211,7 +221,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         int leftW = Math.max(150, w * 2 / 5);
         int rightX = 6 + leftW + 8;
         int rightW = w - rightX - 6;
-        int listBottom = h - 66;
+        int listBottom = h - 78;
         int previewH = Math.max(56, (listBottom - 30 - 22) * 9 / 20);
 
         this.drawPreview(graphics, rightX, 30, rightW, previewH);
@@ -231,16 +241,53 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             }
         }
 
-        // 状态行：标题 + 时间
-        String title = this.statusTitle.isEmpty()
-            ? (this.getPlayer() != null ? "正在播放" : "未在播放")
-            : this.statusTitle;
-        graphics.text(this.font, Component.literal(title).withStyle(ChatFormatting.GRAY), 8, h - 60, -1);
+        // ---- 左下状态区（两行）：操作提示条（醒目、6 秒自动隐藏）+ 正在播放信息 ----
+        int yToast = h - 76;
+        if (!this.statusTitle.isEmpty() && System.currentTimeMillis() - this.statusTitleAt < STATUS_TOAST_MS) {
+            String t = "» " + this.statusTitle;
+            int tw = this.font.width(t);
+            graphics.fill(5, yToast - 3, 12 + tw + 6, yToast + 11, 0xE0101008);
+            graphics.fill(5, yToast - 3, 9, yToast + 11, 0xFFFFC94A);
+            graphics.text(this.font,
+                Component.literal(t).withStyle(ChatFormatting.BOLD).withStyle(ChatFormatting.YELLOW),
+                14, yToast, -1);
+        }
+        String nowPlaying = this.buildNowPlayingLine();
+        if (!nowPlaying.isEmpty()) {
+            graphics.text(this.font,
+                Component.literal(nowPlaying).withStyle(ChatFormatting.YELLOW), 8, yToast + 14, -1);
+        }
         var player = this.getPlayer();
         String time = player != null
             ? KazumiMessages.formatMs(Math.max(0, player.getTimeMs())) + " / " + KazumiMessages.formatMs(player.getDurationMs())
             : "--:-- / --:--";
         graphics.text(this.font, time, w - 8 - this.font.width(time), h - 60, -1);
+    }
+
+    /**
+     * "正在播放"行：番剧名 · 集名 · 线路名（数据来自绑定屏幕 BE 的 NBT）。
+     * 直链播放时番剧名为空，整行不显示。
+     */
+    private String buildNowPlayingLine() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return "";
+        var beEntity = mc.level.getBlockEntity(this.screenPos);
+        if (!(beEntity instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vsb)
+                || vsb.getPlayingTitle().isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("正在播放: ").append(vsb.getPlayingTitle());
+        List<me.zuogeren.kazumiplayer.rule.dto.Road> roads =
+            me.zuogeren.kazumiplayer.util.JsonUtil.parseRoads(vsb.getEpisodeData());
+        if (roads != null && !roads.isEmpty()) {
+            int ri = Math.max(0, Math.min(vsb.getRoadIndex(), roads.size() - 1));
+            var road = roads.get(ri);
+            int idx = Math.max(1, vsb.getEpisodeIndex());
+            String epName = road.identifier().size() >= idx
+                ? road.identifier().get(idx - 1) : ("第" + idx + "集");
+            sb.append(" · ").append(epName).append(" · ").append(road.name());
+        }
+        return sb.toString();
     }
 
     /** 右上视频预览：把绑定屏幕的动态纹理按比例 blit 进区域，无帧时画占位 */
@@ -271,14 +318,14 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 this.bangumiItems = GuiPayloads.fromJson(json,
                     new TypeToken<List<GuiPayloads.BangumiResultItem>>() {}.getType());
                 this.showBangumiView();
-                if (this.bangumiItems.isEmpty()) this.statusTitle = "未找到结果";
+                if (this.bangumiItems.isEmpty()) setStatus("未找到结果");
             }
             case GuiProtocol.DATA_RULE_RESULTS -> {
                 this.ruleItems = GuiPayloads.fromJson(json,
                     new TypeToken<List<GuiPayloads.RuleResultItem>>() {}.getType());
                 this.listView = ListView.RULE;
                 this.rebuildSearchList();
-                if (this.ruleItems.isEmpty()) this.statusTitle = "各源均未搜到结果";
+                if (this.ruleItems.isEmpty()) setStatus("各源均未搜到结果");
             }
             case GuiProtocol.DATA_CHAPTERS -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.ChaptersPayload.class);
@@ -294,12 +341,12 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             }
             case GuiProtocol.DATA_PLAY_OK -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.PlayOkPayload.class);
-                if (p != null) this.statusTitle = p.title();
+                if (p != null) setStatus(p.title());
             }
             case GuiProtocol.DATA_ERROR -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.ErrorPayload.class);
                 if (p != null) {
-                    this.statusTitle = p.message();
+                    setStatus(p.message());
                     KazumiLog.network.warn("GUI action failed: {}", p.message());
                     if (this.minecraft.player != null) {
                         KazumiMessages.sendError(this.minecraft.player, p.message());
@@ -349,7 +396,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.selectedResultId = "";
         this.episodeNames = List.of();
         this.rebuildEpisodeList();
-        this.statusTitle = "正在所有规则中搜索: " + item.name();
+        setStatus("正在所有规则中搜索: " + item.name());
         this.lastKeyword = item.name();
         this.sendAction(GuiProtocol.ACTION_SEARCH_RULE,
             new GuiPayloads.SearchRulePayload("", item.name()));
@@ -361,7 +408,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.selectedResultId = item.id();
         this.selectedRoad = 0;
         this.roadNames = List.of();
-        this.statusTitle = "获取集数: [" + item.rule() + "] " + item.name();
+        setStatus("获取集数: [" + item.rule() + "] " + item.name());
         this.sendAction(GuiProtocol.ACTION_QUERY_CHAPTERS,
             new GuiPayloads.QueryChaptersPayload(item.rule(), item.id(), this.selectedRoad));
     }
@@ -400,7 +447,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.rebuildSearchList();
         this.rebuildEpisodeList();
         this.summaryWidget.setMessage(Component.literal("（在左侧选择番剧后显示简介）"));
-        this.statusTitle = "已清空搜索";
+        setStatus("已清空搜索");
     }
 
     private static void resetSearchState() {
@@ -421,7 +468,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     /** 停止整块屏幕的播放（所有观看者一起停） */
     private void stopScreen() {
         this.sendAction(GuiProtocol.ACTION_STOP_SCREEN, "{}");
-        this.statusTitle = "已请求停止屏幕播放";
+        setStatus("已请求停止屏幕播放");
     }
 
     // ---- 操作 ----
@@ -434,14 +481,14 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             mc.getConnection().send(new ServerboundCustomPayloadPacket(
                 new me.zuogeren.kazumiplayer.network.packet.PlayUrlPacket(this.screenPos, url)));
         }
-        this.statusTitle = "已提交直链播放";
+        setStatus("已提交直链播放");
     }
 
     private void doBangumiSearch() {
         String keyword = this.searchEdit.getValue().trim();
         if (keyword.isEmpty()) return;
         this.lastKeyword = keyword;
-        this.statusTitle = "正在搜索: " + keyword + " ...";
+        setStatus("正在搜索: " + keyword + " ...");
         this.sendAction(GuiProtocol.ACTION_SEARCH_BANGUMI, new GuiPayloads.SearchBangumiPayload(keyword));
     }
 
@@ -450,7 +497,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         String keyword = this.searchEdit.getValue().trim();
         if (keyword.isEmpty()) return;
         this.lastKeyword = keyword;
-        this.statusTitle = "正在所有规则中搜索: " + keyword + " ...";
+        setStatus("正在所有规则中搜索: " + keyword + " ...");
         this.sendAction(GuiProtocol.ACTION_SEARCH_RULE,
             new GuiPayloads.SearchRulePayload("", keyword));
     }
@@ -469,7 +516,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         if (idx < 0 || idx >= this.roadNames.size() || idx == this.selectedRoad) return;
         if (this.selectedRule.isEmpty() || this.selectedResultId.isEmpty()) return;
         this.selectedRoad = idx;
-        this.statusTitle = "切换到线路: " + this.roadNames.get(idx);
+        setStatus("切换到线路: " + this.roadNames.get(idx));
         this.sendAction(GuiProtocol.ACTION_QUERY_CHAPTERS,
             new GuiPayloads.QueryChaptersPayload(this.selectedRule, this.selectedResultId, this.selectedRoad));
     }
@@ -552,11 +599,23 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
         void syncWithPlayer() {
             long dur = durationMs();
-            if (!this.dragging && dur > 0) {
+            // 无播放器/未起播（含切集重建瞬间）：滑块清零，避免残留上一集位置
+            if (dur <= 0) {
+                if (this.value != 0.0) {
+                    this.value = 0;
+                    this.updateMessage();
+                }
+                this.active = false;
+                return;
+            }
+            this.active = true;
+            // seek 提交后的豁免窗口：FFmpeg 跳转（HLS 重拉分片）可达数秒，
+            // 期间反向同步会把滑块拉回旧位置造成"回弹"，故冻结在用户选择的位置
+            boolean seekGrace = System.currentTimeMillis() - lastSeekSentAt < SEEK_SYNC_GRACE_MS;
+            if (!this.dragging && !seekGrace) {
                 this.value = (double) currentMs() / dur;
                 this.updateMessage();
             }
-            this.active = dur > 0;
         }
 
         @Override

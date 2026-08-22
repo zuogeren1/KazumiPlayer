@@ -57,6 +57,7 @@ public class PlayCommands {
                     if (be instanceof VideoScreenBlockEntity screen) {
                         SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, url);
                         setScreenNbt(screen, url, 0);
+                        screen.setPlayingTitle(""); // 直链播放：清空番剧名，GUI 不显示"正在播放"行
                     }
                     KazumiMessages.sendSuccess(ctx.getSource(), "已开始播放: " + url);
                     return 1;
@@ -227,6 +228,7 @@ public class PlayCommands {
                     if (be instanceof VideoScreenBlockEntity screen) {
                         SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, epUrl);
                         setScreenFull(screen, epUrl, 0, roadIdx, episode, roadJson);
+                        screen.setPlayingTitle(entry.item().name());
                     }
                 });
                 String epName = road.identifier().size() > idx ? road.identifier().get(idx) : ("第" + episode + "集");

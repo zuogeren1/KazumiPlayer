@@ -84,25 +84,31 @@ public class ClientPacketHandlers implements IClientPacketHandler {
             if (mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity screen) {
                 var player = ScreenPlayerManager.getPlayer(screen.getBlockPos());
                 if (player == null) return;
+                var sp = ScreenPlayerManager.get(screen.getBlockPos());
                 // 锚点插值：target = 快照位置 + (映射到服务器单调钟的当前值 - 锚点时刻)
                 // serverTimestamp 为服务器发送时的 MonoClock.millis()，钟差由 ClientClockSync 握手补偿；
                 // 时钟未同步时跳过位置校正（只应用暂停状态），避免墙钟偏差造成恒定误差
                 long serverNow = ClientClockSync.serverNowMillis();
                 long targetPos;
+                // 服务端已换片而本地尚未跟进（tick 轮询有 ≤1s 延迟）时禁止兜底 seek 与暂停应用：
+                // 否则新片 target≈0 与旧播放器时间相差悬殊，误触发硬 seek 打断即将重建的播放
+                boolean switchingEpisode = !sp.lastEpisodeUrl.equals(packet.videoUrl());
                 if (serverNow != Long.MIN_VALUE) {
                     long elapsed = packet.paused() ? 0 : Math.max(0, serverNow - packet.serverTimestamp());
                     targetPos = packet.positionMs() + elapsed;
                     boolean seekCooldown =
                             System.currentTimeMillis() - player.getLastSeekMs() < SEEK_COOLDOWN_MS;
                     long drift = Math.abs(player.getTimeMs() - targetPos);
-                    if (!seekCooldown && drift > DRIFT_HARD_LIMIT_MS) {
+                    if (!seekCooldown && !switchingEpisode && drift > DRIFT_HARD_LIMIT_MS) {
                         KazumiLog.sync.warn("Hard resync at {}: drift {}ms exceeds limit",
                                 screen.getBlockPos(), drift);
                         player.seek(targetPos);
                     }
                 }
-                if (packet.paused()) player.pause();
-                else player.resume();
+                if (!switchingEpisode) {
+                    if (packet.paused()) player.pause();
+                    else player.resume();
+                }
             }
         });
     }

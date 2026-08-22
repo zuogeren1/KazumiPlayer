@@ -191,6 +191,7 @@ public class GuiRequestHandlers {
                     UUID sid = screen.getScreenId();
                     SyncGroupManager.get().onPlayStart(sp, sid, screenPos, epUrl);
                     screen.setPlaybackFull(epUrl, 0, roadIdx, idx, roadJson);
+                    screen.setPlayingTitle(entry.item().name());
                     var g = SyncGroupManager.get().getGroup(sid);
                     if (g != null) screen.setWatchingPlayers(g.watchingPlayersString());
                     SyncGroupManager.get().broadcastSyncState(sid, server);

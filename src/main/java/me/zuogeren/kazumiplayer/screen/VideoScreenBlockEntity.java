@@ -32,6 +32,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private int episodeIndex = 1;          // 当前集数 (1-based)
     private int roadIndex = 0;             // 当前线路 (0-based，指向 episodeData 中的 Road)
     private String episodeData = "";       // Road JSON（所有集的名称+URL）
+    private String playingTitle = "";      // 番剧名称（规则播放时写入；直链播放保持空，GUI 不显示"正在播放"行）
     private String watchingPlayers = "";   // 观看者 UUID 列表，逗号分隔
     private boolean playbackPaused;
     private String skinBlock = "";         // 方块皮肤 ID，空=默认
@@ -51,6 +52,11 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public int getEpisodeIndex() { return episodeIndex; }
     public int getRoadIndex() { return roadIndex; }
     public String getEpisodeData() { return episodeData; }
+    public String getPlayingTitle() { return playingTitle; }
+    public void setPlayingTitle(String title) {
+        this.playingTitle = title == null ? "" : title;
+        markDirty();
+    }
     public String getWatchingPlayers() { return watchingPlayers; }
     public boolean isPlaybackPaused() { return playbackPaused; }
     public String getSkinBlock() { return skinBlock; }
@@ -114,6 +120,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.episodeIndex = 1;
         this.roadIndex = 0;
         this.episodeData = "";
+        this.playingTitle = "";
         this.videoState = VideoState.IDLE;
         markDirty();
         KazumiLog.screen.info("clearPlayback side={}",
@@ -158,6 +165,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.episodeIndex = input.getIntOr("EpisodeIndex", 1);
         this.roadIndex = input.getIntOr("RoadIndex", 0);
         this.episodeData = input.getString("EpisodeData").orElse("");
+        this.playingTitle = input.getString("PlayingTitle").orElse("");
         this.watchingPlayers = input.getString("WatchingPlayers").orElse("");
         this.playbackPaused = input.getBooleanOr("PlaybackPaused", false);
         this.skinBlock = input.getString("SkinBlock").orElse("");
@@ -189,6 +197,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putInt("EpisodeIndex", episodeIndex);
         output.putInt("RoadIndex", roadIndex);
         output.putString("EpisodeData", episodeData);
+        output.putString("PlayingTitle", playingTitle);
         output.putString("WatchingPlayers", watchingPlayers);
         output.putBoolean("PlaybackPaused", playbackPaused);
         output.putString("SkinBlock", skinBlock);
@@ -214,6 +223,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putInt("EpisodeIndex", episodeIndex);
         tag.putInt("RoadIndex", roadIndex);
         tag.putString("EpisodeData", episodeData);
+        tag.putString("PlayingTitle", playingTitle);
         tag.putString("WatchingPlayers", watchingPlayers);
         tag.putBoolean("PlaybackPaused", playbackPaused);
         tag.putString("SkinBlock", skinBlock);
