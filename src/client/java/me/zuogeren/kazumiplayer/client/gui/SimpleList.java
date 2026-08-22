@@ -36,6 +36,15 @@ public class SimpleList extends AbstractSelectionList<SimpleList.Row> {
         return this.width - 8;
     }
 
+    /**
+     * 原版默认把滚动条画在 getRowRight() 之外（列表右缘外侧）；
+     * 本列表占满面板宽度，收回右缘内侧对齐边框。
+     */
+    @Override
+    protected int scrollBarX() {
+        return this.getX() + this.width - this.scrollbarWidth() - 2;
+    }
+
     @Override
     public void updateWidgetNarration(NarrationElementOutput output) {
         // 简单文本行无需旁白详情

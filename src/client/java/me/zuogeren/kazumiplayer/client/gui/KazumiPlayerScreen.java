@@ -242,20 +242,21 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         }
 
         // ---- 左下状态区（两行）：操作提示条（醒目、6 秒自动隐藏）+ 正在播放信息 ----
-        int yToast = h - 76;
+        // 提示条背景 [h-75, h-61] 位于列表底(h-78)之下不再重叠；正在播放行贴进度条上方
+        int yToast = h - 75;
         if (!this.statusTitle.isEmpty() && System.currentTimeMillis() - this.statusTitleAt < STATUS_TOAST_MS) {
             String t = "» " + this.statusTitle;
             int tw = this.font.width(t);
-            graphics.fill(5, yToast - 3, 12 + tw + 6, yToast + 11, 0xE0101008);
-            graphics.fill(5, yToast - 3, 9, yToast + 11, 0xFFFFC94A);
+            graphics.fill(5, yToast, 12 + tw + 6, yToast + 14, 0xE0101008);
+            graphics.fill(5, yToast, 9, yToast + 14, 0xFFFFC94A);
             graphics.text(this.font,
                 Component.literal(t).withStyle(ChatFormatting.BOLD).withStyle(ChatFormatting.YELLOW),
-                14, yToast, -1);
+                14, yToast + 3, -1);
         }
         String nowPlaying = this.buildNowPlayingLine();
         if (!nowPlaying.isEmpty()) {
             graphics.text(this.font,
-                Component.literal(nowPlaying).withStyle(ChatFormatting.YELLOW), 8, yToast + 14, -1);
+                Component.literal(nowPlaying).withStyle(ChatFormatting.YELLOW), 8, h - 59, -1);
         }
         var player = this.getPlayer();
         String time = player != null
