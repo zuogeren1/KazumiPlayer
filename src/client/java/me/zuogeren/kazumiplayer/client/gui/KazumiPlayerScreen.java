@@ -340,8 +340,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 }
             }
             case GuiProtocol.DATA_PLAY_OK -> {
-                var p = GuiPayloads.fromJson(json, GuiPayloads.PlayOkPayload.class);
-                if (p != null) setStatus(p.title());
+                // 播放成功：清空操作提示，由下方"正在播放"信息行展示结果（避免两处内容重复）
+                setStatus("");
             }
             case GuiProtocol.DATA_ERROR -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.ErrorPayload.class);
