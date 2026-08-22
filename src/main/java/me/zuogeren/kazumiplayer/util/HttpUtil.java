@@ -53,13 +53,27 @@ public class HttpUtil {
     }
 
     /**
-     * 异步 HTTP 请求
+     * 异步 HTTP 请求（无请求体）
      */
     public static CompletableFuture<String> fetch(
             String urlString,
             String method,
             java.util.Map<String, String> headers,
             java.util.Map<String, String> queryParams) {
+        return fetch(urlString, method, headers, queryParams, null);
+    }
+
+    /**
+     * 异步 HTTP 请求。
+     *
+     * @param body POST 请求体原文（form/json 已由调用方序列化），null 表示无请求体
+     */
+    public static CompletableFuture<String> fetch(
+            String urlString,
+            String method,
+            java.util.Map<String, String> headers,
+            java.util.Map<String, String> queryParams,
+            String body) {
 
         CompletableFuture<String> future = new CompletableFuture<>();
 
@@ -83,7 +97,9 @@ public class HttpUtil {
                 headers.forEach(requestBuilder::header);
 
                 if ("POST".equalsIgnoreCase(method)) {
-                    requestBuilder.POST(HttpRequest.BodyPublishers.noBody());
+                    requestBuilder.POST(body != null
+                            ? HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)
+                            : HttpRequest.BodyPublishers.noBody());
                 } else {
                     requestBuilder.GET();
                 }
@@ -103,11 +119,11 @@ public class HttpUtil {
                 }
 
                 int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
-                String body = readResponseBody(response, maxBytes);
+                String responseBody = readResponseBody(response, maxBytes);
 
                 KazumiLog.http.debug("HTTP {} {} -> {} ({} bytes)",
-                        method, uri.getHost(), response.statusCode(), body.length());
-                future.complete(body);
+                        method, uri.getHost(), response.statusCode(), responseBody.length());
+                future.complete(responseBody);
             } catch (SsrfBlockedException e) {
                 future.completeExceptionally(e);
             } catch (java.net.UnknownHostException e) {

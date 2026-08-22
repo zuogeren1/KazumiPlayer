@@ -60,11 +60,17 @@
 - [x] **网络包分派注册表化**: Server/ClientPacketHandlers 的 if-else instanceof 链改为 `Map<Class<?>, Handler>` 静态注册表，新增操作只需 static 块加一行
 - [x] **重复逻辑抽取**: `JsonUtil.parseFirstRoad`（Road 解析）、`SyncGroup.watchingPlayersString()`（观看者序列化）、`KazumiMessages.formatMs`（时间格式化）、`ScreenCommands` 复用 `getTargetScreen`
 - [x] **seek 权威状态同步**: handlePlaybackControl 的 seek 现经 `applySeek` 同步调用 `updateState` 更新 SyncGroupManager 权威位置并立即广播——修复 GUI 进度条拖动后被周期广播拉回的问题
+- [x] **嗅探架构重写（对齐 Kazumi App）**: 新增 `playback/source` 包忠实移植 Kazumi video_source 架构（IVideoSourceService/McefVideoSourceService/McefSniffBrowser/SniffScripts/租约池/类型化异常/ResolveRequest 身份式取消），tick 播放入口切换至 `VideoSourceResolver.beginPlayback`，`maxConcurrentSniffs` 死配置由租约池启用；实测通过后旧链路已整体删除（PlaybackManager/VideoSniffer/MCEFBrowserLifecycle/dto/VideoSource/PlayStartPacket 死路径），BrowserCookieStore 保留供规则引擎 Cookie 桥接（UA 常量已内联）。遗留：规则的 `useLegacyParser` 字段→客户端嗅探调用接线（需经 NBT/包协议下发）
+- [x] **同步架构重写（时钟同步 + 事件式对齐）**: 参考 AllMusic/MoeMusic 的机制思路（仅借鉴设计，实现为原创代码）——新增 MonoClock 单调毫秒源与 TimeSync/TimeSyncResponse 握手包，ClientClockSync 登录+每 30 秒按四时间戳中值法计算两端钟差；SyncStatePacket 时间戳改为服务器单调锚点，客户端锚点插值目标位置；取消周期性漂移 seek（墙钟偏差曾导致联机时每个广播周期硬 seek 一次的"重复同步"卡顿），仅漂移 >10s 兜底硬 seek。遗留：offset 无多次采样滤波（可取最小 RTT 样本）；切歌/seek 事件仍靠 5s 周期广播收敛（可改事件驱动）
+- [x] **规则引擎对齐排查修复**: 对照 Kazumi lib/services/plugin 逐文件排查——修复 POST body 发不出去（usePost 规则搜索必挂）、API 模板变量不做 URL 编码（中文关键词破坏请求 URL）、空 JSONPath 把整棵子树当名称（roadNamePath/episodeNamePath 为空的规则名变 JSON 串）、URL 归一化放行 javascript: 等 opaque URI 且未编码 href 直接失败（404 症状）、antiCrawlerConfig 未解析（验证页被静默解析为空列表）。遗留见下两条
+- [ ] **API 章节 delimited 格式**: ApiRuleStrategy 仅实现 nested，delimited（分隔符聚合格式）未实现——最新社区规则暂无使用，接入新规则前补齐
+- [ ] **反爬 captcha webview 全流程**: 已做 text/regex 验证页检测报错；Kazumi 完整能力含 xpath 检测、captchaImage/Input/Button 定位、captchaScript JS 注入自动验证（WebView 加载+Cookie 保存+重试），需 MCEF 配合
+- [ ] **API 模式 POST body 模板**: Rule.ApiRequestConfig 缺 body 字段（json/form 模板 + @var 渲染），带 body 的 API 规则无法正确发请求
 - [ ] **RuleManager 重复实例**: `SyncGroupManager.onPlayerJoin` 每次玩家进服 `new RuleManager().loadAll()`，绕过 KazumiPlayerServer 已初始化实例——应注入复用单例
 - [ ] **ClientDisconnectHandler 拆分（god class）**: 259 行混杂鼠标恢复/命令注册/生命周期/核心调度四大职责——拆为 MouseGrabRestorer / ClientCommandRegistration / ClientLifecycleHandler / ClientPlaybackScheduler
-- [ ] **播放器启动逻辑去重**: `onClientTick` 与 `handlePlayStart` 两处各自 `new PlaybackManager()` 启动流程重复；`handlePlayStart` 服务端从不发 PlayStartPacket（死路径）——提取 `startPlayback()` 统一入口
-- [ ] **删除死代码**: `MCEFBrowserLifecycle`、`dto/VideoSource` 无任何调用方；`PlayStateListener` 接口+WaterMediaPlayer listener 列表从未注册——确认后删除
-- [x] **VideoSniffer handler 泄漏**: 常驻浏览器重构后 handler 仅在浏览器创建时注册一次且永不移除（回调路由到 activeFuture），原 add/remove 引用不对称问题不复存在
+- [x] **播放器启动逻辑去重**: handlePlayStart 死路径（PlayStartPacket 包+handler+NetworkManager 注册项）已随旧嗅探链路删除；tick 路径走 playback/source 包
+- [ ] **删除死代码**: `PlayStateListener` 接口+WaterMediaPlayer listener 列表疑似从未注册——确认后删除
+- [x] **VideoSniffer handler 泄漏**: 旧 VideoSniffer 已随嗅探架构重写删除，问题不复存在
 - [ ] **三份 dev mods.toml 去重**: main/server/client resources 下 `META-INF/neoforge.mods.toml` 内容一字不差——保留一份或 processResources 动态生成
 - [ ] **build.gradle configurations.all 篡改**: 全局强制 Usage=JAVA_RUNTIME 破坏变体感知解析——排查 moddev universalJar 变体冲突根因，改为 configuration 级 attributes
 - [ ] **PlaybackControlPacket action 改枚举**: 用 String 表示 action（next/prev/seek_forward 等）无编译期检查——定义 `PlaybackAction` enum + STRING_UTF8 映射 codec
@@ -79,7 +85,7 @@
 - [ ] **PlayCommands 拆分**: 515 行含 10+ 子命令+辅助函数，stop/leave 重复、切集逻辑与 ServerPacketHandlers 重复——拆命令类+EpisodeSwitcher 服务
 - [ ] **搜索缓存抽象**: SearchResultCache / SearchSessionCache / RuleSearchSessionCache 结构重复（Map+定时清理）——提取 `TimedCache<T>` 泛型基类；shutdown() 从未调用
 - [ ] **BangumiApi HttpClient 复用**: 每次 search() new HttpClient/Gson——提升为类级 final 字段
-- [ ] **SNIFF_SCRIPT 外部化**: 70 行 JS 内联字符串——提取为 resources 资源文件
+- [ ] **SNIFF_SCRIPT 外部化**: 新包 playback/source 的 SniffScripts.java 已集中管理全部嗅探 JS（Kazumi 移植版，单一来源消除重复）；可选进一步 resources 文件化
 - [ ] **extractRenderState 跨包引用**: screen 包完全限定名调用 client.ScreenPlayerManager——解耦（注入播放器或独立查询机制）
 - [ ] **onClientTick 魔法数字**: 3000/8000/5000/800/500/100 散落——提为 TimingConstants 命名常量
 - [ ] **多版本支持**: 适配不同 Minecraft 版本

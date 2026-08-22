@@ -1,6 +1,5 @@
 package me.zuogeren.kazumiplayer.client;
 
-import me.zuogeren.kazumiplayer.playback.VideoSniffer;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 
 import java.net.URI;
@@ -19,6 +18,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 会话级内存态，游戏重启后需浏览器重新过一次挑战。
  */
 public final class BrowserCookieStore {
+
+    /** 旧嗅探链路的伪装 UA（Chrome/131）：收割的 Cookie 与该 UA 绑定，复用时必须成对发送 */
+    private static final String SPOOFED_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
     private static final Map<String, Map<String, String>> cookiesByHost = new ConcurrentHashMap<>();
 
@@ -62,7 +65,7 @@ public final class BrowserCookieStore {
         if (cookie.isEmpty()) return Map.of();
         Map<String, String> headers = new HashMap<>();
         headers.put("Cookie", cookie);
-        headers.put("User-Agent", VideoSniffer.getSpoofedUa());
+        headers.put("User-Agent", SPOOFED_UA);
         return headers;
     }
 

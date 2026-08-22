@@ -56,6 +56,16 @@ public class XPathRuleStrategy {
     public RuleSearchResult parseSearch(String raw, RuleExecutionConfig config) {
         List<SearchItem> items = new ArrayList<>();
         List<String> diagnostics = new ArrayList<>();
+
+        // 反爬验证页检测（对齐 Kazumi detectsCaptchaChallenge 的 text/regex 分支）：
+        // 命中时给出明确结论，避免静默解析出 0 条结果被误判为"无此番剧"
+        if (detectCaptcha(raw, config)) {
+            String msg = "检测到站点反爬验证页（captchaDetectValue 命中），需在浏览器完成验证后重试";
+            diagnostics.add(msg);
+            KazumiLog.rule.warn("[{}] {}", config.pluginName(), msg);
+            return new RuleSearchResult(config.pluginName(), items, raw, diagnostics);
+        }
+
         Document doc = Jsoup.parse(raw);
 
         // 搜索结果容器列表
@@ -181,12 +191,11 @@ public class XPathRuleStrategy {
     }
 
     /**
-     * 执行搜索: 准备请求 -> HTTP GET -> 解析
+     * 执行搜索: 准备请求 -> HTTP -> 解析
      */
     public CompletableFuture<RuleSearchResult> search(RuleExecutionConfig config, String keyword) {
         PreparedRuleRequest req = prepareSearchRequest(config, keyword);
-        var searchHeaders = RuleRequestEnhancer.enhance(req.url(), req.headers());
-        return HttpUtil.fetch(req.url(), req.method(), searchHeaders, req.query())
+        return RuleEngine.execute(req)
                 .thenApply(raw -> {
                     int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
                     if (raw.length() > maxBytes) {
@@ -200,15 +209,16 @@ public class XPathRuleStrategy {
     }
 
     /**
-     * 执行章节查询: 准备请求 -> HTTP GET -> 解析
+     * 执行章节查询: 准备请求 -> HTTP -> 解析
      */
     public CompletableFuture<RuleChapterResult> queryChapters(RuleExecutionConfig config, String source) {
         PreparedRuleRequest req = prepareChapterRequest(config, source);
         // 与搜索请求一致带 Referer（对齐 Kazumi：referer = baseUrl + "/"），部分 WAF 会校验
         var headers = new java.util.HashMap<>(req.headers());
         headers.putIfAbsent("Referer", config.baseUrl() + "/");
-        headers = new java.util.HashMap<>(RuleRequestEnhancer.enhance(req.url(), headers));
-        return HttpUtil.fetch(req.url(), req.method(), headers, req.query())
+        return RuleEngine.execute(
+                new PreparedRuleRequest(req.method(), req.url(), headers, req.query(),
+                        req.bodyType(), req.body(), req.includeCookies()))
                 .thenApply(raw -> {
                     int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
                     if (raw.length() > maxBytes) {
@@ -222,6 +232,33 @@ public class XPathRuleStrategy {
     }
 
     // --- 工具方法 ---
+
+    // captchaDetectType 枚举值（对齐 Kazumi CaptchaDetectType）
+    private static final int CAPTCHA_DETECT_XPATH = 1;
+    private static final int CAPTCHA_DETECT_TEXT = 2;
+    private static final int CAPTCHA_DETECT_REGEX = 3;
+
+    /**
+     * 反爬验证页检测（text/regex 类型；xpath 检测与 webview 验证流程未实现，暂跳过）
+     */
+    private static boolean detectCaptcha(String raw, RuleExecutionConfig config) {
+        if (!config.antiCrawlerEnabled() || config.captchaDetectValue().isBlank()
+                || config.captchaDetectType() == CAPTCHA_DETECT_XPATH) {
+            return false;
+        }
+        if (config.captchaDetectType() == CAPTCHA_DETECT_REGEX) {
+            try {
+                return java.util.regex.Pattern.compile(
+                        config.captchaDetectValue(),
+                        java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL)
+                        .matcher(raw).find();
+            } catch (Exception e) {
+                KazumiLog.rule.warn("[{}] captcha regex invalid: {}", config.pluginName(), e.getMessage());
+                return false;
+            }
+        }
+        return raw.contains(config.captchaDetectValue());
+    }
 
     /**
      * 将 XPath 转为相对当前节点执行（Kazumi Dart 语义兼容）。

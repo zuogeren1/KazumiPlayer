@@ -6,6 +6,8 @@ import me.zuogeren.kazumiplayer.network.packet.PlayUrlPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
 import me.zuogeren.kazumiplayer.network.packet.SpeakerConnectPacket;
+import me.zuogeren.kazumiplayer.network.packet.TimeSyncPacket;
+import me.zuogeren.kazumiplayer.network.packet.TimeSyncResponsePacket;
 import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity;
@@ -13,6 +15,7 @@ import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
+import me.zuogeren.kazumiplayer.util.MonoClock;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -40,6 +43,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         register(PlaybackControlPacket.class, ServerPacketHandlers::handlePlaybackControl);
         register(SpeakerConnectPacket.class, ServerPacketHandlers::handleSpeakerConnect);
         register(PlayUrlPacket.class, ServerPacketHandlers::handlePlayUrl);
+        register(TimeSyncPacket.class, ServerPacketHandlers::handleTimeSync);
         register(GuiActionPacket.class, GuiRequestHandlers::handle);
     }
 
@@ -52,6 +56,15 @@ public class ServerPacketHandlers implements IServerPacketHandler {
     public void handle(CustomPacketPayload packet, IPayloadContext context) {
         var h = HANDLERS.get(packet.getClass());
         if (h != null) h.accept(packet, context);
+    }
+
+    /** 时钟同步探测：回显客户端发送时刻并附上服务端收/发两端单调毫秒（须在主线程外尽快响应） */
+    private static void handleTimeSync(TimeSyncPacket packet, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer sp)) return;
+        long recv = MonoClock.millis();
+        long send = MonoClock.millis();
+        PacketDistributor.sendToPlayer(sp,
+                new TimeSyncResponsePacket(packet.clientSendMonotonicMs(), recv, send));
     }
 
     /** GUI 提交的自定义链接：与 /kazumi play-url 同链路（建组 + 写 NBT + 同步观看者） */

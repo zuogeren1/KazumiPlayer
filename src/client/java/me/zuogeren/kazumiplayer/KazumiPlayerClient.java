@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer;
 
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
+import me.zuogeren.kazumiplayer.client.ClientClockSync;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
 import me.zuogeren.kazumiplayer.client.KazumiConfigScreen;
 import me.zuogeren.kazumiplayer.client.BrowserCookieStore;
@@ -50,6 +51,9 @@ public class KazumiPlayerClient {
 
         // 客户端核心调度（每秒 tick）
         NeoForge.EVENT_BUS.register(ClientDisconnectHandler.class);
+
+        // 时钟同步探测（播放位置插值依赖）
+        NeoForge.EVENT_BUS.register(ClientClockSync.class);
 
         // 注入 S→C 网络包处理器
         PacketDispatcher.setClientHandler(new ClientPacketHandlers());

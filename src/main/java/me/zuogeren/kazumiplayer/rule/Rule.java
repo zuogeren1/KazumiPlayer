@@ -38,6 +38,9 @@ public class Rule {
     boolean useLegacyParser;
     boolean adBlocker;
 
+    // 反反爬配置（对齐 Kazumi anti_crawler_config.dart；webview 验证流程未实现，仅做检测）
+    AntiCrawlerConfig antiCrawlerConfig;
+
     // API 模式配置
     ApiSearchConfig searchApiConfig;
     ApiChapterConfig chapterApiConfig;
@@ -64,6 +67,7 @@ public class Rule {
     public boolean isUsePost() { return usePost; }
     public boolean isUseLegacyParser() { return useLegacyParser; }
     public boolean isAdBlocker() { return adBlocker; }
+    public AntiCrawlerConfig getAntiCrawlerConfig() { return antiCrawlerConfig; }
     public ApiSearchConfig getSearchApiConfig() { return searchApiConfig; }
     public ApiChapterConfig getChapterApiConfig() { return chapterApiConfig; }
     public boolean isDeprecated() { return deprecated; }
@@ -100,6 +104,17 @@ public class Rule {
     public static class ApiEpisodePageConfig {
         public String url = "";
         public Map<String, String> query = new LinkedHashMap<>();
+    }
+
+    /**
+     * 反反爬配置（对齐 Kazumi anti_crawler_config.dart）。
+     * captchaDetectType: 1=xpath, 2=text, 3=regex（对齐 CaptchaDetectType）。
+     * webview 验证交互流程未实现——仅支持 text/regex 检测并给出明确报错。
+     */
+    public static class AntiCrawlerConfig {
+        public boolean enabled;
+        public int captchaDetectType = 1;
+        public String captchaDetectValue = "";
     }
 
     /**

@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
+import me.zuogeren.kazumiplayer.util.MonoClock;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -41,7 +42,7 @@ public class SyncGroupManager {
         group.videoUrl = videoUrl;
         group.positionMs = 0;
         group.paused = false;
-        group.serverTimestamp = System.currentTimeMillis();
+        group.serverTimestamp = MonoClock.millis();
     }
 
     public void join(ServerPlayer player, UUID screenId, String videoUrl) {
@@ -86,7 +87,7 @@ public class SyncGroupManager {
         if (group == null) return;
         group.positionMs = positionMs;
         group.paused = paused;
-        group.serverTimestamp = System.currentTimeMillis();
+        group.serverTimestamp = MonoClock.millis();
     }
 
     /**
@@ -95,7 +96,7 @@ public class SyncGroupManager {
     public void broadcastSyncState(UUID screenId, MinecraftServer server) {
         SyncGroup g = groups.get(screenId);
         if (g == null) return;
-        sendSyncState(g, server, System.currentTimeMillis());
+        sendSyncState(g, server, MonoClock.millis());
     }
 
     /**
@@ -106,7 +107,7 @@ public class SyncGroupManager {
     public void onServerTick(ServerTickEvent.Post event) {
         if (++syncTickCounter % SYNC_INTERVAL_TICKS != 0) return;
         MinecraftServer server = event.getServer();
-        long now = System.currentTimeMillis();
+        long now = MonoClock.millis();
         for (SyncGroup g : groups.values()) {
             if (g.players.isEmpty()) continue;
             if (g.videoUrl == null || g.videoUrl.isEmpty()) continue; // 待机组不广播
@@ -161,7 +162,7 @@ public class SyncGroupManager {
                     affectedScreens.add(g.screenPos);
                     var be = sp.level().getBlockEntity(g.screenPos);
                     if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
-                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                        long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
                         screen.updateSyncPosition(g.positionMs + elapsed);
                     }
                 }
@@ -191,7 +192,7 @@ public class SyncGroupManager {
             this.screenId = screenId;
             this.screenPos = pos;
             this.videoUrl = url;
-            this.serverTimestamp = System.currentTimeMillis();
+            this.serverTimestamp = MonoClock.millis();
         }
 
         /** 观看者 UUID 列表 → 逗号分隔字符串（写入 BE 的 WatchingPlayers NBT） */

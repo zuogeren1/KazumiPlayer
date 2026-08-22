@@ -15,10 +15,10 @@ public final class KazumiLog {
     /** Mod 生命周期 / 通用 */
     public static final Logger general   = LoggerFactory.getLogger("kazumiplayer");
 
-    /** 播放引擎 (WaterMediaPlayer, PlaybackManager) */
+    /** 播放引擎 (WaterMediaPlayer, VideoSourceResolver) */
     public static final Logger playback  = LoggerFactory.getLogger("kazumiplayer.playback");
 
-    /** 视频嗅探 (VideoSniffer) */
+    /** 视频嗅探与视频源解析 (playback/source 包) */
     public static final Logger sniff     = LoggerFactory.getLogger("kazumiplayer.sniff");
 
     /** 渲染 (VideoScreenRenderer, VideoScreenTexture) */

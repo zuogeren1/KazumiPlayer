@@ -18,9 +18,13 @@ public record RuleExecutionConfig(
         String userAgent,
         String referer,
         boolean useLegacyParser,
-        boolean adBlocker) {
+        boolean adBlocker,
+        boolean antiCrawlerEnabled,
+        int captchaDetectType,
+        String captchaDetectValue) {
 
     public static RuleExecutionConfig from(Rule rule) {
+        Rule.AntiCrawlerConfig ac = rule.getAntiCrawlerConfig();
         return new RuleExecutionConfig(
                 rule.getName(),
                 rule.getBaseUrl(),
@@ -36,6 +40,9 @@ public record RuleExecutionConfig(
                 rule.getUserAgent(),
                 rule.getReferer(),
                 rule.isUseLegacyParser(),
-                rule.isAdBlocker());
+                rule.isAdBlocker(),
+                ac != null && ac.enabled,
+                ac != null ? ac.captchaDetectType : 1,
+                ac != null ? ac.captchaDetectValue : "");
     }
 }

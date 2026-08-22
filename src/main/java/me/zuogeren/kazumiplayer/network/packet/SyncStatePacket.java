@@ -9,7 +9,9 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
 /**
- * 服务端 → 客户端: 同步播放状态 (seek + pause)。
+ * 服务端 → 客户端: 同步播放状态。
+ * serverTimestamp 为服务器发送时刻的 MonoClock.millis()（服务器单调毫秒锚点），
+ * 客户端经时钟同步握手（ClientClockSync）补偿两端钟差后做锚点插值。
  * 处理逻辑见客户端模块 ClientPacketHandlers。
  */
 public record SyncStatePacket(

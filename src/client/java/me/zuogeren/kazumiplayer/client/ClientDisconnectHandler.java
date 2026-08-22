@@ -4,7 +4,6 @@ import me.zuogeren.kazumiplayer.util.KazumiMessages;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
-import me.zuogeren.kazumiplayer.playback.PlaybackManager;
 import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleEngine;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
@@ -25,7 +24,7 @@ public class ClientDisconnectHandler {
 
     private static int mouseStuckTicks;
 
-    /** 注册正在播放的屏幕（自动播放与 PlayStartPacket 两条路径统一跟踪，供移除兜底清理） */
+    /** 注册正在播放的屏幕（供移除兜底清理） */
     public static void trackScreen(VideoScreenBlockEntity screen) {
         activeScreens.add(screen);
     }
@@ -202,9 +201,8 @@ public class ClientDisconnectHandler {
                 if (sp.player == null && !url.isEmpty() && isWatching(screen, mc)
                         && System.currentTimeMillis() - sp.playbackStartedAt > 3000) {
                     sp.playbackStartedAt = System.currentTimeMillis();
-                    PlaybackManager pm = new PlaybackManager();
-                    pm.playUrl(screen, url);
-                    sp.player = pm.getWaterMedia();
+                    sp.player = me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver
+                        .getInstance().beginPlayback(screen, url);
                     activeScreens.add(screen);
                     sp.lastEpisodeUrl = url;
                     sp.endedNotified = true; // 防止新播放器初始化期间误触发 isEnded()
