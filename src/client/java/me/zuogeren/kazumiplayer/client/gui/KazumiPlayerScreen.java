@@ -222,9 +222,9 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.rebuildEpisodeList();
         this.rebuildQueueList();
         this.rebuildWatchList();
-        // 预览区右下角：全屏观影（关闭 GUI，由 HUD 层接管画面，聊天键仍可用）
+        // 预览区右下角：全屏观影（关闭 GUI，由 HUD 层接管画面，聊天键仍可用；退出时返回本 GUI）
         this.addRenderableWidget(Button.builder(Component.literal("全屏"), b -> {
-                me.zuogeren.kazumiplayer.client.ClientFullscreenState.enter(this.screenPos);
+                me.zuogeren.kazumiplayer.client.ClientFullscreenState.enter(this.screenPos, true);
                 this.onClose();
             }).bounds(L.rightX() + L.rightW() - 44, 30 + L.previewH() - 18, 40, 16).build());
         GuiClientState.setListener(this);

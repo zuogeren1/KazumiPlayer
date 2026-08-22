@@ -3,7 +3,9 @@ package me.zuogeren.kazumiplayer.network;
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
+import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
+import me.zuogeren.kazumiplayer.network.packet.RemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteOpenPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
@@ -45,6 +47,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         register(PlaybackControlPacket.class, ServerPacketHandlers::handlePlaybackControl);
         register(SpeakerConnectPacket.class, ServerPacketHandlers::handleSpeakerConnect);
         register(RemoteOpenPacket.class, ServerPacketHandlers::handleRemoteOpen);
+        register(RemoteFullscreenPacket.class, ServerPacketHandlers::handleRemoteFullscreen);
         register(TimeSyncPacket.class, ServerPacketHandlers::handleTimeSync);
         register(GuiActionPacket.class, GuiRequestHandlers::handle);
     }
@@ -73,16 +76,32 @@ public class ServerPacketHandlers implements IServerPacketHandler {
     private static void handleRemoteOpen(RemoteOpenPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer sp)) return;
-            var level = sp.level();
-            level.getChunk(packet.screenPos().getX() >> 4, packet.screenPos().getZ() >> 4);
-            if (!(level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity)) {
-                KazumiMessages.sendError(sp, "未找到屏幕方块（可能已被破坏）");
-                return;
+            if (validateRemoteTarget(sp, packet.screenPos())) {
+                PacketDistributor.sendToPlayer(sp, new OpenRemoteGuiPacket(packet.screenPos()));
             }
-            PacketDistributor.sendToPlayer(sp, new OpenRemoteGuiPacket(packet.screenPos()));
-            KazumiLog.network.info("Remote open GUI at {} for {}",
-                packet.screenPos().toShortString(), sp.getName().getString());
         });
+    }
+
+    /** 全屏遥控器：同上校验，通过后让客户端直接进入全屏观影 */
+    private static void handleRemoteFullscreen(RemoteFullscreenPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer sp)) return;
+            if (validateRemoteTarget(sp, packet.screenPos())) {
+                PacketDistributor.sendToPlayer(sp, new OpenRemoteFullscreenPacket(packet.screenPos()));
+            }
+        });
+    }
+
+    /** 远程目标校验：强制加载所在区块并确认是屏幕方块，失败时提示。返回 true 表示有效 */
+    private static boolean validateRemoteTarget(ServerPlayer sp, BlockPos pos) {
+        var level = sp.level();
+        level.getChunk(pos.getX() >> 4, pos.getZ() >> 4);
+        if (!(level.getBlockEntity(pos) instanceof VideoScreenBlockEntity)) {
+            KazumiMessages.sendError(sp, "未找到屏幕方块（可能已被破坏）");
+            return false;
+        }
+        KazumiLog.network.info("Remote open at {} for {}", pos.toShortString(), sp.getName().getString());
+        return true;
     }
 
     private static void handleNextEpisode(NextEpisodePacket packet, IPayloadContext context) {

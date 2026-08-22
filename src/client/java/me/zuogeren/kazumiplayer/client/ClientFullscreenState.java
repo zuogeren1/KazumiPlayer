@@ -30,21 +30,28 @@ public class ClientFullscreenState {
 
     private static boolean active;
     private static BlockPos screenPos;
+    /** 进入来源：true=从播放器 GUI 的全屏按钮进入（退出时返回 GUI），false=观影器等直接进入（退出时回世界） */
+    private static boolean returnToGui;
 
     public static boolean isActive() { return active; }
 
     /** 进入全屏：记录目标屏幕并以透明输入屏障替换当前界面 */
-    public static void enter(BlockPos pos) {
+    public static void enter(BlockPos pos, boolean backToGui) {
         screenPos = pos;
         active = true;
+        returnToGui = backToGui;
         FullscreenOverlayScreen.open();
     }
 
-    /** 退出全屏：返回绑定屏幕的播放器 GUI */
+    /** 退出全屏：从 GUI 进入的返回该屏幕的播放器 GUI，其余直接回到世界 */
     public static void exit() {
         deactivate();
-        Minecraft.getInstance().setScreen(
-            new me.zuogeren.kazumiplayer.client.gui.KazumiPlayerScreen(screenPos));
+        var mc = Minecraft.getInstance();
+        if (returnToGui) {
+            mc.setScreen(new me.zuogeren.kazumiplayer.client.gui.KazumiPlayerScreen(screenPos));
+        } else {
+            mc.setScreen(null);
+        }
     }
 
     /** 静默清除全屏状态（断线/退出存档时调用，不打开 GUI） */

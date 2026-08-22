@@ -44,6 +44,9 @@ public class KazumiPlayer {
         VideoScreenRegistration.register(modEventBus);
         SpeakerRegistration.register(modEventBus);
 
+        // 创造模式物品栏标签页
+        CreativeTabRegistration.register(modEventBus);
+
         KazumiLog.general.info("KazumiPlayer common initialized");
     }
 }

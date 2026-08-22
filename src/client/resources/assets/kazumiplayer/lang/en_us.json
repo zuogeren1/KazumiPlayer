@@ -1,6 +1,8 @@
 {
+  "itemGroup.kazumiplayer.kazumiplayer": "KazumiPlayer",
   "block.kazumiplayer.video_screen": "Video Screen",
-  "block.kazumiplayer.speaker": "Speaker",
-  "item.kazumiplayer.connection_tool": "Speaker Connection Tool",
-  "item.kazumiplayer.screen_remote": "Screen Remote"
+  "block.kazumiplayer.speaker": "Speaker (WIP)",
+  "item.kazumiplayer.connection_tool": "Speaker Connection Tool (WIP)",
+  "item.kazumiplayer.screen_remote": "Screen Remote",
+  "item.kazumiplayer.remote_viewer": "Remote Viewer"
 }

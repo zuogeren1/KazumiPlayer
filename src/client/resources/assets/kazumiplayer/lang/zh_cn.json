@@ -1,6 +1,8 @@
 {
+  "itemGroup.kazumiplayer.kazumiplayer": "KazumiPlayer",
   "block.kazumiplayer.video_screen": "视频屏幕",
-  "block.kazumiplayer.speaker": "音响",
-  "item.kazumiplayer.connection_tool": "音响连接工具",
-  "item.kazumiplayer.screen_remote": "屏幕遥控器"
+  "block.kazumiplayer.speaker": "音响 (WIP)",
+  "item.kazumiplayer.connection_tool": "音响连接工具 (WIP)",
+  "item.kazumiplayer.screen_remote": "屏幕遥控器",
+  "item.kazumiplayer.remote_viewer": "远程观影器"
 }

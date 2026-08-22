@@ -6,6 +6,7 @@ import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.client.gui.GuiClientState;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
+import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
@@ -35,6 +36,7 @@ public class ClientPacketHandlers implements IClientPacketHandler {
         register(RuleSyncPacket.class, ClientPacketHandlers::handleRuleSync);
         register(GuiDataPacket.class, ClientPacketHandlers::handleGuiData);
         register(OpenRemoteGuiPacket.class, ClientPacketHandlers::handleOpenRemoteGui);
+        register(OpenRemoteFullscreenPacket.class, ClientPacketHandlers::handleOpenRemoteFullscreen);
         register(TimeSyncResponsePacket.class, (pkt, ctx) -> ClientClockSync.handleResponse((TimeSyncResponsePacket) pkt));
     }
 
@@ -55,6 +57,15 @@ public class ClientPacketHandlers implements IClientPacketHandler {
             if (Minecraft.getInstance().level != null) {
                 Minecraft.getInstance().setScreen(
                     new me.zuogeren.kazumiplayer.client.gui.KazumiPlayerScreen(packet.screenPos()));
+            }
+        }));
+    }
+
+    /** 全屏遥控器：服务端已校验屏幕存在，直接进入全屏观影（退出时不回 GUI） */
+    private static void handleOpenRemoteFullscreen(OpenRemoteFullscreenPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> Minecraft.getInstance().execute(() -> {
+            if (Minecraft.getInstance().level != null) {
+                me.zuogeren.kazumiplayer.client.ClientFullscreenState.enter(packet.screenPos(), false);
             }
         }));
     }
