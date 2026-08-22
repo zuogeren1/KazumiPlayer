@@ -137,14 +137,17 @@ public class GuiRequestHandlers {
                     sendError(sp, "未找到剧集列表");
                     return;
                 }
-                Road road = result.roads().get(0);
+                // 线路选择：road 为 0-based 下标，越界钳制到有效范围（对齐 Kazumi 保持集数序号换线）
+                int roadIdx = Math.max(0, Math.min(payload.road(), result.roads().size() - 1));
+                Road road = result.roads().get(roadIdx);
+                List<String> roadNames = result.roads().stream().map(Road::name).toList();
                 int total = road.data().size();
                 List<String> names = new ArrayList<>();
                 for (int i = 0; i < total; i++) {
                     names.add(road.identifier().size() > i ? road.identifier().get(i) : ("第" + (i + 1) + "集"));
                 }
                 send(sp, GuiProtocol.DATA_CHAPTERS,
-                    GuiPayloads.toJson(new GuiPayloads.ChaptersPayload(names, total)));
+                    GuiPayloads.toJson(new GuiPayloads.ChaptersPayload(roadNames, roadIdx, names, total)));
             })
             .exceptionally(e -> sendError(sp, "获取剧集失败: " + e.getMessage()));
     }
@@ -174,7 +177,9 @@ public class GuiRequestHandlers {
                     sendError(sp, "未找到剧集列表");
                     return;
                 }
-                Road road = result.roads().get(0);
+                // 对齐 Kazumi 切线语义：保持集数序号，取目标线路的同序号集
+                int roadIdx = Math.max(0, Math.min(payload.road(), result.roads().size() - 1));
+                Road road = result.roads().get(roadIdx);
                 int idx = Math.max(1, Math.min(payload.episode(), road.data().size()));
                 String epUrl = road.data().get(idx - 1);
                 String roadJson = JsonUtil.GSON.toJson(result.roads());
@@ -185,14 +190,15 @@ public class GuiRequestHandlers {
                     if (!(beNow instanceof VideoScreenBlockEntity screen)) return;
                     UUID sid = screen.getScreenId();
                     SyncGroupManager.get().onPlayStart(sp, sid, screenPos, epUrl);
-                    screen.setPlaybackFull(epUrl, 0, idx, roadJson);
+                    screen.setPlaybackFull(epUrl, 0, roadIdx, idx, roadJson);
                     var g = SyncGroupManager.get().getGroup(sid);
                     if (g != null) screen.setWatchingPlayers(g.watchingPlayersString());
                     SyncGroupManager.get().broadcastSyncState(sid, server);
                 });
                 String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
                 send(sp, GuiProtocol.DATA_PLAY_OK,
-                    GuiPayloads.toJson(new GuiPayloads.PlayOkPayload(entry.item().name() + " " + name)));
+                    GuiPayloads.toJson(new GuiPayloads.PlayOkPayload(
+                        entry.item().name() + " " + name + "（" + road.name() + "）")));
             })
             .exceptionally(e -> sendError(sp, "播放失败: " + e.getMessage()));
     }

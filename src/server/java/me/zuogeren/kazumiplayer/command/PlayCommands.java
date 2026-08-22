@@ -32,73 +32,17 @@ public class PlayCommands {
     public static LiteralArgumentBuilder<CommandSourceStack> build(
             RuleManager ruleManager, SearchManager searchManager) {
 
-        // /kazumi play <rule> <resultId> <episode>
+        // /kazumi play <rule> <resultId> <episode> [road]  road 为 1-based 线路号，缺省 1
         var play = Commands.literal("play")
             .then(Commands.argument("rule", StringArgumentType.string())
                 .then(Commands.argument("resultId", StringArgumentType.string())
                     .then(Commands.argument("episode", IntegerArgumentType.integer(1))
-                        .executes(ctx -> {
-                            ServerPlayer player = ctx.getSource().getPlayerOrException();
-                            String ruleName = StringArgumentType.getString(ctx, "rule");
-                            String resultId = StringArgumentType.getString(ctx, "resultId");
-                            int episode = IntegerArgumentType.getInteger(ctx, "episode");
+                        .executes(ctx -> executePlay(ctx, ruleManager, searchManager, 1))
+                        .then(Commands.argument("road", IntegerArgumentType.integer(1))
+                            .executes(ctx -> executePlay(ctx, ruleManager, searchManager,
+                                IntegerArgumentType.getInteger(ctx, "road")))))));
 
-                            BlockPos screenPos = getTargetScreen(player);
-                            if (screenPos == null) {
-                                ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
-                                return 0;
-                            }
-
-                            Rule rule = ruleManager.get(ruleName);
-                            if (rule == null) {
-                                ctx.getSource().sendFailure(KazumiMessages.error("规则不存在: " + ruleName));
-                                return 0;
-                            }
-                            if (rule.isDeprecated()) {
-                                KazumiMessages.sendWarn(ctx.getSource(),
-                                    "警告: 规则 " + ruleName + " 已被官方标记为已弃用 (deprecated)，可能已失效，建议改用其他规则");
-                            }
-
-                            var entry = searchManager.getCache().lookup(resultId);
-                            if (entry == null) {
-                                ctx.getSource().sendFailure(KazumiMessages.error("搜索结果已过期，请重新搜索"));
-                                return 0;
-                            }
-
-                            String source = entry.item().src();
-                            KazumiMessages.sendInfo(ctx.getSource(), "正在获取剧集列表...");
-
-                            ruleManager.getEngine().queryChapters(rule, source)
-                                .thenAccept(result -> {
-                                    if (result.roads().isEmpty()) {
-                                        ctx.getSource().sendFailure(KazumiMessages.error("未找到剧集列表"));
-                                        return;
-                                    }
-                                    Road road = result.roads().get(0);
-                                    int idx = Math.max(0, Math.min(episode - 1, road.data().size() - 1));
-                                    String epUrl = road.data().get(idx);
-                                    String roadJson = JsonUtil.GSON.toJson(result.roads());
-
-                                    player.level().getServer().execute(() -> {
-                                        var be = player.level().getBlockEntity(screenPos);
-                                        if (be instanceof VideoScreenBlockEntity screen) {
-                                            SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, epUrl);
-                                            setScreenFull(screen, epUrl, 0, episode, roadJson);
-                                        }
-                                    });
-                                    KazumiMessages.sendSuccess(ctx.getSource(),
-                                        "正在播放: " + road.identifier().get(idx) + " (第" + episode + "集)");
-                                })
-                                .exceptionally(e -> {
-                                    ctx.getSource().sendFailure(KazumiMessages.error(
-                                        "获取剧集失败: " + e.getMessage()));
-                                    return null;
-                                });
-
-                            return 1;
-                        }))));
-
-        // /kazumi play-url <url>
+    // /kazumi play-url <url>
         var playUrl = Commands.literal("play-url")
             .then(Commands.argument("url", StringArgumentType.greedyString())
                 .executes(ctx -> {
@@ -223,6 +167,81 @@ public class PlayCommands {
 
         return play.then(playUrl).then(join).then(playStop).then(playLeave);
     }
+
+    /**
+     * /kazumi play 执行体。road 为 1-based 线路号（对齐 Kazumi 切线语义：
+     * 保持集数序号，取目标线路的同序号集），越界钳制到有效线路范围。
+     */
+    private static int executePlay(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx,
+            RuleManager ruleManager, SearchManager searchManager, int roadNumber) {
+        ServerPlayer player;
+        try {
+            player = ctx.getSource().getPlayerOrException();
+        } catch (Exception e) {
+            ctx.getSource().sendFailure(KazumiMessages.error("该命令只能由玩家执行"));
+            return 0;
+        }
+        String ruleName = StringArgumentType.getString(ctx, "rule");
+        String resultId = StringArgumentType.getString(ctx, "resultId");
+        int episode = IntegerArgumentType.getInteger(ctx, "episode");
+
+        BlockPos screenPos = getTargetScreen(player);
+        if (screenPos == null) {
+            ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
+            return 0;
+        }
+
+        Rule rule = ruleManager.get(ruleName);
+        if (rule == null) {
+            ctx.getSource().sendFailure(KazumiMessages.error("规则不存在: " + ruleName));
+            return 0;
+        }
+        if (rule.isDeprecated()) {
+            KazumiMessages.sendWarn(ctx.getSource(),
+                "警告: 规则 " + ruleName + " 已被官方标记为已弃用 (deprecated)，可能已失效，建议改用其他规则");
+        }
+
+        var entry = searchManager.getCache().lookup(resultId);
+        if (entry == null) {
+            ctx.getSource().sendFailure(KazumiMessages.error("搜索结果已过期，请重新搜索"));
+            return 0;
+        }
+
+        String source = entry.item().src();
+        KazumiMessages.sendInfo(ctx.getSource(), "正在获取剧集列表...");
+
+        ruleManager.getEngine().queryChapters(rule, source)
+            .thenAccept(result -> {
+                if (result.roads().isEmpty()) {
+                    ctx.getSource().sendFailure(KazumiMessages.error("未找到剧集列表"));
+                    return;
+                }
+                int roadIdx = Math.max(0, Math.min(roadNumber - 1, result.roads().size() - 1));
+                Road road = result.roads().get(roadIdx);
+                int idx = Math.max(0, Math.min(episode - 1, road.data().size() - 1));
+                String epUrl = road.data().get(idx);
+                String roadJson = JsonUtil.GSON.toJson(result.roads());
+
+                player.level().getServer().execute(() -> {
+                    var be = player.level().getBlockEntity(screenPos);
+                    if (be instanceof VideoScreenBlockEntity screen) {
+                        SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, epUrl);
+                        setScreenFull(screen, epUrl, 0, roadIdx, episode, roadJson);
+                    }
+                });
+                String epName = road.identifier().size() > idx ? road.identifier().get(idx) : ("第" + episode + "集");
+                KazumiMessages.sendSuccess(ctx.getSource(),
+                    "正在播放: " + epName + " (第" + episode + "集，" + road.name() + ")");
+            })
+            .exceptionally(e -> {
+                ctx.getSource().sendFailure(KazumiMessages.error(
+                    "获取剧集失败: " + e.getMessage()));
+                return null;
+            });
+
+        return 1;
+    }
+
 
     /** 顶层命令：next/prev/time/episodes/pause/resume，单独注册到 /kazumi 下 */
     public static void registerTopLevel(CommandDispatcher<CommandSourceStack> dispatcher,
@@ -365,7 +384,7 @@ public class PlayCommands {
         List<Road> roads = JsonUtil.GSON.fromJson(screen.getEpisodeData(),
             new com.google.gson.reflect.TypeToken<List<Road>>() {}.getType());
         if (roads == null || roads.isEmpty()) return 0;
-        Road road = roads.get(0);
+        Road road = roads.get(Math.max(0, Math.min(screen.getRoadIndex(), roads.size() - 1)));
         int idx = screen.getEpisodeIndex();
         idx = next ? idx + 1 : idx - 1;
         if (idx < 1 || idx > road.data().size()) {
@@ -375,7 +394,7 @@ public class PlayCommands {
         String url = road.data().get(idx - 1);
         String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
         String roadJson = JsonUtil.GSON.toJson(roads);
-        screen.setPlaybackFull(url, 0, idx, roadJson);
+        screen.setPlaybackFull(url, 0, screen.getRoadIndex(), idx, roadJson);
         UUID sid = screen.getScreenId();
         SyncGroupManager.get().onPlayStart(player, sid, screenPos, url);
         syncWatchingPlayers(screen);
@@ -487,8 +506,8 @@ public class PlayCommands {
     }
 
     private static void setScreenFull(VideoScreenBlockEntity screen, String url,
-                                       long positionMs, int episodeIdx, String roadJson) {
-        screen.setPlaybackFull(url, positionMs, episodeIdx, roadJson);
+                                       long positionMs, int roadIdx, int episodeIdx, String roadJson) {
+        screen.setPlaybackFull(url, positionMs, roadIdx, episodeIdx, roadJson);
         syncWatchingPlayers(screen);
     }
 

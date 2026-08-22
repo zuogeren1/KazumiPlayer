@@ -110,7 +110,9 @@ public class ServerPacketHandlers implements IServerPacketHandler {
                 stopPlaybackAndNotify(sp, screen, packet.screenPos());
                 return;
             }
-            Road road = roads.get(0);
+            // 自动下一集保持在当前线路内（线路下标随播放写入 BE NBT）
+            int ri = Math.max(0, Math.min(screen.getRoadIndex(), roads.size() - 1));
+            Road road = roads.get(ri);
             if (idx < 1 || idx > road.data().size()) {
                 // 没有下一集：停止播放并通知
                 stopPlaybackAndNotify(sp, screen, packet.screenPos());
@@ -119,7 +121,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
 
             String nextUrl = road.data().get(idx - 1);
             String allData = JsonUtil.GSON.toJson(roads);
-            screen.setPlaybackFull(nextUrl, 0, idx, allData);
+            screen.setPlaybackFull(nextUrl, 0, ri, idx, allData);
             UUID sid = screen.getScreenId();
             SyncGroupManager.get().onPlayStart(sp, sid, packet.screenPos(), nextUrl);
             // 同步 WatchingPlayers NBT
@@ -198,7 +200,8 @@ public class ServerPacketHandlers implements IServerPacketHandler {
     private static void handleEpisodeSwitch(VideoScreenBlockEntity screen, String action) {
         String data = screen.getEpisodeData();
         if (data.isEmpty()) return;
-        Road road = JsonUtil.parseFirstRoad(data);
+        // 在当前线路内切换集数（线路下标随播放写入 BE NBT）
+        Road road = JsonUtil.parseRoad(data, screen.getRoadIndex());
         if (road == null) return;
 
         int idx = screen.getEpisodeIndex();
@@ -207,7 +210,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         if (idx < 1 || idx > road.data().size()) return;
 
         String url = road.data().get(idx - 1);
-        screen.setPlaybackFull(url, 0, idx, data);
+        screen.setPlaybackFull(url, 0, screen.getRoadIndex(), idx, data);
         KazumiLog.network.info("Episode switch to {}: {}", idx, url);
     }
 

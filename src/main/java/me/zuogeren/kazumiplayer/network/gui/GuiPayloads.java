@@ -19,9 +19,10 @@ public final class GuiPayloads {
     /** rule 为空字符串表示在全部规则中搜索 */
     public record SearchRulePayload(String rule, String keyword) {}
 
-    public record QueryChaptersPayload(String rule, String id) {}
+    /** road 为 0-based 线路下标，缺省 0（Gson 缺字段时 int 默认 0） */
+    public record QueryChaptersPayload(String rule, String id, int road) {}
 
-    public record PlayEpisodePayload(String rule, String id, int episode) {}
+    public record PlayEpisodePayload(String rule, String id, int episode, int road) {}
 
     // ---- S→C 响应 ----
 
@@ -29,7 +30,11 @@ public final class GuiPayloads {
 
     public record RuleResultItem(String rule, String id, String name) {}
 
-    public record ChaptersPayload(List<String> names, int total) {}
+    /**
+     * roads = 全部线路名列表；road = 本次集数列表对应的线路下标；
+     * names/total = 该线路的集数名与总数
+     */
+    public record ChaptersPayload(List<String> roads, int road, List<String> names, int total) {}
 
     public record PlayOkPayload(String title) {}
 

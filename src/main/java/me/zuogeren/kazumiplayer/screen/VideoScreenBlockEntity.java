@@ -30,6 +30,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
 
     // 集数管理
     private int episodeIndex = 1;          // 当前集数 (1-based)
+    private int roadIndex = 0;             // 当前线路 (0-based，指向 episodeData 中的 Road)
     private String episodeData = "";       // Road JSON（所有集的名称+URL）
     private String watchingPlayers = "";   // 观看者 UUID 列表，逗号分隔
     private boolean playbackPaused;
@@ -48,6 +49,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public String getEpisodeUrl() { return episodeUrl; }
     public long getSyncPositionMs() { return syncPositionMs; }
     public int getEpisodeIndex() { return episodeIndex; }
+    public int getRoadIndex() { return roadIndex; }
     public String getEpisodeData() { return episodeData; }
     public String getWatchingPlayers() { return watchingPlayers; }
     public boolean isPlaybackPaused() { return playbackPaused; }
@@ -95,10 +97,11 @@ public class VideoScreenBlockEntity extends BlockEntity {
             level != null && level.isClientSide() ? "client" : "server");
     }
 
-    /** 设置完整播放信息（含集数和 Road 数据） */
-    public void setPlaybackFull(String url, long positionMs, int episodeIdx, String episodeDataJson) {
+    /** 设置完整播放信息（含线路、集数和 Road 数据） */
+    public void setPlaybackFull(String url, long positionMs, int roadIdx, int episodeIdx, String episodeDataJson) {
         this.episodeUrl = url;
         this.syncPositionMs = positionMs;
+        this.roadIndex = roadIdx;
         this.episodeIndex = episodeIdx;
         this.episodeData = episodeDataJson;
         this.videoState = VideoState.PLAYING;
@@ -109,6 +112,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.episodeUrl = "";
         this.syncPositionMs = -1;
         this.episodeIndex = 1;
+        this.roadIndex = 0;
         this.episodeData = "";
         this.videoState = VideoState.IDLE;
         markDirty();
@@ -152,6 +156,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.episodeUrl = input.getString("EpisodeUrl").orElse("");
         this.syncPositionMs = input.getLongOr("SyncPositionMs", -1L);
         this.episodeIndex = input.getIntOr("EpisodeIndex", 1);
+        this.roadIndex = input.getIntOr("RoadIndex", 0);
         this.episodeData = input.getString("EpisodeData").orElse("");
         this.watchingPlayers = input.getString("WatchingPlayers").orElse("");
         this.playbackPaused = input.getBooleanOr("PlaybackPaused", false);
@@ -182,6 +187,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putString("EpisodeUrl", episodeUrl);
         output.putLong("SyncPositionMs", syncPositionMs);
         output.putInt("EpisodeIndex", episodeIndex);
+        output.putInt("RoadIndex", roadIndex);
         output.putString("EpisodeData", episodeData);
         output.putString("WatchingPlayers", watchingPlayers);
         output.putBoolean("PlaybackPaused", playbackPaused);
@@ -206,6 +212,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putString("EpisodeUrl", episodeUrl);
         tag.putLong("SyncPositionMs", syncPositionMs);
         tag.putInt("EpisodeIndex", episodeIndex);
+        tag.putInt("RoadIndex", roadIndex);
         tag.putString("EpisodeData", episodeData);
         tag.putString("WatchingPlayers", watchingPlayers);
         tag.putBoolean("PlaybackPaused", playbackPaused);

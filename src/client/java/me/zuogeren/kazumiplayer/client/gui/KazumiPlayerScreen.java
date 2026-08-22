@@ -47,6 +47,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private enum DetailView { EPISODES, SUMMARY }
     private static DetailView detailView = DetailView.EPISODES;
     private static List<String> episodeNames = List.of();
+    private static List<String> roadNames = List.of();   // 播放线路名列表
+    private static int selectedRoad;                     // 当前线路 (0-based)
     private static String selectedRule = "";
     private static String selectedResultId = "";
     private static String subjectSummary = "";
@@ -65,6 +67,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private MultiLineTextWidget summaryWidget;
     private Button episodesTab;
     private Button summaryTab;
+    private Button roadButton;
+    private boolean roadDropdownOpen;
     private Button pauseButton;
     private SeekSlider seekSlider;
 
@@ -122,13 +126,16 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         int previewH = Math.max(56, (listBottom - 30 - 22) * 9 / 20);
         int splitY = 30 + previewH;
 
-        // ---- 右下：选集 / 简介 ----
+        // ---- 右下：选集 / 简介 / 线路下拉 ----
         this.episodesTab = Button.builder(Component.literal("选集"), b -> this.switchDetail(DetailView.EPISODES))
             .bounds(rightX, splitY, 52, 16).build();
         this.summaryTab = Button.builder(Component.literal("简介"), b -> this.switchDetail(DetailView.SUMMARY))
             .bounds(rightX + 56, splitY, 52, 16).build();
+        this.roadButton = Button.builder(Component.literal("线路"), b -> this.roadDropdownOpen = !this.roadDropdownOpen)
+            .bounds(rightX + 112, splitY, Math.min(72, rightW - 112), 16).build();
         this.addRenderableWidget(this.episodesTab);
         this.addRenderableWidget(this.summaryTab);
+        this.addRenderableWidget(this.roadButton);
 
         int detailTop = splitY + 20;
         this.episodeList = new SimpleList(this.minecraft, rightW, listBottom - detailTop, detailTop, ROW_HEIGHT);
@@ -209,6 +216,21 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
         this.drawPreview(graphics, rightX, 30, rightW, previewH);
 
+        // 线路下拉展开层（渲染在预览区之上）
+        if (this.roadDropdownOpen && !this.roadNames.isEmpty()) {
+            int dx = this.roadButton.getX();
+            int dw = Math.max(this.roadButton.getWidth(), 110);
+            int dy = this.roadButton.getY() + 16;
+            for (int i = 0; i < this.roadNames.size(); i++) {
+                int y0 = dy + i * ROW_HEIGHT;
+                boolean hovered = mouseX >= dx && mouseX < dx + dw && mouseY >= y0 && mouseY < y0 + ROW_HEIGHT;
+                graphics.fill(dx, y0, dx + dw, y0 + ROW_HEIGHT,
+                    hovered ? 0xFF3C3C52 : (i == selectedRoad ? 0xF0252545 : 0xE0000000));
+                String label = (i == selectedRoad ? "> " : "") + this.roadNames.get(i);
+                graphics.text(this.font, Component.literal(label).withStyle(ChatFormatting.GRAY), dx + 4, y0 + 4, -1);
+            }
+        }
+
         // 状态行：标题 + 时间
         String title = this.statusTitle.isEmpty()
             ? (this.getPlayer() != null ? "正在播放" : "未在播放")
@@ -261,7 +283,11 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             case GuiProtocol.DATA_CHAPTERS -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.ChaptersPayload.class);
                 if (p != null) {
+                    this.roadNames = p.roads() != null ? p.roads() : List.of();
+                    this.selectedRoad = this.roadNames.isEmpty() ? 0
+                        : Math.max(0, Math.min(p.road(), this.roadNames.size() - 1));
                     this.episodeNames = p.names();
+                    this.updateRoadButtonLabel();
                     this.rebuildEpisodeList();
                     this.switchDetail(DetailView.EPISODES);
                 }
@@ -329,13 +355,15 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             new GuiPayloads.SearchRulePayload("", item.name()));
     }
 
-    /** 点击规则结果 → 拉取集数列表 */
+    /** 点击规则结果 → 拉取集数列表（重置回第一线路） */
     private void selectRuleResult(GuiPayloads.RuleResultItem item) {
         this.selectedRule = item.rule();
         this.selectedResultId = item.id();
+        this.selectedRoad = 0;
+        this.roadNames = List.of();
         this.statusTitle = "获取集数: [" + item.rule() + "] " + item.name();
         this.sendAction(GuiProtocol.ACTION_QUERY_CHAPTERS,
-            new GuiPayloads.QueryChaptersPayload(item.rule(), item.id()));
+            new GuiPayloads.QueryChaptersPayload(item.rule(), item.id(), this.selectedRoad));
     }
 
     // ---- 右下列表 ----
@@ -382,6 +410,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         lastKeyword = "";
         detailView = DetailView.EPISODES;
         episodeNames = List.of();
+        roadNames = List.of();
+        selectedRoad = 0;
         selectedRule = "";
         selectedResultId = "";
         subjectSummary = "";
@@ -428,7 +458,45 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private void playEpisode(int ep) {
         if (this.selectedRule.isEmpty() || this.selectedResultId.isEmpty()) return;
         this.sendAction(GuiProtocol.ACTION_PLAY_EPISODE,
-            new GuiPayloads.PlayEpisodePayload(this.selectedRule, this.selectedResultId, ep));
+            new GuiPayloads.PlayEpisodePayload(this.selectedRule, this.selectedResultId, ep, this.selectedRoad));
+    }
+
+    // ---- 线路下拉 ----
+
+    /** 切换线路（对齐 Kazumi：保持集数序号，重新拉取目标线路的集数列表） */
+    private void selectRoad(int idx) {
+        this.roadDropdownOpen = false;
+        if (idx < 0 || idx >= this.roadNames.size() || idx == this.selectedRoad) return;
+        if (this.selectedRule.isEmpty() || this.selectedResultId.isEmpty()) return;
+        this.selectedRoad = idx;
+        this.statusTitle = "切换到线路: " + this.roadNames.get(idx);
+        this.sendAction(GuiProtocol.ACTION_QUERY_CHAPTERS,
+            new GuiPayloads.QueryChaptersPayload(this.selectedRule, this.selectedResultId, this.selectedRoad));
+    }
+
+    private void updateRoadButtonLabel() {
+        if (this.roadButton == null) return;
+        String label = this.roadNames.size() > 1
+            ? "线路 " + (this.selectedRoad + 1) + "/" + this.roadNames.size()
+            : (this.roadNames.isEmpty() ? "线路" : "线路 1/1");
+        this.roadButton.setMessage(Component.literal(label));
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
+        // 下拉展开时优先处理：点中选项则切线；点击下拉区域外则收起
+        if (this.roadDropdownOpen && !this.roadNames.isEmpty()) {
+            int dx = this.roadButton.getX();
+            int dw = Math.max(this.roadButton.getWidth(), 110);
+            int dy = this.roadButton.getY() + 16;
+            int mx = (int) event.x(), my = (int) event.y();
+            if (mx >= dx && mx < dx + dw && my >= dy && my < dy + this.roadNames.size() * ROW_HEIGHT) {
+                selectRoad((my - dy) / ROW_HEIGHT);
+                return true;
+            }
+            this.roadDropdownOpen = false;
+        }
+        return super.mouseClicked(event, doubled);
     }
 
     private void sendControl(String action, long value) {
