@@ -165,11 +165,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.addRenderableWidget(this.summaryWidget);
 
         // ---- 最右列：播放队列（占位）+ 正在观看的玩家 ----
-        int panelH = Math.max(40, (listBottom - 44) / 2 - 8);
-        this.queueList = new SimpleList(this.minecraft, sideW, panelH, 44, ROW_HEIGHT);
+        // 与中列节奏对齐：队列面板顶(44)/底(splitY)与预览区完全重合，
+        // 「观看中」标题与选集按钮行平齐(splitY+4)，列表与集数列表同高同底
+        int sideQueueH = Math.max(40, splitY - 44);
+        this.queueList = new SimpleList(this.minecraft, sideW, sideQueueH, 44, ROW_HEIGHT);
         this.queueList.setX(sideX);
         this.addRenderableWidget(this.queueList);
-        this.watchList = new SimpleList(this.minecraft, sideW, panelH, 44 + panelH + 16, ROW_HEIGHT);
+        this.watchList = new SimpleList(this.minecraft, sideW, listBottom - detailTop, detailTop, ROW_HEIGHT);
         this.watchList.setX(sideX);
         this.addRenderableWidget(this.watchList);
 
@@ -246,10 +248,10 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
         this.drawPreview(graphics, rightX, 30, rightW, previewH);
 
-        // 最右列面板标题
+        // 最右列面板标题（「观看中」与中列选集按钮行平齐）
+        int splitY = 30 + previewH;
         graphics.text(this.font, Component.literal("队列").withStyle(ChatFormatting.GRAY), sideX, 30, -1);
-        graphics.text(this.font, Component.literal("观看中").withStyle(ChatFormatting.GRAY),
-            sideX, 44 + Math.max(40, (listBottom - 44) / 2 - 8) + 4, -1);
+        graphics.text(this.font, Component.literal("观看中").withStyle(ChatFormatting.GRAY), sideX, splitY + 4, -1);
 
         this.drawPreview(graphics, rightX, 30, rightW, previewH);
 
