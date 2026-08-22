@@ -59,6 +59,11 @@ public final class VideoSourceResolver {
         pool.cancelAll();
     }
 
+    /** 取消指定屏幕的在途解析并回收其租约（URL 切换停旧播放器时调用） */
+    public void cancelResolve(net.minecraft.core.BlockPos pos) {
+        pool.cancel(pos.toString());
+    }
+
     private void resolveWithRetry(VideoScreenBlockEntity screen, String episodeUrl,
             WaterMediaPlayer player, int attempt) {
         String key = screen.getBlockPos().toString();

@@ -196,6 +196,19 @@ public class ClientDisconnectHandler {
             if (be instanceof VideoScreenBlockEntity screen) {
                 String url = screen.getEpisodeUrl();
                 var sp = ScreenPlayerManager.get(screen.getBlockPos());
+                // 僵尸播放器自愈：解析失败/租约放弃/嗅探超时耗尽后，播放器已登记但永不进入播放态，
+                // 而重试条件是 player == null——不回收就永远卡死（只能离开重新加入才能恢复）。
+                // 阈值覆盖两次嗅探超时重试（默认 30s×2）+ 起播缓冲；暂停中的屏幕不算僵尸
+                long zombieTimeoutMs = Math.max(75_000,
+                    me.zuogeren.kazumiplayer.ClientConfig.CONFIG.sniffTimeoutSeconds.get() * 2000L + 15_000);
+                if (sp.player != null && !sp.everPlayed && !screen.isPlaybackPaused()
+                        && System.currentTimeMillis() - sp.playbackStartedAt > zombieTimeoutMs) {
+                    KazumiLog.playback.warn("Zombie playback (never started) at {}, recycling",
+                        screen.getBlockPos());
+                    sp.player.stop();
+                    sp.player = null;
+                    sp.everPlayed = false;
+                }
                 // 新播放：启动播放器并预置 seek
                 // 只有 WatchingPlayers 中的玩家才自动播放（手动 join 后才能播）
                 if (sp.player == null && !url.isEmpty() && isWatching(screen, mc)
@@ -206,8 +219,9 @@ public class ClientDisconnectHandler {
                     activeScreens.add(screen);
                     sp.lastEpisodeUrl = url;
                     sp.endedNotified = true; // 防止新播放器初始化期间误触发 isEnded()
+                    sp.everPlayed = false;
                     long seekMs = screen.getSyncPositionMs();
-                    if (seekMs > 0) sp.player.seek(seekMs);
+                    if (sp.player != null && seekMs > 0) sp.player.seek(seekMs);
                     // 启动快照：屏幕处于暂停时立即暂停（不再依赖每秒轮询）
                     if (screen.isPlaybackPaused()) {
                         sp.player.pause();
@@ -227,6 +241,7 @@ public class ClientDisconnectHandler {
                     // 播放自然结束后永远无法触发自动下一集
                     if (sp.player.isPlaying()) {
                         sp.endedNotified = false;
+                        sp.everPlayed = true; // 已实际出画面，不参与僵尸自愈判定
                     }
                     // 兜底：部分流（live 型 HLS）永不产生 EOF，用时长逼近视为播完
                     boolean ended = sp.player.isEnded()
@@ -239,8 +254,10 @@ public class ClientDisconnectHandler {
                         mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
                     }
                 }
-                // URL 变了 → 停旧播放器，下次 tick 自动启动新的
+                // URL 变了 → 取消该屏在途解析（防止旧解析完成后复活已停止的旧播放器）、停旧播放器，下次 tick 自动启动新的
                 if (!url.isEmpty() && !url.equals(sp.lastEpisodeUrl)) {
+                    me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance()
+                        .cancelResolve(screen.getBlockPos());
                     if (sp.player != null) {
                         sp.player.stop();
                         sp.player = null;

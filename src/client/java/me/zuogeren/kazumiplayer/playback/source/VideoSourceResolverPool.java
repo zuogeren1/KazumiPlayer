@@ -46,10 +46,19 @@ public class VideoSourceResolverPool {
         return lease;
     }
 
+    /**
+     * 取消该屏在途解析并【立即回收租约】。
+     * 解析 future 稍后以 Cancelled 完成，whenComplete 里的二次 release 因幂等检查直接跳过；
+     * 若不在此处回收，后续 tryAcquire 会因 key 仍被占而失败——
+     * 切集起播新 URL 时恰好撞上旧解析在途就会因此永久卡死（播放器已登记但永不播放）。
+     *
+     * @return true 表示确有在途解析被取消
+     */
     public synchronized boolean cancel(String key) {
         Lease lease = activeLeases.get(key);
         if (lease == null) return false;
         lease.cancel();
+        release(lease);
         return true;
     }
 

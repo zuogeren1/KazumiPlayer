@@ -19,6 +19,8 @@ public final class ScreenPlayerManager {
         public String lastEpisodeUrl = "";
         public long playbackStartedAt; // 防抖：上次启动播放的时间戳
         public boolean endedNotified;
+        /** 本次启动后是否进入过播放态——解析失败/租约放弃的播放器永远为 false，供僵尸自愈判定 */
+        public boolean everPlayed;
     }
 
     private static final Map<BlockPos, ScreenPlayer> players = new ConcurrentHashMap<>();
