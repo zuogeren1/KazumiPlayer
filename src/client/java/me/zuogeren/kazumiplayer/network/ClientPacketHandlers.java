@@ -6,6 +6,7 @@ import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.client.gui.GuiClientState;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
+import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
 import me.zuogeren.kazumiplayer.network.packet.SyncStatePacket;
@@ -33,6 +34,7 @@ public class ClientPacketHandlers implements IClientPacketHandler {
         register(SyncStatePacket.class, ClientPacketHandlers::handleSyncState);
         register(RuleSyncPacket.class, ClientPacketHandlers::handleRuleSync);
         register(GuiDataPacket.class, ClientPacketHandlers::handleGuiData);
+        register(OpenRemoteGuiPacket.class, ClientPacketHandlers::handleOpenRemoteGui);
         register(TimeSyncResponsePacket.class, (pkt, ctx) -> ClientClockSync.handleResponse((TimeSyncResponsePacket) pkt));
     }
 
@@ -45,6 +47,16 @@ public class ClientPacketHandlers implements IClientPacketHandler {
     public void handle(CustomPacketPayload packet, IPayloadContext context) {
         var h = HANDLERS.get(packet.getClass());
         if (h != null) h.accept(packet, context);
+    }
+
+    /** 屏幕遥控器：服务端已校验屏幕存在，打开对应屏幕的播放器 GUI */
+    private static void handleOpenRemoteGui(OpenRemoteGuiPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> Minecraft.getInstance().execute(() -> {
+            if (Minecraft.getInstance().level != null) {
+                Minecraft.getInstance().setScreen(
+                    new me.zuogeren.kazumiplayer.client.gui.KazumiPlayerScreen(packet.screenPos()));
+            }
+        }));
     }
 
     private static void handlePlayStop(PlayStopPacket packet, IPayloadContext context) {

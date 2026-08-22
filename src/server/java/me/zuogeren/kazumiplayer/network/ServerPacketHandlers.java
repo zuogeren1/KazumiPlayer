@@ -3,6 +3,8 @@ package me.zuogeren.kazumiplayer.network;
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
+import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
+import me.zuogeren.kazumiplayer.network.packet.RemoteOpenPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
 import me.zuogeren.kazumiplayer.network.packet.SpeakerConnectPacket;
@@ -42,6 +44,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         register(NextEpisodePacket.class, ServerPacketHandlers::handleNextEpisode);
         register(PlaybackControlPacket.class, ServerPacketHandlers::handlePlaybackControl);
         register(SpeakerConnectPacket.class, ServerPacketHandlers::handleSpeakerConnect);
+        register(RemoteOpenPacket.class, ServerPacketHandlers::handleRemoteOpen);
         register(TimeSyncPacket.class, ServerPacketHandlers::handleTimeSync);
         register(GuiActionPacket.class, GuiRequestHandlers::handle);
     }
@@ -64,6 +67,22 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         long send = MonoClock.millis();
         PacketDistributor.sendToPlayer(sp,
                 new TimeSyncResponsePacket(packet.clientSendMonotonicMs(), recv, send));
+    }
+
+    /** 屏幕遥控器：校验绑定屏幕存在（远程屏幕通常不在视距内，强制加载区块）后让客户端打开 GUI */
+    private static void handleRemoteOpen(RemoteOpenPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer sp)) return;
+            var level = sp.level();
+            level.getChunk(packet.screenPos().getX() >> 4, packet.screenPos().getZ() >> 4);
+            if (!(level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity)) {
+                KazumiMessages.sendError(sp, "未找到屏幕方块（可能已被破坏）");
+                return;
+            }
+            PacketDistributor.sendToPlayer(sp, new OpenRemoteGuiPacket(packet.screenPos()));
+            KazumiLog.network.info("Remote open GUI at {} for {}",
+                packet.screenPos().toShortString(), sp.getName().getString());
+        });
     }
 
     private static void handleNextEpisode(NextEpisodePacket packet, IPayloadContext context) {
