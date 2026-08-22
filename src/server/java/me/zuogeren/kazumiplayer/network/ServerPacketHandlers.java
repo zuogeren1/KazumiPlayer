@@ -83,6 +83,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             SyncGroupManager.get().onPlayStart(sp, sid, packet.screenPos(), url);
             screen.setPlayback(url, 0);
             screen.setPlayingTitle(""); // 直链播放：清空番剧名，GUI 不显示"正在播放"行
+            SyncNotificationUtil.notifyOtherWatchers(sp, packet.screenPos(), sid, "开始播放直链视频");
             var g = SyncGroupManager.get().getGroup(sid);
             if (g != null) {
                 screen.setWatchingPlayers(g.watchingPlayersString());
@@ -172,7 +173,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             if (!(be instanceof VideoScreenBlockEntity screen)) return;
 
             switch (packet.action()) {
-                case "next", "prev" -> handleEpisodeSwitch(screen, packet.action());
+                case "next", "prev" -> handleEpisodeSwitch(sp, screen, packet.action());
                 case "pause", "resume" -> togglePause(sp, screen, "pause".equals(packet.action()));
                 case "seek_forward" -> {
                     long newPos = Math.max(0, screen.getSyncPositionMs() + packet.value() * 1000);
@@ -196,9 +197,11 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             SyncGroupManager.get().updateState(sid, Math.max(0, newPos), g.paused);
             SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
         }
+        SyncNotificationUtil.notifyOtherWatchers(sp, screen.getBlockPos(), sid,
+            "跳转到 " + KazumiMessages.formatMs(Math.max(0, newPos)));
     }
 
-    private static void handleEpisodeSwitch(VideoScreenBlockEntity screen, String action) {
+    private static void handleEpisodeSwitch(ServerPlayer sp, VideoScreenBlockEntity screen, String action) {
         String data = screen.getEpisodeData();
         if (data.isEmpty()) return;
         // 在当前线路内切换集数（线路下标随播放写入 BE NBT）
@@ -212,6 +215,9 @@ public class ServerPacketHandlers implements IServerPacketHandler {
 
         String url = road.data().get(idx - 1);
         screen.setPlaybackFull(url, 0, screen.getRoadIndex(), idx, data);
+        String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
+        SyncNotificationUtil.notifyOtherWatchers(sp, screen.getBlockPos(), screen.getScreenId(),
+            "切换到 " + name);
         KazumiLog.network.info("Episode switch to {}: {}", idx, url);
     }
 
@@ -226,6 +232,8 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         screen.updateSyncPosition(cur);
         screen.setPlaybackPaused(pause);
         SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
+        SyncNotificationUtil.notifyOtherWatchers(sp, screen.getBlockPos(), sid,
+            pause ? "暂停了播放" : "恢复了播放");
     }
 
     private static void handleSpeakerConnect(SpeakerConnectPacket packet, IPayloadContext context) {

@@ -222,11 +222,22 @@ public class ClientDisconnectHandler {
                     sp.player.applyVolumeFromOptions();
                 }
                 // 检测播放完毕 → 自动下一集
-                if (sp.player != null && sp.player.isEnded() && !sp.endedNotified) {
-                    sp.endedNotified = true;
-                    KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
-                    var pkt = new NextEpisodePacket(screen.getBlockPos());
-                    mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
+                if (sp.player != null) {
+                    // 开播即解除 L208 的初始化保护——否则 endedNotified 恒为 true，
+                    // 播放自然结束后永远无法触发自动下一集
+                    if (sp.player.isPlaying()) {
+                        sp.endedNotified = false;
+                    }
+                    // 兜底：部分流（live 型 HLS）永不产生 EOF，用时长逼近视为播完
+                    boolean ended = sp.player.isEnded()
+                        || (sp.player.getDurationMs() > 0
+                            && sp.player.getTimeMs() >= sp.player.getDurationMs() - 300);
+                    if (ended && !sp.endedNotified) {
+                        sp.endedNotified = true;
+                        KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
+                        var pkt = new NextEpisodePacket(screen.getBlockPos());
+                        mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
+                    }
                 }
                 // URL 变了 → 停旧播放器，下次 tick 自动启动新的
                 if (!url.isEmpty() && !url.equals(sp.lastEpisodeUrl)) {

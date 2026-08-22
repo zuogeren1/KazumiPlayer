@@ -184,6 +184,8 @@ public class GuiRequestHandlers {
                 String epUrl = road.data().get(idx - 1);
                 String roadJson = JsonUtil.GSON.toJson(result.roads());
 
+                String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
+
                 MinecraftServer server = sp.level().getServer();
                 server.execute(() -> {
                     var beNow = sp.level().getBlockEntity(screenPos);
@@ -195,8 +197,9 @@ public class GuiRequestHandlers {
                     var g = SyncGroupManager.get().getGroup(sid);
                     if (g != null) screen.setWatchingPlayers(g.watchingPlayersString());
                     SyncGroupManager.get().broadcastSyncState(sid, server);
+                    SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid,
+                        "播放了 " + entry.item().name() + " " + name + "（" + road.name() + "）");
                 });
-                String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
                 send(sp, GuiProtocol.DATA_PLAY_OK,
                     GuiPayloads.toJson(new GuiPayloads.PlayOkPayload(
                         entry.item().name() + " " + name + "（" + road.name() + "）")));
