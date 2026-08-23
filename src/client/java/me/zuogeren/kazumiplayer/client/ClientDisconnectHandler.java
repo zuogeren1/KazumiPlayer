@@ -19,6 +19,12 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ClientDisconnectHandler {
+    // ---- 调度节奏常量 ----
+    private static final int TICKS_PER_SECOND = 20;                 // 播放调度每秒一轮
+    private static final int MOUSE_STUCK_DEBOUNCE_TICKS = 2;        // 光标重捕防抖（0.1s）
+    private static final long PLAYBACK_START_COOLDOWN_MS = 3000;    // 开播冷却，防同步风暴期反复起播
+    private static final long END_DETECT_MARGIN_MS = 300;           // 播完判定提前量（live 型 HLS 无 EOF 兜底）
+
     private static int tickCounter;
     private static final Set<VideoScreenBlockEntity> activeScreens = ConcurrentHashMap.newKeySet();
 
@@ -69,7 +75,7 @@ public class ClientDisconnectHandler {
             int realCursorMode = org.lwjgl.glfw.GLFW.glfwGetInputMode(
                     mc.getWindow().handle(), GLFW_CURSOR);
             if (realCursorMode != GLFW_CURSOR_DISABLED) {
-                if (++mouseStuckTicks > 2) { // 2 tick = 0.1 秒防抖
+                if (++mouseStuckTicks > MOUSE_STUCK_DEBOUNCE_TICKS) {
                     forceRestoreMouseGrab(mc);
                     mouseStuckTicks = 0;
                 }
@@ -155,7 +161,7 @@ public class ClientDisconnectHandler {
 
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
-        if (++tickCounter % 20 != 0) return;
+        if (++tickCounter % TICKS_PER_SECOND != 0) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) {
             // 离开世界时停止所有播放
@@ -213,7 +219,7 @@ public class ClientDisconnectHandler {
                 // 新播放：启动播放器并预置 seek
                 // 只有 WatchingPlayers 中的玩家才自动播放（手动 join 后才能播）
                 if (sp.player == null && !url.isEmpty() && isWatching(screen, mc)
-                        && System.currentTimeMillis() - sp.playbackStartedAt > 3000) {
+                        && System.currentTimeMillis() - sp.playbackStartedAt > PLAYBACK_START_COOLDOWN_MS) {
                     sp.playbackStartedAt = System.currentTimeMillis();
                     sp.player = me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver
                         .getInstance().beginPlayback(screen, url);
@@ -247,7 +253,7 @@ public class ClientDisconnectHandler {
                     // 兜底：部分流（live 型 HLS）永不产生 EOF，用时长逼近视为播完
                     boolean ended = sp.player.isEnded()
                         || (sp.player.getDurationMs() > 0
-                            && sp.player.getTimeMs() >= sp.player.getDurationMs() - 300);
+                            && sp.player.getTimeMs() >= sp.player.getDurationMs() - END_DETECT_MARGIN_MS);
                     if (ended && !sp.endedNotified) {
                         sp.endedNotified = true;
                         KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());

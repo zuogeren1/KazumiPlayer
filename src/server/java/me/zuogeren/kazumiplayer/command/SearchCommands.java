@@ -152,7 +152,7 @@ public class SearchCommands {
                             src.sendFailure(KazumiMessages.error("搜索会话已过期，请重新搜索"));
                             return 0;
                         }
-                        showRulePage(src, session, p);
+                        showRulePage(src, sessionId, session, p);
                         return 1;
                     })));
 
@@ -185,13 +185,13 @@ public class SearchCommands {
                 // 缓存全量结果，翻页走 /kazumi search-rule page 从缓存读
                 String sessionId = ruleSessionCache.createSession(ruleName, keyword, data);
                 var session = ruleSessionCache.getSession(sessionId);
-                showRulePage(src, session, p);
+                showRulePage(src, sessionId, session, p);
             })
             .exceptionally(e -> { KazumiMessages.sendError(src, "搜索出错"); return null; });
         return 1;
     }
 
-    private static void showRulePage(CommandSourceStack src,
+    private static void showRulePage(CommandSourceStack src, String sessionId,
                                       RuleSearchSessionCache.Session session, int page) {
         List<ResultEntry> all = new ArrayList<>();
         for (var entry : session.data.results().entrySet()) {
@@ -217,13 +217,13 @@ public class SearchCommands {
         if (cp > 1) {
             int prev = cp - 1;
             nav.append(ChatComponentUtil.clickable("<<< 上一页  ",
-                "/kazumi search-rule page " + session.sessionId + " " + prev,
+                "/kazumi search-rule page " + sessionId + " " + prev,
                 "切换到第 " + prev + " 页"));
         }
         if (cp < totalPages) {
             int next = cp + 1;
             nav.append(ChatComponentUtil.clickable(">>> 下一页",
-                "/kazumi search-rule page " + session.sessionId + " " + next,
+                "/kazumi search-rule page " + sessionId + " " + next,
                 "切换到第 " + next + " 页"));
         }
         if (cp > 1 || cp < totalPages) {

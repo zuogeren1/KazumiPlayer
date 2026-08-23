@@ -22,6 +22,11 @@ import java.util.concurrent.CompletableFuture;
 public class BangumiApi {
     private static final String API_DOMAIN = "https://api.bgm.tv";
     private static final String SEARCH_PATH = "/v0/search/subjects";
+    // 类级复用：HttpClient 自带连接池，每次 new 会重建连接池且句柄需靠 GC 回收
+    private static final HttpClient CLIENT = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(5))
+        .build();
+    private static final com.google.gson.Gson GSON = new GsonBuilder().create();
 
     public CompletableFuture<List<BangumiSubject>> search(String keyword) {
         return search(keyword, 20, 0);
@@ -37,7 +42,7 @@ public class BangumiApi {
                     "filter", Map.of("type", List.of(2))
                 );
 
-                String jsonBody = new GsonBuilder().create().toJson(body);
+                String jsonBody = GSON.toJson(body);
                 HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(10))
@@ -46,15 +51,11 @@ public class BangumiApi {
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                     .build();
 
-                HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(5))
-                    .build();
-                HttpResponse<String> response = client.send(request,
+                HttpResponse<String> response = CLIENT.send(request,
                     HttpResponse.BodyHandlers.ofString());
 
                 if (response.statusCode() == 200) {
-                    SearchResponse sr = new GsonBuilder().create()
-                        .fromJson(response.body(), SearchResponse.class);
+                    SearchResponse sr = GSON.fromJson(response.body(), SearchResponse.class);
                     return sr != null && sr.data != null ? sr.data : Collections.emptyList();
                 }
                 KazumiLog.search.warn("Bangumi search returned {}", response.statusCode());

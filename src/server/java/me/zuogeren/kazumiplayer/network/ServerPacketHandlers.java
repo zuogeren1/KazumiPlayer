@@ -8,6 +8,7 @@ import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteOpenPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
+import me.zuogeren.kazumiplayer.network.packet.PlaybackAction;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
 import me.zuogeren.kazumiplayer.network.packet.SpeakerConnectPacket;
 import me.zuogeren.kazumiplayer.network.packet.TimeSyncPacket;
@@ -184,17 +185,17 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             if (!(be instanceof VideoScreenBlockEntity screen)) return;
 
             switch (packet.action()) {
-                case "next", "prev" -> handleEpisodeSwitch(sp, screen, packet.action());
-                case "pause", "resume" -> togglePause(sp, screen, "pause".equals(packet.action()));
-                case "seek_forward" -> {
+                case NEXT, PREV -> handleEpisodeSwitch(sp, screen, packet.action());
+                case PAUSE, RESUME -> togglePause(sp, screen, packet.action() == PlaybackAction.PAUSE);
+                case SEEK_FORWARD -> {
                     long newPos = Math.max(0, screen.getSyncPositionMs() + packet.value() * 1000);
                     applySeek(sp, screen, newPos);
                 }
-                case "seek_back" -> {
+                case SEEK_BACK -> {
                     long newPos = Math.max(0, screen.getSyncPositionMs() - packet.value() * 1000);
                     applySeek(sp, screen, newPos);
                 }
-                case "seek_goto" -> applySeek(sp, screen, packet.value());
+                case SEEK_GOTO -> applySeek(sp, screen, packet.value());
             }
         });
     }
@@ -212,7 +213,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             "跳转到 " + KazumiMessages.formatMs(Math.max(0, newPos)));
     }
 
-    private static void handleEpisodeSwitch(ServerPlayer sp, VideoScreenBlockEntity screen, String action) {
+    private static void handleEpisodeSwitch(ServerPlayer sp, VideoScreenBlockEntity screen, PlaybackAction action) {
         String data = screen.getEpisodeData();
         if (data.isEmpty()) return;
         // 在当前线路内切换集数（线路下标随播放写入 BE NBT）
@@ -220,7 +221,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         if (road == null) return;
 
         int idx = screen.getEpisodeIndex();
-        if ("next".equals(action)) idx++;
+        if (action == PlaybackAction.NEXT) idx++;
         else idx--;
         if (idx < 1 || idx > road.data().size()) return;
 

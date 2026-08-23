@@ -3,37 +3,19 @@ package me.zuogeren.kazumiplayer.search;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
- * 搜索会话缓存: keyword -> 全量结果列表
+ * 搜索会话缓存: sessionId -> 全量结果列表（TTL 10 分钟）
  * 翻页直接从缓存读取，不重复请求 API
  */
 public class SearchSessionCache {
-    private static final long TTL_MINUTES = 10;
-    private final Map<String, Session> sessions = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "KazumiPlayer-SessionCache-Cleaner");
-        t.setDaemon(true);
-        return t;
-    });
-
-    public SearchSessionCache() {
-        cleaner.scheduleAtFixedRate(this::cleanExpired, 1, 1, TimeUnit.MINUTES);
-    }
+    private final TimedCache<Session> sessions = new TimedCache<>("KazumiPlayer-SessionCache-Cleaner", 10);
 
     /**
      * 创建新搜索会话，返回 sessionId
      */
     public String createSession(String keyword) {
-        String id = UUID.randomUUID().toString().substring(0, 8);
-        sessions.put(id, new Session(keyword));
-        return id;
+        return sessions.put(new Session(keyword));
     }
 
     /**
@@ -50,10 +32,7 @@ public class SearchSessionCache {
      */
     public PageResult getPage(String sessionId, int page, int pageSize) {
         Session s = sessions.get(sessionId);
-        if (s == null || isExpired(s)) {
-            if (s != null) sessions.remove(sessionId);
-            return null;
-        }
+        if (s == null) return null;
         int total = s.results.size();
         int totalPages = total == 0 ? 1 : (total + pageSize - 1) / pageSize;
         int cp = Math.min(page, totalPages);
@@ -66,28 +45,19 @@ public class SearchSessionCache {
                 pageItems, cp < totalPages, total > 0);
     }
 
+    /** 不存在或已过期返回 null */
     public Session getSession(String sessionId) {
         return sessions.get(sessionId);
     }
 
-    private boolean isExpired(Session s) {
-        return System.currentTimeMillis() - s.createdAt > TimeUnit.MINUTES.toMillis(TTL_MINUTES);
-    }
-
-    private void cleanExpired() {
-        sessions.entrySet().removeIf(e -> isExpired(e.getValue()));
-    }
-
-    public void shutdown() { cleaner.shutdown(); }
+    public void shutdown() { sessions.shutdown(); }
 
     public static class Session {
         final String keyword;
-        final long createdAt;
         final List<BangumiApi.BangumiSubject> results = Collections.synchronizedList(new ArrayList<>());
 
         Session(String keyword) {
             this.keyword = keyword;
-            this.createdAt = System.currentTimeMillis();
         }
     }
 

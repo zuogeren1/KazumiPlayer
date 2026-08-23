@@ -87,18 +87,19 @@
 - [x] **VideoSniffer handler 泄漏**: 旧 VideoSniffer 已随嗅探架构重写删除，问题不复存在
 - [x] ~~**三份 dev mods.toml 去重**~~ → 已评估不做：实际存在 5 份（resources×3 + templates×2），templates 已是正式产物的占位符展开机制（单一来源）；dev resources 副本必须三处一致否则 JPMS split package 报 ResolutionException（文件头注释已说明约束）。若未来收敛，仅剩"dev 副本也由模板生成"一条路，锦上添花而已
 - [ ] **build.gradle configurations.all 篡改**: 全局强制 Usage=JAVA_RUNTIME 破坏变体感知解析（当年为修 moddev universalJar 变体冲突所加）——构建目前可用则不动，待真撞上变体解析报错时带复现排查，改为 configuration 级 attributes【观望】
-- [ ] **PlaybackControlPacket action 改枚举**: 用 String 表示 action（next/prev/seek_forward 等）无编译期检查——定义 `PlaybackAction` enum + STRING_UTF8 映射 codec
+- [x] **PlaybackControlPacket action 改枚举**: 新增 `PlaybackAction` enum（NEXT/PREV/PAUSE/RESUME/SEEK_FORWARD/SEEK_BACK/SEEK_GOTO），自定义 STREAM_CODEC 保持小写 snake_case wire 格式、非法值抛 DecoderException；packet/handler/GUI 发送端全部改用枚举
 - [x] ~~**RuleEngine 策略接口**~~ → 已评估不做：实测仅 88 行、2 个方法、各 1 个 if 分支，抽接口不会更简单（过度设计）
-- [ ] **setPlayback/setPlaybackFull 边界文档化**: 两组调用点均活跃（6+3 处），不强合——补 Javadoc 写清分工边界防误用【P2·攒批】
-- [ ] **getScreenId 延迟副作用**: getter 首次调用生成 UUID 并 markDirty 触发网络同步——提供 ensureScreenId() 显式初始化
-- [ ] **ConnectedSpeakers 编解码去重**: BlockPos 列表编码在 saveAdditional/loadAdditional/getUpdateTag 三处重复——提取 encode/decode 工具
-- [ ] **BE 双轨序列化统一**: load/saveAdditional 用 ValueOutput，getUpdateTag 用旧式 CompoundTag——统一或至少抽字段名常量
+- [x] **setPlayback/setPlaybackFull 边界文档化**: Javadoc 写清分工——setPlayback 不写 Road 数据（无剧集上下文场景），setPlaybackFull 完整写入（规则剧集/直链队列，自动连播依赖）
+- [x] **getScreenId 显式初始化入口**: 新增 `ensureScreenId()`（生成即持久化）；getScreenId() 转发保持 lazy 历史行为不变（30 处服务端调用点依赖该语义，改纯 getter 会引入 NPE 面），新代码建议创建屏幕后显式调 ensureScreenId()
+- [x] **ConnectedSpeakers 编解码去重**: 三处重复逻辑收敛为 `encodeConnectedSpeakers`/`decodeConnectedSpeakers` 静态工具（磁盘 NBT 与同步 getUpdateTag 共用）
+- [x] ~~**BE 双轨序列化统一**~~ → 按"至少抽字段名常量"落地：ValueOutput（磁盘）与 CompoundTag（同步包）双轨保留，字段名统一走 KEY_* 常量消除裸字符串双份维护
 - [x] **SpeakerBlockEntity chunk 加载误清连接**: loadAdditional 曾在服务端 `getLinkedScreen()==null` 时自动 clearLink——但屏幕 chunk 未加载时 getBlockEntity 返回 null，启动加载顺序不定会误删有效连接并写盘；已删除该防御块（所有合法失效路径均已有清理：屏幕破坏 setRemoved 遍历 ConnectedSpeakers / 音响挖除反向通知 / 手动断开双向清理）
 - [ ] **SpeakerConnectPacket UUID 序列化**: STRING_UTF8 存 36 字符膨胀——改 mostSignificantBits+leastSignificantBits VAR_LONG
 - [x] ~~**HttpUtil.fetch 双重异步**~~ → 已评估不改：`new CompletableFuture` + runAsync 是受检异常场景的标准手动桥接（仅一层异步提交，非双重异步）；改 supplyAsync 直返会让所有异常被 CompletionException 包裹，而 `e.getMessage()` 在 GUI/命令层有 10+ 处用户可见文案消费点（GuiRequestHandlers/PlayCommands/RuleEngine errors 等），文案将变成 "java.util.concurrent.CompletionException: ..." 噪音，逐处剥壳得不偿失
 - [ ] **PlayCommands 拆分**: 现 490 行含 10+ 子命令+辅助函数，stop/leave 重复、切集逻辑与 ServerPacketHandlers 重复——抽 EpisodeSwitcher 服务消重即可，不必机械拆命令类【P2·攒批】
-- [ ] **搜索缓存抽象**: SearchResultCache / SearchSessionCache / RuleSearchSessionCache 结构重复（Map+定时清理）——提取 `TimedCache<T>` 泛型基类；shutdown() 从未调用
-- [ ] **BangumiApi HttpClient 复用**: 每次 search() new HttpClient/Gson——提升为类级 final 字段
+- [x] **搜索缓存抽象 TimedCache<T>**: 三个缓存类的 Map+TTL+清理线程同构逻辑收敛到 `TimedCache<V>` 泛型基类（创建时间由包装层管理，Session/Entry 去掉冗余 createdAt/sessionId 字段；showRulePage 改传参取 sessionId）；shutdown() 仍无外部调用方但守护线程不阻塞 JVM 退出
+- [x] **BangumiApi HttpClient 复用**: HttpClient/Gson 提升为类级 static final 字段（HttpClient 自带连接池，不再每次 search 重建）
+- [x] ~~**onClientTick 魔法数字**~~: 核验后仅剩 4 处（20/2/3000/300，其余已在此前重构消化），提为 ClientDisconnectHandler 类内命名常量
 - [x] ~~**SNIFF_SCRIPT 外部化**~~ → 已评估不做：SniffScripts.java 已是嗅探 JS 的单一来源，resources 化只会失去编译期检查与 IDE 高亮
 - [ ] **extractRenderState 跨包引用**: screen 包完全限定名调用 client.ScreenPlayerManager——同属 client source set 内部耦合，不影响 common 纯净性；解耦收益存疑【低·可弃】
 - [ ] **onClientTick 魔法数字**: 3000/8000/5000/800/500/100 散落——提为 TimingConstants 命名常量

@@ -5,6 +5,7 @@ import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.network.gui.GuiPayloads;
 import me.zuogeren.kazumiplayer.network.gui.GuiProtocol;
 import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
+import me.zuogeren.kazumiplayer.network.packet.PlaybackAction;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
 import me.zuogeren.kazumiplayer.playback.WaterMediaPlayer;
 import me.zuogeren.kazumiplayer.screen.VideoScreenRenderer;
@@ -199,16 +200,16 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
         int by = h - 28;
         int bw = Math.max(44, (w - 12 - 7 * 4) / 8);
-        this.addRenderableWidget(Button.builder(Component.literal("上一集"), b -> this.sendControl("prev", 0))
+        this.addRenderableWidget(Button.builder(Component.literal("上一集"), b -> this.sendControl(PlaybackAction.PREV, 0))
             .bounds(6, by, bw, 18).build());
         this.pauseButton = Button.builder(Component.literal("暂停"), b -> this.togglePause())
             .bounds(6 + (bw + 4), by, bw, 18).build();
         this.addRenderableWidget(this.pauseButton);
-        this.addRenderableWidget(Button.builder(Component.literal("下一集"), b -> this.sendControl("next", 0))
+        this.addRenderableWidget(Button.builder(Component.literal("下一集"), b -> this.sendControl(PlaybackAction.NEXT, 0))
             .bounds(6 + (bw + 4) * 2, by, bw, 18).build());
-        this.addRenderableWidget(Button.builder(Component.literal("-10s"), b -> this.sendControl("seek_back", 10))
+        this.addRenderableWidget(Button.builder(Component.literal("-10s"), b -> this.sendControl(PlaybackAction.SEEK_BACK, 10))
             .bounds(6 + (bw + 4) * 3, by, bw, 18).build());
-        this.addRenderableWidget(Button.builder(Component.literal("+10s"), b -> this.sendControl("seek_forward", 10))
+        this.addRenderableWidget(Button.builder(Component.literal("+10s"), b -> this.sendControl(PlaybackAction.SEEK_FORWARD, 10))
             .bounds(6 + (bw + 4) * 4, by, bw, 18).build());
         this.addRenderableWidget(Button.builder(Component.literal("加入同步"), b -> this.sendAction(GuiProtocol.ACTION_JOIN, "{}"))
             .bounds(6 + (bw + 4) * 5, by, bw, 18).build());
@@ -667,7 +668,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         return super.mouseClicked(event, doubled);
     }
 
-    private void sendControl(String action, long value) {
+    private void sendControl(PlaybackAction action, long value) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.getConnection() != null) {
             mc.getConnection().send(new ServerboundCustomPayloadPacket(
@@ -677,7 +678,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
     private void togglePause() {
         var player = this.getPlayer();
-        this.sendControl(player != null && player.isPlaying() ? "pause" : "resume", 0);
+        this.sendControl(player != null && player.isPlaying() ? PlaybackAction.PAUSE : PlaybackAction.RESUME, 0);
     }
 
     private void sendAction(String action, Object payloadJson) {
@@ -761,7 +762,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         @Override
         public void onRelease(MouseButtonEvent event) {
             if (this.dragging && pendingSeekMs >= 0) {
-                sendControl("seek_goto", pendingSeekMs);
+                sendControl(PlaybackAction.SEEK_GOTO, pendingSeekMs);
                 lastSeekSentAt = System.currentTimeMillis();
                 pendingSeekMs = -1;
             }

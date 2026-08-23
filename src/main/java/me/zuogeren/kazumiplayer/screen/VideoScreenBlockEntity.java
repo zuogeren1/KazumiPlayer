@@ -19,6 +19,23 @@ import java.util.List;
 
 public class VideoScreenBlockEntity extends BlockEntity {
 
+    // ---- NBT 字段名（loadAdditional / saveAdditional / getUpdateTag 三处共用，勿散落字符串） ----
+    private static final String KEY_SCREEN_WIDTH = "ScreenWidth";
+    private static final String KEY_SCREEN_HEIGHT = "ScreenHeight";
+    private static final String KEY_FACING = "Facing";
+    private static final String KEY_VIDEO_STATE = "VideoState";
+    private static final String KEY_EPISODE_URL = "EpisodeUrl";
+    private static final String KEY_SYNC_POSITION_MS = "SyncPositionMs";
+    private static final String KEY_EPISODE_INDEX = "EpisodeIndex";
+    private static final String KEY_ROAD_INDEX = "RoadIndex";
+    private static final String KEY_EPISODE_DATA = "EpisodeData";
+    private static final String KEY_PLAYING_TITLE = "PlayingTitle";
+    private static final String KEY_WATCHING_PLAYERS = "WatchingPlayers";
+    private static final String KEY_PLAYBACK_PAUSED = "PlaybackPaused";
+    private static final String KEY_SKIN_BLOCK = "SkinBlock";
+    private static final String KEY_SCREEN_ID = "ScreenId";
+    private static final String KEY_CONNECTED_SPEAKERS = "ConnectedSpeakers";
+
     private float screenWidth = 3.0f;
     private float screenHeight = 2.0f;
     private Direction facing = Direction.NORTH;
@@ -67,8 +84,16 @@ public class VideoScreenBlockEntity extends BlockEntity {
     public void removeConnectedSpeaker(BlockPos pos) {
         connectedSpeakers.remove(pos); markDirty();
     }
-    /** 屏幕唯一标识，首次访问时 lazy 生成 */
+    /**
+     * 屏幕唯一标识。首次访问时 lazy 生成并 markDirty 持久化（历史行为，全部服务端操作路径
+     * 依赖此语义，勿改为纯 getter）。新代码建议在创建屏幕后显式调用 {@link #ensureScreenId()}。
+     */
     public UUID getScreenId() {
+        return ensureScreenId();
+    }
+
+    /** 显式获取或初始化 ScreenId（生成即持久化）——把副作用从"任意读取路径"收敛到明确调用点 */
+    public UUID ensureScreenId() {
         if (screenId == null) {
             screenId = UUID.randomUUID();
             markDirty();
@@ -92,6 +117,11 @@ public class VideoScreenBlockEntity extends BlockEntity {
         markDirty();
     }
 
+    /**
+     * 简单播放：仅设置 URL/位置/状态，不写线路/集数/Road 数据（保留原值）。
+     * 适用：无剧集上下文的场景（如暂停恢复后的重定位）。规则剧集与直链队列
+     * 必须用 {@link #setPlaybackFull}，否则自动连播会读到过期 Road 数据。
+     */
     public void setPlayback(String url, long positionMs) {
         this.episodeUrl = url;
         this.syncPositionMs = positionMs;
@@ -103,7 +133,11 @@ public class VideoScreenBlockEntity extends BlockEntity {
             level != null && level.isClientSide() ? "client" : "server");
     }
 
-    /** 设置完整播放信息（含线路、集数和 Road 数据） */
+    /**
+     * 完整播放：写入 URL/位置/状态 + 线路/集数/Road 数据。
+     * 适用：规则剧集播放与直链队列（合成 Road，见 util/DirectLinkQueue）——
+     * 自动下一集/上一集/切线均在 EpisodeData 内推进，必须经此方法写入。
+     */
     public void setPlaybackFull(String url, long positionMs, int roadIdx, int episodeIdx, String episodeDataJson) {
         this.episodeUrl = url;
         this.syncPositionMs = positionMs;
@@ -168,85 +202,88 @@ public class VideoScreenBlockEntity extends BlockEntity {
 
     @Override
     protected void loadAdditional(ValueInput input) {
-        this.screenWidth = input.getFloatOr("ScreenWidth", 3.0f);
-        this.screenHeight = input.getFloatOr("ScreenHeight", 2.0f);
-        this.facing = input.getString("Facing").map(Direction::byName).orElse(Direction.NORTH);
-        this.videoState = input.getString("VideoState").map(VideoState::fromName).orElse(VideoState.IDLE);
-        this.episodeUrl = input.getString("EpisodeUrl").orElse("");
-        this.syncPositionMs = input.getLongOr("SyncPositionMs", -1L);
-        this.episodeIndex = input.getIntOr("EpisodeIndex", 1);
-        this.roadIndex = input.getIntOr("RoadIndex", 0);
-        this.episodeData = input.getString("EpisodeData").orElse("");
-        this.playingTitle = input.getString("PlayingTitle").orElse("");
-        this.watchingPlayers = input.getString("WatchingPlayers").orElse("");
-        this.playbackPaused = input.getBooleanOr("PlaybackPaused", false);
-        this.skinBlock = input.getString("SkinBlock").orElse("");
-        this.screenId = input.getString("ScreenId").filter(s -> !s.isEmpty()).map(UUID::fromString).orElse(null);
-        // ConnectedSpeakers: 逗号分隔的 BlockPos 编码 "x,y,z;x,y,z;..."
+        this.screenWidth = input.getFloatOr(KEY_SCREEN_WIDTH, 3.0f);
+        this.screenHeight = input.getFloatOr(KEY_SCREEN_HEIGHT, 2.0f);
+        this.facing = input.getString(KEY_FACING).map(Direction::byName).orElse(Direction.NORTH);
+        this.videoState = input.getString(KEY_VIDEO_STATE).map(VideoState::fromName).orElse(VideoState.IDLE);
+        this.episodeUrl = input.getString(KEY_EPISODE_URL).orElse("");
+        this.syncPositionMs = input.getLongOr(KEY_SYNC_POSITION_MS, -1L);
+        this.episodeIndex = input.getIntOr(KEY_EPISODE_INDEX, 1);
+        this.roadIndex = input.getIntOr(KEY_ROAD_INDEX, 0);
+        this.episodeData = input.getString(KEY_EPISODE_DATA).orElse("");
+        this.playingTitle = input.getString(KEY_PLAYING_TITLE).orElse("");
+        this.watchingPlayers = input.getString(KEY_WATCHING_PLAYERS).orElse("");
+        this.playbackPaused = input.getBooleanOr(KEY_PLAYBACK_PAUSED, false);
+        this.skinBlock = input.getString(KEY_SKIN_BLOCK).orElse("");
+        this.screenId = input.getString(KEY_SCREEN_ID).filter(s -> !s.isEmpty()).map(UUID::fromString).orElse(null);
         this.connectedSpeakers.clear();
-        input.getString("ConnectedSpeakers").ifPresent(str -> {
-            for (String s : str.split(";")) {
-                if (s.isBlank()) continue;
-                String[] p = s.split(",");
-                if (p.length == 3) {
-                    try {
-                        connectedSpeakers.add(new BlockPos(Integer.parseInt(p[0]), Integer.parseInt(p[1]), Integer.parseInt(p[2])));
-                    } catch (NumberFormatException ignored) {}
-                }
-            }
-        });
-
+        decodeConnectedSpeakers(input.getString(KEY_CONNECTED_SPEAKERS).orElse(""), connectedSpeakers);
     }
 
     @Override
     protected void saveAdditional(ValueOutput output) {
-        output.putFloat("ScreenWidth", screenWidth);
-        output.putFloat("ScreenHeight", screenHeight);
-        output.putString("Facing", facing.getName());
-        output.putString("VideoState", videoState.name());
-        output.putString("EpisodeUrl", episodeUrl);
-        output.putLong("SyncPositionMs", syncPositionMs);
-        output.putInt("EpisodeIndex", episodeIndex);
-        output.putInt("RoadIndex", roadIndex);
-        output.putString("EpisodeData", episodeData);
-        output.putString("PlayingTitle", playingTitle);
-        output.putString("WatchingPlayers", watchingPlayers);
-        output.putBoolean("PlaybackPaused", playbackPaused);
-        output.putString("SkinBlock", skinBlock);
-        output.putString("ScreenId", screenId != null ? screenId.toString() : "");
-        // ConnectedSpeakers: "x,y,z;x,y,z;..."
-        var sb = new StringBuilder();
-        for (var pos : connectedSpeakers) {
-            if (!sb.isEmpty()) sb.append(';');
-            sb.append(pos.getX()).append(',').append(pos.getY()).append(',').append(pos.getZ());
-        }
-        output.putString("ConnectedSpeakers", sb.toString());
+        output.putFloat(KEY_SCREEN_WIDTH, screenWidth);
+        output.putFloat(KEY_SCREEN_HEIGHT, screenHeight);
+        output.putString(KEY_FACING, facing.getName());
+        output.putString(KEY_VIDEO_STATE, videoState.name());
+        output.putString(KEY_EPISODE_URL, episodeUrl);
+        output.putLong(KEY_SYNC_POSITION_MS, syncPositionMs);
+        output.putInt(KEY_EPISODE_INDEX, episodeIndex);
+        output.putInt(KEY_ROAD_INDEX, roadIndex);
+        output.putString(KEY_EPISODE_DATA, episodeData);
+        output.putString(KEY_PLAYING_TITLE, playingTitle);
+        output.putString(KEY_WATCHING_PLAYERS, watchingPlayers);
+        output.putBoolean(KEY_PLAYBACK_PAUSED, playbackPaused);
+        output.putString(KEY_SKIN_BLOCK, skinBlock);
+        output.putString(KEY_SCREEN_ID, screenId != null ? screenId.toString() : "");
+        output.putString(KEY_CONNECTED_SPEAKERS, encodeConnectedSpeakers(connectedSpeakers));
     }
 
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
         CompoundTag tag = new CompoundTag();
-        tag.putFloat("ScreenWidth", screenWidth);
-        tag.putFloat("ScreenHeight", screenHeight);
-        tag.putString("Facing", facing.getName());
-        tag.putString("VideoState", videoState.name());
-        tag.putString("EpisodeUrl", episodeUrl);
-        tag.putLong("SyncPositionMs", syncPositionMs);
-        tag.putInt("EpisodeIndex", episodeIndex);
-        tag.putInt("RoadIndex", roadIndex);
-        tag.putString("EpisodeData", episodeData);
-        tag.putString("PlayingTitle", playingTitle);
-        tag.putString("WatchingPlayers", watchingPlayers);
-        tag.putBoolean("PlaybackPaused", playbackPaused);
-        tag.putString("SkinBlock", skinBlock);
-        tag.putString("ScreenId", screenId != null ? screenId.toString() : "");
+        tag.putFloat(KEY_SCREEN_WIDTH, screenWidth);
+        tag.putFloat(KEY_SCREEN_HEIGHT, screenHeight);
+        tag.putString(KEY_FACING, facing.getName());
+        tag.putString(KEY_VIDEO_STATE, videoState.name());
+        tag.putString(KEY_EPISODE_URL, episodeUrl);
+        tag.putLong(KEY_SYNC_POSITION_MS, syncPositionMs);
+        tag.putInt(KEY_EPISODE_INDEX, episodeIndex);
+        tag.putInt(KEY_ROAD_INDEX, roadIndex);
+        tag.putString(KEY_EPISODE_DATA, episodeData);
+        tag.putString(KEY_PLAYING_TITLE, playingTitle);
+        tag.putString(KEY_WATCHING_PLAYERS, watchingPlayers);
+        tag.putBoolean(KEY_PLAYBACK_PAUSED, playbackPaused);
+        tag.putString(KEY_SKIN_BLOCK, skinBlock);
+        tag.putString(KEY_SCREEN_ID, screenId != null ? screenId.toString() : "");
+        tag.putString(KEY_CONNECTED_SPEAKERS, encodeConnectedSpeakers(connectedSpeakers));
+        return tag;
+    }
+
+    // ---- ConnectedSpeakers 编解码（磁盘 NBT 与同步 getUpdateTag 共用） ----
+
+    /** 编码为 "x,y,z;x,y,z;..." */
+    private static String encodeConnectedSpeakers(List<BlockPos> speakers) {
         var sb = new StringBuilder();
-        for (var pos : connectedSpeakers) {
+        for (var pos : speakers) {
             if (!sb.isEmpty()) sb.append(';');
             sb.append(pos.getX()).append(',').append(pos.getY()).append(',').append(pos.getZ());
         }
-        tag.putString("ConnectedSpeakers", sb.toString());
-        return tag;
+        return sb.toString();
+    }
+
+    /** 解码 "x,y,z;x,y,z;..."，格式非法的项静默跳过 */
+    private static void decodeConnectedSpeakers(String str, List<BlockPos> into) {
+        if (str == null || str.isEmpty()) return;
+        for (String s : str.split(";")) {
+            if (s.isBlank()) continue;
+            String[] p = s.split(",");
+            if (p.length == 3) {
+                try {
+                    into.add(new BlockPos(Integer.parseInt(p[0]), Integer.parseInt(p[1]), Integer.parseInt(p[2])));
+                } catch (NumberFormatException ignored) {}
+            }
+        }
     }
 
     @Override
