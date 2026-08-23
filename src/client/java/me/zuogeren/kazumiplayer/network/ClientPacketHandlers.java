@@ -119,8 +119,11 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                     targetPos = packet.positionMs() + elapsed;
                     boolean seekCooldown =
                             System.currentTimeMillis() - player.getLastSeekMs() < SEEK_COOLDOWN_MS;
+                    // 启动期保护：切集后组的时钟从切换瞬间起算，而播放器要经解析+缓冲才出声，
+                    // 两者天然差数秒——出画（everPlayed）之前不做漂移校正，否则会把新集 seek 到错误位置
+                    boolean startingUp = !sp.everPlayed;
                     long drift = Math.abs(player.getTimeMs() - targetPos);
-                    if (!seekCooldown && !switchingEpisode && drift > DRIFT_HARD_LIMIT_MS) {
+                    if (!seekCooldown && !switchingEpisode && !startingUp && drift > DRIFT_HARD_LIMIT_MS) {
                         long duration = player.getDurationMs();
                         if (duration > 0 && targetPos >= duration) {
                             // 目标位置超出媒体时长：权威状态已被污染（历史教训：墙钟混入 MonoClock 运算），

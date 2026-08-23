@@ -20,6 +20,12 @@ public class WaterMediaPlayer {
     private long pendingSeekMs = -1;
     private boolean pendingPause;
     private volatile long lastSeekMs; // 最近一次 seek 的时间戳（漂移校正冷却用）
+    /**
+     * 会话关闭标志：stop() 置位。play() 的 MRL 加载是异步的（独立线程重试轮询 +
+     * mc.execute 二段投递），若加载期间被 stop，必须让加载线程在创建 FFMediaPlayer 前
+     * 自行放弃——否则会产生无人引用的孤儿播放器（音频持续外泄且无法停止）。
+     */
+    private volatile boolean closed;
     private final List<PlayStateListener> listeners = new ArrayList<>();
 
     public void addListener(PlayStateListener l) { listeners.add(l); }
@@ -37,18 +43,24 @@ public class WaterMediaPlayer {
     }
 
     public void play(String videoUrl) {
+        closed = false;
         String url = normalizeUrl(videoUrl);
         KazumiLog.playback.debug("WaterMedia.play() called url={}", url);
         Minecraft mc = Minecraft.getInstance();
         new Thread(() -> {
             for (int retry = 0; retry < 30; retry++) {
+                if (closed) return; // 加载期间被 stop：放弃起播（防孤儿播放器）
                 MRL mrl = MediaAPI.mrl(url);
                 if (mrl.source(0) != null) {
-                    mc.execute(() -> createAndStart(mrl, mc));
+                    mc.execute(() -> {
+                        if (closed) return; // 与 stop 同在主线程排队，此处检查无竞态
+                        createAndStart(mrl, mc);
+                    });
                     return;
                 }
                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
             }
+            if (closed) return;
             KazumiLog.playback.error("MRL loading timeout: {} (normalized: {})", videoUrl, url);
             mc.execute(() -> KazumiMessages.chatError("视频加载超时，请检查网络或稍后重试"));
         }, "KazumiPlayer-MRL-Loader").start();
@@ -143,6 +155,7 @@ public class WaterMediaPlayer {
     }
 
     public void stop() {
+        closed = true; // 让在途的 MRL 加载线程放弃创建播放器
         pendingSeekMs = -1;
         pendingPause = false;
         try {
