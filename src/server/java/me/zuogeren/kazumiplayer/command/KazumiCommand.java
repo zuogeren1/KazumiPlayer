@@ -32,8 +32,11 @@ public class KazumiCommand {
                 .then(SearchCommands.buildSearchRule(ruleManager, searchManager))
                 .then(ScreenCommands.build())
                 .then(PlayCommands.build(ruleManager, searchManager))
+                .then(PlayCommands.buildControl())
+                .then(PlayCommands.buildEpisodes(ruleManager, searchManager))
         );
 
-        PlayCommands.registerTopLevel(dispatcher, ruleManager, searchManager);
+        // 旧一级写法的透明转发别名（play-url / join）
+        PlayCommands.registerCompatAliases(dispatcher);
     }
 }

@@ -99,7 +99,7 @@
 - [x] **SpeakerBlockEntity chunk 加载误清连接**: loadAdditional 曾在服务端 `getLinkedScreen()==null` 时自动 clearLink——但屏幕 chunk 未加载时 getBlockEntity 返回 null，启动加载顺序不定会误删有效连接并写盘；已删除该防御块（所有合法失效路径均已有清理：屏幕破坏 setRemoved 遍历 ConnectedSpeakers / 音响挖除反向通知 / 手动断开双向清理）
 - [ ] **SpeakerConnectPacket UUID 序列化**: STRING_UTF8 存 36 字符膨胀——改 mostSignificantBits+leastSignificantBits VAR_LONG；该包仅在手动连接音响时发送，每包省 ~20 字节收益趋近零【低·可弃】
 - [x] ~~**HttpUtil.fetch 双重异步**~~ → 已评估不改：`new CompletableFuture` + runAsync 是受检异常场景的标准手动桥接（仅一层异步提交，非双重异步）；改 supplyAsync 直返会让所有异常被 CompletionException 包裹，而 `e.getMessage()` 在 GUI/命令层有 10+ 处用户可见文案消费点（GuiRequestHandlers/PlayCommands/RuleEngine errors 等），文案将变成 "java.util.concurrent.CompletionException: ..." 噪音，逐处剥壳得不偿失
-- [ ] **PlayCommands 拆分**: 现 490 行含 10+ 子命令+辅助函数，stop/leave 重复、切集逻辑与 ServerPacketHandlers 重复——抽 EpisodeSwitcher 服务消重即可，不必机械拆命令类【P2·攒批】
+- [x] **PlayCommands 拆分**: 新增 `sync/PlaybackController` 作为播放控制唯一权威实现——切集四件套（setPlaybackFull+onPlayStart+WatchingPlayers+立即广播）原子化为 applyEpisodeSwitch，暂停/恢复/seek/joinScreen/leaveOwn 全收敛；`SyncGroup.livePositionMillis()` 单点化 elapsed 计算（曾因复制传播扩散出 14 处、其中 10 处墙钟混算）。PlayCommands 瘦身 537→332 行纯参数解析层，ServerPacketHandlers 283→197 行。命令树重组：控制类迁入 `/kazumi control next|prev|pause|resume|time …`，play-url/join 迁入 `/kazumi play url|join`（旧一级写法保留透明别名）
 - [x] **搜索缓存抽象 TimedCache<T>**: 三个缓存类的 Map+TTL+清理线程同构逻辑收敛到 `TimedCache<V>` 泛型基类（创建时间由包装层管理，Session/Entry 去掉冗余 createdAt/sessionId 字段；showRulePage 改传参取 sessionId）；shutdown() 仍无外部调用方但守护线程不阻塞 JVM 退出
 - [x] **BangumiApi HttpClient 复用**: HttpClient/Gson 提升为类级 static final 字段（HttpClient 自带连接池，不再每次 search 重建）
 - [x] ~~**onClientTick 魔法数字**~~: 核验后仅剩 4 处（20/2/3000/300，其余已在此前重构消化），提为 ClientDisconnectHandler 类内命名常量

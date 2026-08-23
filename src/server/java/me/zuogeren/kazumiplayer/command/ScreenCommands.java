@@ -8,7 +8,6 @@ import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.screen.VideoScreenRegistration;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
-import me.zuogeren.kazumiplayer.util.MonoClock;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
@@ -68,8 +67,7 @@ public class ScreenCommands {
                     // 停止前保存当前计时到 NBT
                     var g = SyncGroupManager.get().getGroup(sid);
                     if (g != null) {
-                        long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
-                        screen.updateSyncPosition(g.positionMs + elapsed);
+                        screen.updateSyncPosition(g.livePositionMillis());
                     }
                     screen.clearPlayback();
                     SyncGroupManager.get().leaveByScreenId(sid);

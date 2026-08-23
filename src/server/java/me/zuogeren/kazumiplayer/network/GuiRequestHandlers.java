@@ -12,11 +12,11 @@ import me.zuogeren.kazumiplayer.search.BangumiApi;
 import me.zuogeren.kazumiplayer.search.RuleSearchSessionCache;
 import me.zuogeren.kazumiplayer.search.SearchManager;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
+import me.zuogeren.kazumiplayer.sync.PlaybackController;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
-import me.zuogeren.kazumiplayer.util.MonoClock;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -222,48 +222,15 @@ public class GuiRequestHandlers {
     private static void join(ServerPlayer sp, BlockPos screenPos) {
         var be = sp.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) return;
-        UUID sid = screen.getScreenId();
-        String url = screen.getEpisodeUrl();
-        var group = SyncGroupManager.get().getGroup(sid);
-
-        if (url.isEmpty()) {
-            SyncGroupManager.get().joinStandby(sp, sid, screenPos);
-            SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "加入了同步播放");
-            sendOk(sp, "已加入同步播放（等待播放开始）");
-        } else if (group != null) {
-            long elapsed = group.paused ? 0 : MonoClock.millis() - group.serverTimestamp;
-            long currentPos = group.positionMs + elapsed;
-            SyncGroupManager.get().join(sp, sid, url);
-            screen.setPlayback(url, currentPos);
-            screen.setWatchingPlayers(group.watchingPlayersString());
-            SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
-            SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "加入了同步播放");
-            sendOk(sp, "已加入同步播放 (位置: " + (currentPos / 1000) + "s)");
-        } else {
-            SyncGroupManager.get().onPlayStart(sp, sid, screenPos, url);
-            screen.setPlayback(url, 0);
-            var g2 = SyncGroupManager.get().getGroup(sid);
-            if (g2 != null) screen.setWatchingPlayers(g2.watchingPlayersString());
-            SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
-            SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "加入了同步播放");
-            sendOk(sp, "已加入同步播放 (位置: 0s)");
-        }
+        // 业务委托 PlaybackController（与命令层同一实现）
+        sendOk(sp, PlaybackController.joinScreen(sp, screenPos, screen).detail());
     }
 
     private static void leave(ServerPlayer sp, BlockPos screenPos) {
         var be = sp.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) return;
-        UUID sid = screen.getScreenId();
-        var g = SyncGroupManager.get().getGroup(sid);
-        if (g != null) {
-            long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
-            screen.updateSyncPosition(g.positionMs + elapsed);
-            SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "离开了同步播放");
-        }
-        SyncGroupManager.get().leave(sp.getUUID());
+        PlaybackController.leaveOwn(sp, screenPos, screen, "离开了同步播放");
         PacketDistributor.sendToPlayer(sp, new PlayStopPacket(screenPos));
-        var g2 = SyncGroupManager.get().getGroup(sid);
-        screen.setWatchingPlayers(g2 != null ? g2.watchingPlayersString() : "");
         sendOk(sp, "已离开同步播放");
     }
 
@@ -274,8 +241,7 @@ public class GuiRequestHandlers {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
         if (g != null) {
-            long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
-            screen.updateSyncPosition(g.positionMs + elapsed);
+            screen.updateSyncPosition(g.livePositionMillis());
         }
         List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
 

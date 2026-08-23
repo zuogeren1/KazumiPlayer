@@ -167,8 +167,7 @@ public class SyncGroupManager {
                     affectedScreens.add(g.screenPos);
                     var be = sp.level().getBlockEntity(g.screenPos);
                     if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
-                        long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
-                        screen.updateSyncPosition(g.positionMs + elapsed);
+                        screen.updateSyncPosition(g.livePositionMillis());
                     }
                 }
             }
@@ -203,6 +202,12 @@ public class SyncGroupManager {
         /** 观看者 UUID 列表 → 逗号分隔字符串（写入 BE 的 WatchingPlayers NBT） */
         public String watchingPlayersString() {
             return String.join(",", players.stream().map(UUID::toString).toList());
+        }
+
+        /** 权威实时位置 = 基准位置 + 未暂停时的流逝时间（MonoClock 单调钟，勿用墙钟另行计算） */
+        public long livePositionMillis() {
+            long elapsed = paused ? 0 : MonoClock.millis() - serverTimestamp;
+            return positionMs + elapsed;
         }
     }
 }

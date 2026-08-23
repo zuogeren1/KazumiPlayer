@@ -16,6 +16,7 @@ import me.zuogeren.kazumiplayer.network.packet.TimeSyncResponsePacket;
 import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity;
+import me.zuogeren.kazumiplayer.sync.PlaybackController;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
@@ -134,18 +135,11 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             }
 
             String nextUrl = road.data().get(idx - 1);
-            String allData = JsonUtil.GSON.toJson(roads);
-            screen.setPlaybackFull(nextUrl, 0, ri, idx, allData);
-            UUID sid = screen.getScreenId();
-            SyncGroupManager.get().onPlayStart(sp, sid, packet.screenPos(), nextUrl);
-            // 同步 WatchingPlayers NBT
-            var g = SyncGroupManager.get().getGroup(sid);
-            if (g != null) {
-                screen.setWatchingPlayers(g.watchingPlayersString());
-            }
+            PlaybackController.applyEpisodeSwitch(sp, packet.screenPos(), screen, nextUrl, ri, idx,
+                JsonUtil.GSON.toJson(roads));
             // 通知所有观看者（包括触发者，因为自动切集没有单独提示）
             String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
-            SyncNotificationUtil.broadcastToGroup(sp, packet.screenPos(), sid, "自动切换到 " + name);
+            SyncNotificationUtil.broadcastToGroup(sp, packet.screenPos(), screen.getScreenId(), "自动切换到 " + name);
             KazumiLog.network.info("Auto next episode {}: {}", idx, nextUrl);
         });
     }
@@ -154,10 +148,9 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
 
-        // 保存实时位置到 NBT
+        // 保存实时位置到 NBT（组权威实时值，勿用墙钟）
         if (g != null) {
-            long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
-            screen.updateSyncPosition(g.positionMs + elapsed);
+            screen.updateSyncPosition(g.livePositionMillis());
         }
 
         // 收集观看者列表（删组前）
@@ -184,73 +177,19 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             var be = sp.level().getBlockEntity(packet.screenPos());
             if (!(be instanceof VideoScreenBlockEntity screen)) return;
 
+            // 全部委托 PlaybackController（与命令层同一权威实现），结果静默（GUI 场景无聊天反馈惯例）
             switch (packet.action()) {
-                case NEXT, PREV -> handleEpisodeSwitch(sp, screen, packet.action());
-                case PAUSE, RESUME -> togglePause(sp, screen, packet.action() == PlaybackAction.PAUSE);
-                case SEEK_FORWARD -> {
-                    long newPos = Math.max(0, screen.getSyncPositionMs() + packet.value() * 1000);
-                    applySeek(sp, screen, newPos);
-                }
-                case SEEK_BACK -> {
-                    long newPos = Math.max(0, screen.getSyncPositionMs() - packet.value() * 1000);
-                    applySeek(sp, screen, newPos);
-                }
-                case SEEK_GOTO -> applySeek(sp, screen, packet.value());
+                case NEXT -> PlaybackController.switchEpisode(sp, packet.screenPos(), screen, true);
+                case PREV -> PlaybackController.switchEpisode(sp, packet.screenPos(), screen, false);
+                case PAUSE -> PlaybackController.setPaused(sp, packet.screenPos(), screen, true);
+                case RESUME -> PlaybackController.setPaused(sp, packet.screenPos(), screen, false);
+                case SEEK_FORWARD -> PlaybackController.seekTo(sp, packet.screenPos(), screen,
+                    PlaybackController.livePosition(screen) + packet.value() * 1000);
+                case SEEK_BACK -> PlaybackController.seekTo(sp, packet.screenPos(), screen,
+                    PlaybackController.livePosition(screen) - packet.value() * 1000);
+                case SEEK_GOTO -> PlaybackController.seekTo(sp, packet.screenPos(), screen, packet.value());
             }
         });
-    }
-
-    /** seek 后同步权威位置并立即广播，否则周期广播会用旧位置把进度拉回去 */
-    private static void applySeek(ServerPlayer sp, VideoScreenBlockEntity screen, long newPos) {
-        UUID sid = screen.getScreenId();
-        screen.updateSyncPosition(Math.max(0, newPos));
-        var g = SyncGroupManager.get().getGroup(sid);
-        if (g != null) {
-            SyncGroupManager.get().updateState(sid, Math.max(0, newPos), g.paused);
-            SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
-        }
-        SyncNotificationUtil.notifyOtherWatchers(sp, screen.getBlockPos(), sid,
-            "跳转到 " + KazumiMessages.formatMs(Math.max(0, newPos)));
-    }
-
-    private static void handleEpisodeSwitch(ServerPlayer sp, VideoScreenBlockEntity screen, PlaybackAction action) {
-        String data = screen.getEpisodeData();
-        if (data.isEmpty()) return;
-        // 在当前线路内切换集数（线路下标随播放写入 BE NBT）
-        Road road = JsonUtil.parseRoad(data, screen.getRoadIndex());
-        if (road == null) return;
-
-        int idx = screen.getEpisodeIndex();
-        if (action == PlaybackAction.NEXT) idx++;
-        else idx--;
-        if (idx < 1 || idx > road.data().size()) return;
-
-        String url = road.data().get(idx - 1);
-        screen.setPlaybackFull(url, 0, screen.getRoadIndex(), idx, data);
-        // 重置权威同步组（对齐 auto-next 路径的 onPlayStart）：刷新 videoUrl 为新集、位置归零重计、
-        // paused=false。缺失时周期广播仍携带旧集 URL → 客户端换片保护 switchingEpisode 恒为 true，
-        // 吞掉之后所有暂停/seek 应用——表现为切集后暂停卡死、时间调整无效，直到重新 join 重建组
-        UUID sid = screen.getScreenId();
-        SyncGroupManager.get().onPlayStart(sp, sid, screen.getBlockPos(), url);
-        String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
-        SyncNotificationUtil.notifyOtherWatchers(sp, screen.getBlockPos(), sid,
-            "切换到 " + name);
-        KazumiLog.network.info("Episode switch to {}: {}", idx, url);
-    }
-
-    /** GUI/包触发的暂停/恢复：与 /kazumi pause|resume 同逻辑（更新权威状态并立即广播） */
-    private static void togglePause(ServerPlayer sp, VideoScreenBlockEntity screen, boolean pause) {
-        UUID sid = screen.getScreenId();
-        var g = SyncGroupManager.get().getGroup(sid);
-        if (g == null) return;
-        long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
-        long cur = g.positionMs + elapsed;
-        SyncGroupManager.get().updateState(sid, cur, pause);
-        screen.updateSyncPosition(cur);
-        screen.setPlaybackPaused(pause);
-        SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
-        SyncNotificationUtil.notifyOtherWatchers(sp, screen.getBlockPos(), sid,
-            pause ? "暂停了播放" : "恢复了播放");
     }
 
     private static void handleSpeakerConnect(SpeakerConnectPacket packet, IPayloadContext context) {
