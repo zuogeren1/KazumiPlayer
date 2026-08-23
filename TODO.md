@@ -1,6 +1,6 @@
 # TODO
 
-## 音响系统（当前占位，待 WaterMedia v3 API 完善后实现）
+## 音响系统（⛔ 整体挂起——先决条件：前置 mod WaterMedia v3 完善 audio 能力（video/audio 独立开关）；就绪前不动此区）
 
 - [ ] **音响发声**: WaterMedia v3 当前 `MediaAPI.createPlayer(mrl, gfx, sfx)` 不支持 video/audio 独立开关。`SpeakerBlockEntity.startAudio()` 为占位
 - [ ] **连接时屏幕静音**: 有音响连接时屏幕 `player.mute(true)`，断开最后一个音响后恢复
@@ -40,11 +40,9 @@
 
 ## BUG
 
-- [ ] **7sefun 嗅探超时**: 嗅探架构重写（playback/source 包）后 7sefun.top 两次尝试均 30s 超时无命中——待复测定位（加载生命周期日志已具备：started loading / loading completed status / 注入日志可区分"未导航"与"页面结构问题"）；sorani 同架构实测全流程通过
 - [ ] **多屏幕同时播放**: 未充分测试多屏幕同时播放的稳定性
 - [ ] **音响重复连接**: 同一音响重复连接同一屏幕——目前无去重提示
 - [ ] **多人同时开 GUI 的状态陈旧**: 多人共享一块屏幕时，GUI 底部状态栏文字只反映本客户端触发过的操作，他人换集/暂停不会更新文字（预览画面/时间/暂停状态实时，数据层无冲突，最后操作者赢为预期语义）——可改进：播放标题写入 BE NBT 随同步广播，或从 Road JSON+EpisodeIndex 推断当前集名；如需防陌生人乱控可加"观看者/OP 可控"权限
-- [ ] **视频源反爬 (tvtfun)**: tvtfun 规则已被官方标记 deprecated（站点加反爬，Kazumi App 同样解析失败）——依赖规则更新或站点放宽
 - [ ] **嗅探健壮性收尾**: 已落地——停止/破坏屏幕取消在途嗅探（cancelActiveSniff）、带签名 query 的直链直判快速播放、接管式并发取代在途任务。剩余：接管/取消路径需实机回归；Cookie 桥接的 cf_clearance 时效与刷新策略未验证
 - [~] **Cloudflare 挑战页卡死嗅探 (dmbus/DM84)**: 已落地——常驻共享浏览器（Cookie 跨嗅探保留）、UA 伪装（HTTP头+JS侧+mcef.properties 异常值强制重写，含空闲期）、HTTP 直取播放页解析直链优先（java 路径与浏览器路径可达性不同，互补）、Cookie 桥接（收割 document.cookie 按域名存储，直取/规则请求成对附加 Cookie+伪装 UA——clearance cookie 与签发 UA 绑定）、失败提示区分 CF 拦截、章节/直取请求补 Referer。**实测结论：dmbus 源站分钟级闪断(522)为站点侧问题，与客户端无关**。剩余候选：规则 antiCrawler 配置（验证页检测+自动点击+自定义 JS）
 - [x] **鼠标脱离准心**: 网页源嗅探/播放后鼠标指针脱离准心——GLFW 真实光标检测 + 嗅探完成立即强制抓回，已实机确认
@@ -79,30 +77,30 @@
 - [x] **嗅探架构重写（对齐 Kazumi App）**: 新增 `playback/source` 包忠实移植 Kazumi video_source 架构（IVideoSourceService/McefVideoSourceService/McefSniffBrowser/SniffScripts/租约池/类型化异常/ResolveRequest 身份式取消），tick 播放入口切换至 `VideoSourceResolver.beginPlayback`，`maxConcurrentSniffs` 死配置由租约池启用；实测通过后旧链路已整体删除（PlaybackManager/VideoSniffer/MCEFBrowserLifecycle/dto/VideoSource/PlayStartPacket 死路径），BrowserCookieStore 保留供规则引擎 Cookie 桥接（UA 常量已内联）。测试状态：sorani 全流程通过，7sefun 超时待查（见 BUG 区）。遗留：规则的 `useLegacyParser` 字段→客户端嗅探调用接线（需经 NBT/包协议下发）
 - [x] **同步架构重写（时钟同步 + 事件式对齐）**: 参考 AllMusic/MoeMusic 的机制思路（仅借鉴设计，实现为原创代码）——新增 MonoClock 单调毫秒源与 TimeSync/TimeSyncResponse 握手包，ClientClockSync 登录+每 30 秒按四时间戳中值法计算两端钟差；SyncStatePacket 时间戳改为服务器单调锚点，客户端锚点插值目标位置；取消周期性漂移 seek（墙钟偏差曾导致联机时每个广播周期硬 seek 一次的"重复同步"卡顿），仅漂移 >10s 兜底硬 seek。遗留：offset 无多次采样滤波（可取最小 RTT 样本）；切歌/seek 事件仍靠 5s 周期广播收敛（可改事件驱动）
 - [x] **规则引擎对齐排查修复**: 对照 Kazumi lib/services/plugin 逐文件排查——修复 POST body 发不出去（usePost 规则搜索必挂）、API 模板变量不做 URL 编码（中文关键词破坏请求 URL）、空 JSONPath 把整棵子树当名称（roadNamePath/episodeNamePath 为空的规则名变 JSON 串）、URL 归一化放行 javascript: 等 opaque URI 且未编码 href 直接失败（404 症状）、antiCrawlerConfig 未解析（验证页被静默解析为空列表）。遗留见下两条
-- [ ] **API 章节 delimited 格式**: ApiRuleStrategy 仅实现 nested，delimited（分隔符聚合格式）未实现——最新社区规则暂无使用，接入新规则前补齐
-- [ ] **反爬 captcha webview 全流程**: 已做 text/regex 验证页检测报错；Kazumi 完整能力含 xpath 检测、captchaImage/Input/Button 定位、captchaScript JS 注入自动验证（WebView 加载+Cookie 保存+重试），需 MCEF 配合
-- [ ] **API 模式 POST body 模板**: Rule.ApiRequestConfig 缺 body 字段（json/form 模板 + @var 渲染），带 body 的 API 规则无法正确发请求
-- [ ] **RuleManager 重复实例**: `SyncGroupManager.onPlayerJoin` 每次玩家进服 `new RuleManager().loadAll()`，绕过 KazumiPlayerServer 已初始化实例——应注入复用单例
-- [ ] **ClientDisconnectHandler 拆分（god class）**: 259 行混杂鼠标恢复/命令注册/生命周期/核心调度四大职责——拆为 MouseGrabRestorer / ClientCommandRegistration / ClientLifecycleHandler / ClientPlaybackScheduler
+- [ ] **API 章节 delimited 格式**: ApiRuleStrategy 仅实现 nested，delimited（分隔符聚合格式）未实现——最新社区规则暂无使用【按需：出现首个依赖规则时再补】
+- [ ] **反爬 captcha webview 全流程**: 已做 text/regex 验证页检测报错；Kazumi 完整能力含 xpath 检测、captchaImage/Input/Button 定位、captchaScript JS 注入自动验证（WebView 加载+Cookie 保存+重试），需 MCEF 配合【按需：出现实际站点需求再立项】
+- [ ] **API 模式 POST body 模板**: Rule.ApiRequestConfig 缺 body 字段（json/form 模板 + @var 渲染），带 body 的 API 规则无法正确发请求【按需：同上】
+- [x] **RuleManager 重复实例**: `SyncGroupManager.onPlayerJoin` 曾每次玩家进服 `new RuleManager(...).loadAll()` 全量重读磁盘且产生第二实例——已改为 `SyncGroupManager.init(ruleManager)` 注入 KazumiPlayerServer 初始化的单例，进服广播直接读单例
+- [ ] **ClientDisconnectHandler 拆分**: 现 286 行；真正重量集中在 onClientTick 内约 130 行播放调度状态机——只拆出 ClientPlaybackScheduler 即可，鼠标防御/命令注册/生命周期清理均为小段不必单独成类【P2·攒批】
 - [x] **播放器启动逻辑去重**: handlePlayStart 死路径（PlayStartPacket 包+handler+NetworkManager 注册项）已随旧嗅探链路删除；tick 路径走 playback/source 包
-- [ ] **删除死代码**: `PlayStateListener` 接口+WaterMediaPlayer listener 列表疑似从未注册——确认后删除
+- [~] **PlayStateListener 死代码（改判：决策项而非清理项）**: 已确认 `addListener` 全项目零调用点、listener 从未注册；但 `SpeakerClientAudio implements PlayStateListener`（音响跟随骨架）——直接删会连带删掉音响跟随设计。处置随音响区一同挂起【挂起·待 WaterMedia v3 audio】
 - [x] **VideoSniffer handler 泄漏**: 旧 VideoSniffer 已随嗅探架构重写删除，问题不复存在
-- [ ] **三份 dev mods.toml 去重**: main/server/client resources 下 `META-INF/neoforge.mods.toml` 内容一字不差——保留一份或 processResources 动态生成
-- [ ] **build.gradle configurations.all 篡改**: 全局强制 Usage=JAVA_RUNTIME 破坏变体感知解析——排查 moddev universalJar 变体冲突根因，改为 configuration 级 attributes
+- [x] ~~**三份 dev mods.toml 去重**~~ → 已评估不做：实际存在 5 份（resources×3 + templates×2），templates 已是正式产物的占位符展开机制（单一来源）；dev resources 副本必须三处一致否则 JPMS split package 报 ResolutionException（文件头注释已说明约束）。若未来收敛，仅剩"dev 副本也由模板生成"一条路，锦上添花而已
+- [ ] **build.gradle configurations.all 篡改**: 全局强制 Usage=JAVA_RUNTIME 破坏变体感知解析（当年为修 moddev universalJar 变体冲突所加）——构建目前可用则不动，待真撞上变体解析报错时带复现排查，改为 configuration 级 attributes【观望】
 - [ ] **PlaybackControlPacket action 改枚举**: 用 String 表示 action（next/prev/seek_forward 等）无编译期检查——定义 `PlaybackAction` enum + STRING_UTF8 映射 codec
-- [ ] **RuleEngine 策略接口**: RuleEngine if-else 分派 + 两策略参数类型不统一（RuleExecutionConfig vs Rule）——抽取 `RuleStrategy` 接口统一参数
-- [ ] **setPlayback/setPlaybackFull 重叠**: 两个方法职责重叠，调用方易误用——合并或加明确 Javadoc
+- [x] ~~**RuleEngine 策略接口**~~ → 已评估不做：实测仅 88 行、2 个方法、各 1 个 if 分支，抽接口不会更简单（过度设计）
+- [ ] **setPlayback/setPlaybackFull 边界文档化**: 两组调用点均活跃（6+3 处），不强合——补 Javadoc 写清分工边界防误用【P2·攒批】
 - [ ] **getScreenId 延迟副作用**: getter 首次调用生成 UUID 并 markDirty 触发网络同步——提供 ensureScreenId() 显式初始化
 - [ ] **ConnectedSpeakers 编解码去重**: BlockPos 列表编码在 saveAdditional/loadAdditional/getUpdateTag 三处重复——提取 encode/decode 工具
 - [ ] **BE 双轨序列化统一**: load/saveAdditional 用 ValueOutput，getUpdateTag 用旧式 CompoundTag——统一或至少抽字段名常量
-- [ ] **SpeakerBlockEntity chunk 加载误清连接**: loadAdditional 中 `getLinkedScreen()==null` 自动 clearLink，屏幕 chunk 未加载时误清——推迟到服务端 tick 验证
+- [x] **SpeakerBlockEntity chunk 加载误清连接**: loadAdditional 曾在服务端 `getLinkedScreen()==null` 时自动 clearLink——但屏幕 chunk 未加载时 getBlockEntity 返回 null，启动加载顺序不定会误删有效连接并写盘；已删除该防御块（所有合法失效路径均已有清理：屏幕破坏 setRemoved 遍历 ConnectedSpeakers / 音响挖除反向通知 / 手动断开双向清理）
 - [ ] **SpeakerConnectPacket UUID 序列化**: STRING_UTF8 存 36 字符膨胀——改 mostSignificantBits+leastSignificantBits VAR_LONG
-- [ ] **HttpUtil.fetch 双重异步**: runAsync 再包一层 CompletableFuture——直接返回 supplyAsync 结果简化异常链
-- [ ] **PlayCommands 拆分**: 515 行含 10+ 子命令+辅助函数，stop/leave 重复、切集逻辑与 ServerPacketHandlers 重复——拆命令类+EpisodeSwitcher 服务
+- [x] ~~**HttpUtil.fetch 双重异步**~~ → 已评估不改：`new CompletableFuture` + runAsync 是受检异常场景的标准手动桥接（仅一层异步提交，非双重异步）；改 supplyAsync 直返会让所有异常被 CompletionException 包裹，而 `e.getMessage()` 在 GUI/命令层有 10+ 处用户可见文案消费点（GuiRequestHandlers/PlayCommands/RuleEngine errors 等），文案将变成 "java.util.concurrent.CompletionException: ..." 噪音，逐处剥壳得不偿失
+- [ ] **PlayCommands 拆分**: 现 490 行含 10+ 子命令+辅助函数，stop/leave 重复、切集逻辑与 ServerPacketHandlers 重复——抽 EpisodeSwitcher 服务消重即可，不必机械拆命令类【P2·攒批】
 - [ ] **搜索缓存抽象**: SearchResultCache / SearchSessionCache / RuleSearchSessionCache 结构重复（Map+定时清理）——提取 `TimedCache<T>` 泛型基类；shutdown() 从未调用
 - [ ] **BangumiApi HttpClient 复用**: 每次 search() new HttpClient/Gson——提升为类级 final 字段
-- [ ] **SNIFF_SCRIPT 外部化**: 新包 playback/source 的 SniffScripts.java 已集中管理全部嗅探 JS（Kazumi 移植版，单一来源消除重复）；可选进一步 resources 文件化
-- [ ] **extractRenderState 跨包引用**: screen 包完全限定名调用 client.ScreenPlayerManager——解耦（注入播放器或独立查询机制）
+- [x] ~~**SNIFF_SCRIPT 外部化**~~ → 已评估不做：SniffScripts.java 已是嗅探 JS 的单一来源，resources 化只会失去编译期检查与 IDE 高亮
+- [ ] **extractRenderState 跨包引用**: screen 包完全限定名调用 client.ScreenPlayerManager——同属 client source set 内部耦合，不影响 common 纯净性；解耦收益存疑【低·可弃】
 - [ ] **onClientTick 魔法数字**: 3000/8000/5000/800/500/100 散落——提为 TimingConstants 命名常量
-- [ ] **多版本支持**: 适配不同 Minecraft 版本
-- [ ] **多加载器支持**: 除 NeoForge 外支持 Fabric/Quilt
+- [ ] **多版本支持**: 适配不同 Minecraft 版本【暂缓——功能快速迭代期聚焦单版本，避免按版本分支/抽象层的双重维护成本；待功能面稳定后再评估】
+- [ ] **多加载器支持**: 除 NeoForge 外支持 Fabric/Quilt【暂缓——理由同上，且前置依赖 MCEF/WaterMedia 生态以 NeoForge 为主】
