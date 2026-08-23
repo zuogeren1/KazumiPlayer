@@ -12,9 +12,11 @@ import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.search.BangumiApi;
 import me.zuogeren.kazumiplayer.search.RuleSearchSessionCache;
 import me.zuogeren.kazumiplayer.search.SearchManager;
+import me.zuogeren.kazumiplayer.screen.VideoScreenBlock;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.sync.PlaybackController;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
+import net.minecraft.core.Direction;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
@@ -65,6 +67,7 @@ public class GuiRequestHandlers {
                 case GuiProtocol.ACTION_JOIN -> join(sp, packet.screenPos());
                 case GuiProtocol.ACTION_LEAVE -> leave(sp, packet.screenPos());
                 case GuiProtocol.ACTION_STOP_SCREEN -> stopScreen(sp, packet.screenPos());
+                case GuiProtocol.ACTION_SCREEN_PROPS -> screenProps(sp, packet.screenPos(), packet.payloadJson());
                 case GuiProtocol.ACTION_QUEUE_ADD -> queueAdd(sp, packet.screenPos(), packet.payloadJson());
                 case GuiProtocol.ACTION_QUEUE_JUMP -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.JUMP);
                 case GuiProtocol.ACTION_QUEUE_MOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.MOVE);
@@ -304,6 +307,47 @@ public class GuiRequestHandlers {
         }
         KazumiLog.network.info("GUI stop screen {} ({} watchers notified)", screenPos.toShortString(), watchers.size());
         sendOk(sp, "已停止屏幕播放");
+    }
+
+    // ---- 屏幕几何属性（朝向/大小/偏移）----
+
+    /**
+     * 设置屏幕朝向/大小/XYZ 偏移（GUI「屏幕设置」面板）：
+     * clamp 后应用（BlockState.FACING + BE NBT 双写），并回发权威值供面板刷新显示。
+     */
+    private static void screenProps(ServerPlayer sp, BlockPos screenPos, String payloadJson) {
+        var p = GuiPayloads.fromJson(payloadJson, GuiPayloads.ScreenPropsPayload.class);
+        if (p == null) return;
+        if (!(sp.level().getBlockEntity(screenPos) instanceof VideoScreenBlockEntity screen)) return;
+
+        Direction facing = Direction.byName(p.facing());
+        if (facing == null || facing.getAxis() == Direction.Axis.Y) {
+            sendError(sp, "无效方向: " + p.facing());
+            return;
+        }
+        float width = clamp(p.width(), 0.5f, 128.0f);
+        float height = clamp(p.height(), 0.5f, 128.0f);
+        float ox = clamp(p.offsetX(), -32.0f, 32.0f);
+        float oy = clamp(p.offsetY(), -32.0f, 32.0f);
+        float oz = clamp(p.offsetZ(), -32.0f, 32.0f);
+
+        // 朝向双写：方块本体模型读 BlockState，渲染器画面读 BE NBT——必须同步更新
+        var state = sp.level().getBlockState(screenPos);
+        if (state.hasProperty(me.zuogeren.kazumiplayer.screen.VideoScreenBlock.FACING)) {
+            sp.level().setBlock(screenPos, state.setValue(me.zuogeren.kazumiplayer.screen.VideoScreenBlock.FACING, facing), 3);
+        }
+        screen.setFacing(facing);
+        screen.setScreenSize(width, height);
+        screen.setScreenOffset(ox, oy, oz);
+
+        send(sp, GuiProtocol.DATA_SCREEN_PROPS, GuiPayloads.toJson(
+            new GuiPayloads.ScreenPropsPayload(ox, oy, oz, facing.getName(), width, height)));
+        KazumiLog.network.info("Screen props updated at {} by {}", screenPos.toShortString(),
+            sp.getName().getString());
+    }
+
+    private static float clamp(float v, float min, float max) {
+        return Math.max(min, Math.min(max, v));
     }
 
     // ---- 直链队列（实现见 QueueRequestHandlers）----

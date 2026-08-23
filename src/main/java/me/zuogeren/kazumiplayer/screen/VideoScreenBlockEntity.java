@@ -34,6 +34,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private static final String KEY_PLAYBACK_PAUSED = "PlaybackPaused";
     private static final String KEY_SKIN_BLOCK = "SkinBlock";
     private static final String KEY_SCREEN_ID = "ScreenId";
+    private static final String KEY_OFFSET_X = "OffsetX";
+    private static final String KEY_OFFSET_Y = "OffsetY";
+    private static final String KEY_OFFSET_Z = "OffsetZ";
     private static final String KEY_CONNECTED_SPEAKERS = "ConnectedSpeakers";
 
     private float screenWidth = 3.0f;
@@ -54,6 +57,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private boolean playbackPaused;
     private String skinBlock = "";         // 方块皮肤 ID，空=默认
     private UUID screenId;                 // 屏幕唯一标识，lazy 生成
+    private float offsetX;                 // 屏幕面渲染偏移（格），XYZ 自由叠加在默认位置上
+    private float offsetY;
+    private float offsetZ;
     private final List<BlockPos> connectedSpeakers = new ArrayList<>(); // 已连接音响列表
 
     public VideoScreenBlockEntity(BlockPos pos, BlockState blockState) {
@@ -109,6 +115,18 @@ public class VideoScreenBlockEntity extends BlockEntity {
 
     public void setFacing(Direction facing) {
         this.facing = facing;
+        markDirty();
+    }
+
+    public float getOffsetX() { return offsetX; }
+    public float getOffsetY() { return offsetY; }
+    public float getOffsetZ() { return offsetZ; }
+
+    /** 设置屏幕面渲染偏移（格），叠加在默认位置上 */
+    public void setScreenOffset(float x, float y, float z) {
+        this.offsetX = x;
+        this.offsetY = y;
+        this.offsetZ = z;
         markDirty();
     }
 
@@ -216,6 +234,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.playbackPaused = input.getBooleanOr(KEY_PLAYBACK_PAUSED, false);
         this.skinBlock = input.getString(KEY_SKIN_BLOCK).orElse("");
         this.screenId = input.getString(KEY_SCREEN_ID).filter(s -> !s.isEmpty()).map(UUID::fromString).orElse(null);
+        this.offsetX = input.getFloatOr(KEY_OFFSET_X, 0.0f);
+        this.offsetY = input.getFloatOr(KEY_OFFSET_Y, 0.0f);
+        this.offsetZ = input.getFloatOr(KEY_OFFSET_Z, 0.0f);
         this.connectedSpeakers.clear();
         decodeConnectedSpeakers(input.getString(KEY_CONNECTED_SPEAKERS).orElse(""), connectedSpeakers);
     }
@@ -236,6 +257,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putBoolean(KEY_PLAYBACK_PAUSED, playbackPaused);
         output.putString(KEY_SKIN_BLOCK, skinBlock);
         output.putString(KEY_SCREEN_ID, screenId != null ? screenId.toString() : "");
+        output.putFloat(KEY_OFFSET_X, offsetX);
+        output.putFloat(KEY_OFFSET_Y, offsetY);
+        output.putFloat(KEY_OFFSET_Z, offsetZ);
         output.putString(KEY_CONNECTED_SPEAKERS, encodeConnectedSpeakers(connectedSpeakers));
     }
 
@@ -256,6 +280,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putBoolean(KEY_PLAYBACK_PAUSED, playbackPaused);
         tag.putString(KEY_SKIN_BLOCK, skinBlock);
         tag.putString(KEY_SCREEN_ID, screenId != null ? screenId.toString() : "");
+        tag.putFloat(KEY_OFFSET_X, offsetX);
+        tag.putFloat(KEY_OFFSET_Y, offsetY);
+        tag.putFloat(KEY_OFFSET_Z, offsetZ);
         tag.putString(KEY_CONNECTED_SPEAKERS, encodeConnectedSpeakers(connectedSpeakers));
         return tag;
     }

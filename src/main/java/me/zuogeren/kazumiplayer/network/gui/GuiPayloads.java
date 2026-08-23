@@ -24,6 +24,13 @@ public final class GuiPayloads {
 
     public record PlayEpisodePayload(String rule, String id, int episode, int road) {}
 
+    /**
+     * 屏幕几何属性（ACTION_SCREEN_PROPS 请求与 DATA_SCREEN_PROPS 回显共用）：
+     * facing 为 north/south/east/west；width/height 单位格；offset XYZ 为相对默认位置的自由偏移（格）
+     */
+    public record ScreenPropsPayload(float offsetX, float offsetY, float offsetZ,
+                                     String facing, float width, float height) {}
+
     /** 直链队列提交：一次可携带多条 URL */
     public record QueueAddPayload(List<String> urls) {}
 

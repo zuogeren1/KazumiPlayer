@@ -16,6 +16,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.MultiLineTextWidget;
@@ -23,6 +24,9 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 
 import java.util.List;
@@ -253,12 +257,17 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 me.zuogeren.kazumiplayer.client.ClientFullscreenState.enter(this.screenPos, true);
                 this.onClose();
             }).bounds(L.rightX() + L.rightW() - 44, 30 + L.previewH() - 18, 40, 16).build());
+        // 预览区左上角：屏幕设置（独立界面，背景透明可对照世界中的屏幕）
+        this.addRenderableWidget(Button.builder(Component.literal("设置"), b ->
+                this.minecraft.setScreen(new ScreenPropsScreen(this.screenPos)))
+            .bounds(L.rightX() + 4, 34, 40, 14).build());
         GuiClientState.setListener(this);
     }
 
     @Override
     public void removed() {
-        GuiClientState.setListener(null);
+        // 仅在自己仍是监听者时清空（切到 ScreenPropsScreen 时它已接管，勿误清）
+        GuiClientState.removeListenerIfOwner(this);
         // 界面关闭时取消服务端在途流式搜源（慢源完成后不再回推迟到结果）
         this.sendAction(GuiProtocol.ACTION_CANCEL_SEARCH, "{}");
         super.removed();
@@ -302,7 +311,6 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.drawPreview(graphics, L.rightX(), 30, L.rightW(), L.previewH());
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 
-        // 最右列面板标题（「观看中」与中列选集按钮行平齐）
         graphics.text(this.font, Component.literal("队列").withStyle(ChatFormatting.GRAY), L.sideX(), 30, -1);
         graphics.text(this.font, Component.literal("观看中").withStyle(ChatFormatting.GRAY), L.sideX(), L.splitY() + 4, -1);
 

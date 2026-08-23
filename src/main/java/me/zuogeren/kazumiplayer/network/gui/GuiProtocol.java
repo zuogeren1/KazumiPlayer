@@ -28,6 +28,8 @@ public final class GuiProtocol {
     public static final String ACTION_STOP_SCREEN = "stop_screen";
     /** {urls} 提交直链：屏幕空闲则立即起播，队列播放中则追加到队尾，规则剧集中拒绝 */
     public static final String ACTION_QUEUE_ADD = "queue_add";
+    /** {offsetX,offsetY,offsetZ,facing,width,height} 设置屏幕几何属性（朝向/大小/偏移），服务端 clamp 后回发权威值 */
+    public static final String ACTION_SCREEN_PROPS = "screen_props";
     /** {index} 立即切播队列第 index 项（1-based） */
     public static final String ACTION_QUEUE_JUMP = "queue_jump";
     /** {index} 把队列第 index 项移到当前项之后（下一个就播它），仅待播项有效 */
@@ -56,6 +58,8 @@ public final class GuiProtocol {
     public static final String DATA_RULE_RESULTS_PARTIAL = "rule_results_partial";
     /** ChaptersPayload */
     public static final String DATA_CHAPTERS = "chapters";
+    /** ScreenPropsPayload 服务端 clamp 后的权威属性值（设置面板以此刷新显示） */
+    public static final String DATA_SCREEN_PROPS = "screen_props";
     /** PlayOkPayload */
     public static final String DATA_PLAY_OK = "play_ok";
     /** ErrorPayload */

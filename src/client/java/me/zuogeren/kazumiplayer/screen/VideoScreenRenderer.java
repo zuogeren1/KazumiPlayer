@@ -75,6 +75,9 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         BlockEntityRenderState.extractBase(be, state, breakProgress);
         state.screenWidth = be.getScreenWidth();
         state.screenHeight = be.getScreenHeight();
+        state.offsetX = be.getOffsetX();
+        state.offsetY = be.getOffsetY();
+        state.offsetZ = be.getOffsetZ();
         state.facing = be.getFacing();
         state.videoState = be.getVideoState();
         state.player = me.zuogeren.kazumiplayer.client.ScreenPlayerManager.getPlayer(be.getBlockPos());
@@ -141,8 +144,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
 
         poseStack.pushPose();
 
-        // 屏幕显示在方块上方（+0.5格避开方块遮挡进度条）
-        poseStack.translate(0.5, 1.5 + halfH, 0.5);
+        // 屏幕显示在方块上方（+0.5格避开方块遮挡进度条），叠加用户设置的 XYZ 偏移
+        poseStack.translate(0.5 + state.offsetX, 1.5 + state.offsetY + halfH, 0.5 + state.offsetZ);
 
         // 根据朝向绕 Y 轴旋转
         rotateToFacing(poseStack, state.facing);
@@ -263,17 +266,22 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     /**
      * 渲染包围盒必须包含伸出方块上方的屏幕面，否则玩家视角看不到方块本体
      * AABB 时整个 BE 被 frustum 剔除，屏幕面消失（方块本体由 chunk 渲染所以正常）。
+     * 需计入用户设置的 XYZ 偏移，否则偏移后的屏幕面会被剔除。
      */
     @Override
     public AABB getRenderBoundingBox(VideoScreenBlockEntity blockEntity) {
         BlockPos pos = blockEntity.getBlockPos();
         float halfW = blockEntity.getScreenWidth() / 2.0f;
         float halfH = blockEntity.getScreenHeight() / 2.0f;
-        // 屏幕面：中心在方块上方 1.5+halfH，半宽 halfW，半高 halfH；水平方向按最大半径覆盖
+        // 屏幕面：默认中心在方块上方 1.5+halfH，半宽 halfW，半高 halfH；水平方向按最大半径覆盖
         double r = Math.max(1.0, halfW) + 0.5;
-        double yTop = pos.getY() + 1.5 + halfH * 2 + 1.0;
+        double cx = pos.getX() + 0.5 + blockEntity.getOffsetX();
+        double cy = pos.getY() + 1.5 + blockEntity.getOffsetY() + halfH;
+        double cz = pos.getZ() + 0.5 + blockEntity.getOffsetZ();
         return new AABB(
-                pos.getX() + 0.5 - r, pos.getY(), pos.getZ() + 0.5 - r,
-                pos.getX() + 0.5 + r, yTop, pos.getZ() + 0.5 + r);
+                Math.min(pos.getX() + 0.5 - r, cx - r), Math.min(pos.getY(), cy - halfH - 1.0),
+                Math.min(pos.getZ() + 0.5 - r, cz - r),
+                Math.max(pos.getX() + 0.5 + r, cx + r), Math.max(pos.getY() + 1.5 + halfH * 2 + 1.0, cy + halfH + 1.0),
+                Math.max(pos.getZ() + 0.5 + r, cz + r));
     }
 }

@@ -23,6 +23,15 @@ public final class GuiClientState {
         listener = l;
     }
 
+    public static Listener getListener() {
+        return listener;
+    }
+
+    /** 仅当 l 仍是当前监听者时清空（Screen 切换时序防御，避免误清新界面的注册） */
+    public static void removeListenerIfOwner(Listener l) {
+        if (listener == l) listener = null;
+    }
+
     /** 在主线程被 ClientPacketHandlers 调用 */
     public static void onData(String dataType, String json) {
         Listener l = listener;
