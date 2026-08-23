@@ -119,9 +119,18 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                             System.currentTimeMillis() - player.getLastSeekMs() < SEEK_COOLDOWN_MS;
                     long drift = Math.abs(player.getTimeMs() - targetPos);
                     if (!seekCooldown && !switchingEpisode && drift > DRIFT_HARD_LIMIT_MS) {
-                        KazumiLog.sync.warn("Hard resync at {}: drift {}ms exceeds limit",
+                        long duration = player.getDurationMs();
+                        if (duration > 0 && targetPos >= duration) {
+                            // 目标位置超出媒体时长：权威状态已被污染（历史教训：墙钟混入 MonoClock 运算），
+                            // 拒绝跟随——seek 到天文位置会让 FFmpeg 重开输入失败、管道死亡、误判 ended
+                            KazumiLog.sync.error(
+                                "Rejected insane sync target {}ms (duration={}ms) at {}",
+                                targetPos, duration, screen.getBlockPos());
+                        } else {
+                            KazumiLog.sync.warn("Hard resync at {}: drift {}ms exceeds limit",
                                 screen.getBlockPos(), drift);
-                        player.seek(targetPos);
+                            player.seek(targetPos);
+                        }
                     }
                 }
                 if (!switchingEpisode) {

@@ -156,7 +156,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
 
         // 保存实时位置到 NBT
         if (g != null) {
-            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+            long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
             screen.updateSyncPosition(g.positionMs + elapsed);
         }
 
@@ -238,7 +238,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
         if (g == null) return;
-        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+        long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
         long cur = g.positionMs + elapsed;
         SyncGroupManager.get().updateState(sid, cur, pause);
         screen.updateSyncPosition(cur);

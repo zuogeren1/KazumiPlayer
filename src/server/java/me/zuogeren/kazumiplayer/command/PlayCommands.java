@@ -14,6 +14,7 @@ import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.ChatComponentUtil;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
+import me.zuogeren.kazumiplayer.util.MonoClock;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -87,7 +88,7 @@ public class PlayCommands {
                     KazumiMessages.sendSuccess(ctx.getSource(), "已加入同步播放（等待播放开始）");
                 } else if (group != null) {
                     // 已在播放：加入现有组
-                    long elapsed = group.paused ? 0 : System.currentTimeMillis() - group.serverTimestamp;
+                    long elapsed = group.paused ? 0 : MonoClock.millis() - group.serverTimestamp;
                     long currentPos = group.positionMs + elapsed;
                     SyncGroupManager.get().join(player, sid, url);
                     setScreenNbt(screen, url, currentPos);

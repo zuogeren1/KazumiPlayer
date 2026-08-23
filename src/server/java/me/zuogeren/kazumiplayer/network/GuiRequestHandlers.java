@@ -16,6 +16,7 @@ import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
+import me.zuogeren.kazumiplayer.util.MonoClock;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -230,7 +231,7 @@ public class GuiRequestHandlers {
             SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "加入了同步播放");
             sendOk(sp, "已加入同步播放（等待播放开始）");
         } else if (group != null) {
-            long elapsed = group.paused ? 0 : System.currentTimeMillis() - group.serverTimestamp;
+            long elapsed = group.paused ? 0 : MonoClock.millis() - group.serverTimestamp;
             long currentPos = group.positionMs + elapsed;
             SyncGroupManager.get().join(sp, sid, url);
             screen.setPlayback(url, currentPos);
@@ -255,7 +256,7 @@ public class GuiRequestHandlers {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
         if (g != null) {
-            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+            long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
             screen.updateSyncPosition(g.positionMs + elapsed);
             SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, "离开了同步播放");
         }
@@ -273,7 +274,7 @@ public class GuiRequestHandlers {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
         if (g != null) {
-            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+            long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
             screen.updateSyncPosition(g.positionMs + elapsed);
         }
         List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
