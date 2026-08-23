@@ -49,6 +49,12 @@ public final class VideoSourceResolver {
 
         if (looksLikeDirectVideo(episodeUrl)) {
             KazumiLog.sniff.info("[source] direct video URL, playing without sniffing");
+            // .m3u8/.m3u 播放列表直链按 HLS 直播流处理：置直连模式绕过服务端时钟同步
+            // （live 无稳定时间轴，同步校正/暂停广播只会干扰缓冲，GUI 时间轴控制随之禁用）
+            if (isLivePlaylistUrl(episodeUrl)) {
+                session.bypassSync = true;
+                KazumiLog.sniff.info("[source] live playlist URL, sync bypassed");
+            }
             player.play(episodeUrl);
             screen.setVideoState(VideoState.PLAYING);
             return player;
@@ -179,6 +185,24 @@ public final class VideoSourceResolver {
             || path.endsWith(".m3u8") || path.endsWith(".avi")
             || path.endsWith(".webm") || path.endsWith(".mov");
         return lower.startsWith("file://") || hasDrive || hasVideoExt;
+    }
+
+    /**
+     * URL 去 query/fragment 后以 .m3u8/.m3u 结尾 → 按 HLS 直播流处理
+     * （置 {@link ScreenPlayerManager.ScreenPlayer#bypassSync}，绕过同步与自动切集）。
+     */
+    private static boolean isLivePlaylistUrl(String url) {
+        if (url == null) return false;
+        return pointsToPlaylist(url.trim());
+    }
+
+    private static boolean pointsToPlaylist(String line) {
+        String lower = line.toLowerCase();
+        int cut = lower.indexOf('?');
+        if (cut >= 0) lower = lower.substring(0, cut);
+        cut = lower.indexOf('#');
+        if (cut >= 0) lower = lower.substring(0, cut);
+        return lower.endsWith(".m3u8") || lower.endsWith(".m3u");
     }
 
     private static Throwable unwrap(Throwable t) {

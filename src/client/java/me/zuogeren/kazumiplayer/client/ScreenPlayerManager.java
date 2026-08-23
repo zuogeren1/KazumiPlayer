@@ -23,6 +23,13 @@ public final class ScreenPlayerManager {
         public boolean everPlayed;
         /** 本次启动是否已发送首帧锚定上报（PositionReportPacket，每集一次） */
         public boolean anchorReported;
+        /**
+         * 直播直连模式（.m3u8/.m3u 直链）：绕过服务端时钟同步本地自由播放——
+         * live 流没有稳定时间轴，位置校正/暂停广播无意义且干扰缓冲重建，
+         * 自动切集兜底会被滑动窗口时长误触发；GUI 的时间轴控制项随之禁用。
+         * 新起播前由调度器复位，直播直链起播时置位。
+         */
+        public boolean bypassSync;
     }
 
     private static final Map<BlockPos, ScreenPlayer> players = new ConcurrentHashMap<>();

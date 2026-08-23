@@ -58,6 +58,19 @@ public class WaterMediaPlayer {
                     });
                     return;
                 }
+                // MRL 已进入确定失败态（如 content-type 校验拒绝、平台拦截）：
+                // 即时报错收尾，不必傻等满 30 轮超时（典型：IPTV 目录 m3u8 被 text/plain 拒绝）
+                MRL.Status st = mrl.status();
+                if (st == MRL.Status.ERROR || st == MRL.Status.BLOCKED) {
+                    Throwable reason = mrl.exception();
+                    String raw = reason != null && reason.getMessage() != null
+                            ? reason.getMessage() : st.name();
+                    if (raw.length() > 120) raw = raw.substring(0, 120) + "…";
+                    String detail = raw;
+                    KazumiLog.playback.error("MRL load failed ({}): {}", url, detail);
+                    mc.execute(() -> KazumiMessages.chatError("视频加载失败：" + detail));
+                    return;
+                }
                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
             }
             if (closed) return;

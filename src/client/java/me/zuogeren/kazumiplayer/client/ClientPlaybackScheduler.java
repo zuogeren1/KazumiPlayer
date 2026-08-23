@@ -108,6 +108,7 @@ public class ClientPlaybackScheduler {
         if (sp.player == null && !url.isEmpty() && isWatching(screen, mc)
                 && System.currentTimeMillis() - sp.playbackStartedAt > PLAYBACK_START_COOLDOWN_MS) {
             sp.playbackStartedAt = System.currentTimeMillis();
+            sp.bypassSync = false; // 先复位上一集的直播直连标记（beginPlayback 检测到直播直链会重新置位）
             sp.player = me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver
                     .getInstance().beginPlayback(screen, url);
             sp.lastEpisodeUrl = url;
@@ -138,8 +139,9 @@ public class ClientPlaybackScheduler {
                 if (!sp.everPlayed) {
                     sp.everPlayed = true; // 已实际出画面，不参与僵尸自愈判定
                     // 首帧锚定上报（每集一次）：服务端以真实播放位置校准权威时钟，
-                    // 消除"组时钟从切换瞬间流逝 vs 播放器经解析/缓冲晚 N 秒出声"的假漂移硬 seek
-                    if (!sp.anchorReported && mc.getConnection() != null) {
+                    // 消除"组时钟从切换瞬间流逝 vs 播放器经解析/缓冲晚 N 秒出声"的假漂移硬 seek；
+                    // 直播直连模式无权威时间轴，上报无意义
+                    if (!sp.bypassSync && !sp.anchorReported && mc.getConnection() != null) {
                         sp.anchorReported = true;
                         mc.getConnection().send(new ServerboundCustomPayloadPacket(
                             new PositionReportPacket(screen.getBlockPos(), screen.getScreenId(),
@@ -147,15 +149,19 @@ public class ClientPlaybackScheduler {
                     }
                 }
             }
-            // 兜底：部分流（live 型 HLS）永不产生 EOF，用时长逼近视为播完
-            boolean ended = sp.player.isEnded()
-                    || (sp.player.getDurationMs() > 0
-                    && sp.player.getTimeMs() >= sp.player.getDurationMs() - END_DETECT_MARGIN_MS);
-            if (ended && !sp.endedNotified) {
-                sp.endedNotified = true;
-                KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
-                var pkt = new NextEpisodePacket(screen.getBlockPos());
-                mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
+            // 兜底：部分流（live 型 HLS）永不产生 EOF，用时长逼近视为播完。
+            // 直播直连模式跳过：duration=滑动窗口长度（如 30s），time 逼近窗口末端是常态，
+            // 不跳过会在半分钟内误判"播完"触发自动切集
+            if (!sp.bypassSync) {
+                boolean ended = sp.player.isEnded()
+                        || (sp.player.getDurationMs() > 0
+                        && sp.player.getTimeMs() >= sp.player.getDurationMs() - END_DETECT_MARGIN_MS);
+                if (ended && !sp.endedNotified) {
+                    sp.endedNotified = true;
+                    KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
+                    var pkt = new NextEpisodePacket(screen.getBlockPos());
+                    mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
+                }
             }
         }
         // URL 变了 → 取消该屏在途解析（防止旧解析完成后复活已停止的旧播放器）、停旧播放器，下次 tick 自动启动新的

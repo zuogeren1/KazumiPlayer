@@ -96,6 +96,11 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private SimpleList watchList;      // 当前正在观看的玩家
     private int sideRefreshCounter;
     private Button pauseButton;
+    // 时间轴控制（上一集/下一集/±10s）：直播直连模式（bypassSync）下禁用
+    private Button prevButton;
+    private Button nextButton;
+    private Button seekBackButton;
+    private Button seekForwardButton;
     private SeekSlider seekSlider;
     private Button sourceButton;       // 搜源来源限定下拉（全部/各已装规则）
     private boolean sourceDropdownOpen;
@@ -229,17 +234,21 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
         int by = h - 28;
         int bw = Math.max(44, (w - 12 - 7 * 4) / 8);
-        this.addRenderableWidget(Button.builder(Component.literal("上一集"), b -> this.sendControl(PlaybackAction.PREV, 0))
-            .bounds(6, by, bw, 18).build());
+        this.prevButton = Button.builder(Component.literal("上一集"), b -> this.sendControl(PlaybackAction.PREV, 0))
+            .bounds(6, by, bw, 18).build();
+        this.addRenderableWidget(this.prevButton);
         this.pauseButton = Button.builder(Component.literal("暂停"), b -> this.togglePause())
             .bounds(6 + (bw + 4), by, bw, 18).build();
         this.addRenderableWidget(this.pauseButton);
-        this.addRenderableWidget(Button.builder(Component.literal("下一集"), b -> this.sendControl(PlaybackAction.NEXT, 0))
-            .bounds(6 + (bw + 4) * 2, by, bw, 18).build());
-        this.addRenderableWidget(Button.builder(Component.literal("-10s"), b -> this.sendControl(PlaybackAction.SEEK_BACK, 10))
-            .bounds(6 + (bw + 4) * 3, by, bw, 18).build());
-        this.addRenderableWidget(Button.builder(Component.literal("+10s"), b -> this.sendControl(PlaybackAction.SEEK_FORWARD, 10))
-            .bounds(6 + (bw + 4) * 4, by, bw, 18).build());
+        this.nextButton = Button.builder(Component.literal("下一集"), b -> this.sendControl(PlaybackAction.NEXT, 0))
+            .bounds(6 + (bw + 4) * 2, by, bw, 18).build();
+        this.addRenderableWidget(this.nextButton);
+        this.seekBackButton = Button.builder(Component.literal("-10s"), b -> this.sendControl(PlaybackAction.SEEK_BACK, 10))
+            .bounds(6 + (bw + 4) * 3, by, bw, 18).build();
+        this.addRenderableWidget(this.seekBackButton);
+        this.seekForwardButton = Button.builder(Component.literal("+10s"), b -> this.sendControl(PlaybackAction.SEEK_FORWARD, 10))
+            .bounds(6 + (bw + 4) * 4, by, bw, 18).build();
+        this.addRenderableWidget(this.seekForwardButton);
         this.addRenderableWidget(Button.builder(Component.literal("加入同步"), b -> this.sendAction(GuiProtocol.ACTION_JOIN, "{}"))
             .bounds(6 + (bw + 4) * 5, by, bw, 18).build());
         this.addRenderableWidget(Button.builder(Component.literal("离开"), b -> this.sendAction(GuiProtocol.ACTION_LEAVE, "{}"))
@@ -288,6 +297,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.seekSlider.syncWithPlayer();
         var player = this.getPlayer();
         this.pauseButton.setMessage(Component.literal(player != null && player.isPlaying() ? "暂停" : "播放"));
+        // 直播直连模式（.m3u8/.m3u 直链）：live 无稳定时间轴，时间轴控制项全部禁用
+        boolean liveCtl = !ScreenPlayerManager.get(this.screenPos).bypassSync;
+        this.prevButton.active = liveCtl;
+        this.pauseButton.active = liveCtl;
+        this.nextButton.active = liveCtl;
+        this.seekBackButton.active = liveCtl;
+        this.seekForwardButton.active = liveCtl;
         // 直链提交按钮随屏幕状态切换语义；右侧两面板低频刷新（BE NBT 同步与 TabList 解析均有延迟）
         var screen = this.boundScreen();
         if (this.playUrlButton != null) {
@@ -836,6 +852,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
         void syncWithPlayer() {
             long dur = durationMs();
+            // 直播直连模式：滑动窗口时长无时间轴语义，滑块禁用并显示"直播"
+            if (ScreenPlayerManager.get(screenPos).bypassSync) {
+                this.value = 0;
+                this.setMessage(Component.literal("直播"));
+                this.active = false;
+                return;
+            }
             // 无播放器/未起播（含切集重建瞬间）：滑块清零，避免残留上一集位置
             if (dur <= 0) {
                 if (this.value != 0.0) {

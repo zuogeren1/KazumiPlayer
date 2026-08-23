@@ -106,6 +106,9 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 var player = ScreenPlayerManager.getPlayer(screen.getBlockPos());
                 if (player == null) return;
                 var sp = ScreenPlayerManager.get(screen.getBlockPos());
+                // 直播直连模式（.m3u8/.m3u 直链）：live 流无稳定时间轴，
+                // 位置插值/硬 seek 与无条件 pause/resume 均无意义且反复打断缓冲重建，完全绕过
+                if (sp.bypassSync) return;
                 // 锚点插值：target = 快照位置 + (映射到服务器单调钟的当前值 - 锚点时刻)
                 // serverTimestamp 为服务器发送时的 MonoClock.millis()，钟差由 ClientClockSync 握手补偿；
                 // 时钟未同步时跳过位置校正（只应用暂停状态），避免墙钟偏差造成恒定误差
