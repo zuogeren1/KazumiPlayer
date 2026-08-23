@@ -121,6 +121,9 @@ public class ClientPlaybackScheduler {
             if (screen.isPlaybackPaused()) {
                 sp.player.pause();
             }
+            if (sp.player != null) {
+                attachFailureSkip(screen, sp, mc);
+            }
         }
         // 已启动但 seek 未生效：等播放器就绪后重试
         if (sp.player != null && sp.player.hasPendingSeek() && sp.player.isPlaying()) {
@@ -149,19 +152,22 @@ public class ClientPlaybackScheduler {
                     }
                 }
             }
-            // 兜底：部分流（live 型 HLS）永不产生 EOF，用时长逼近视为播完。
-            // 直播直连模式跳过：duration=滑动窗口长度（如 30s），time 逼近窗口末端是常态，
-            // 不跳过会在半分钟内误判"播完"触发自动切集
-            if (!sp.bypassSync) {
-                boolean ended = sp.player.isEnded()
+            // 播完判定：直播直连模式只认真实 EOF——滑动窗口 duration 是固定窗长
+            // （实测 live 探针 totalDuration=30s），"时长逼近视为播完"兜底对 live 必然误触发；
+            // VOD 型 HLS（m3u8 点播）没有 EOF 缺失问题，仍靠 isEnded() 正常驱动队列自动连播
+            boolean ended;
+            if (sp.bypassSync) {
+                ended = sp.player.isEnded();
+            } else {
+                ended = sp.player.isEnded()
                         || (sp.player.getDurationMs() > 0
                         && sp.player.getTimeMs() >= sp.player.getDurationMs() - END_DETECT_MARGIN_MS);
-                if (ended && !sp.endedNotified) {
-                    sp.endedNotified = true;
-                    KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
-                    var pkt = new NextEpisodePacket(screen.getBlockPos());
-                    mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
-                }
+            }
+            if (ended && !sp.endedNotified) {
+                sp.endedNotified = true;
+                KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
+                var pkt = new NextEpisodePacket(screen.getBlockPos());
+                mc.getConnection().send(new ServerboundCustomPayloadPacket(pkt));
             }
         }
         // URL 变了 → 取消该屏在途解析（防止旧解析完成后复活已停止的旧播放器）、停旧播放器，下次 tick 自动启动新的
@@ -181,6 +187,37 @@ public class ClientPlaybackScheduler {
     @SubscribeEvent
     public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
         stopAllActive();
+    }
+
+    // ---- 队列容错：播放失败自动跳过 ----
+
+    /** 同一屏幕跳过请求的最小重发间隔（服务端处理与 URL 变更同步均有延迟，防抖动重复发送） */
+    private static final long SKIP_RESEND_COOLDOWN_MS = 3000;
+    private static long lastSkipSentAt;
+
+    /**
+     * 给本次起播的播放器挂失败回调：MRL 拒绝/加载超时/播放器创建失败时
+     * 请求服务端移除正在播放的队列项并切播下一个（queue_skip_current）。
+     * 回调可能来自 MRL-Loader 线程，统一投递主线程；会话不符（URL 已变更/已停止）则忽略。
+     */
+    private static void attachFailureSkip(VideoScreenBlockEntity screen,
+            ScreenPlayerManager.ScreenPlayer sp, Minecraft mc) {
+        final var player = sp.player;
+        player.setPlayFailureListener(() -> mc.execute(() -> {
+            var current = ScreenPlayerManager.get(screen.getBlockPos());
+            if (current.player != player) return; // 该播放器已被替换/停止，失败属于旧集
+            if (mc.getConnection() == null) return;
+            long now = System.currentTimeMillis();
+            if (now - lastSkipSentAt < SKIP_RESEND_COOLDOWN_MS) return;
+            lastSkipSentAt = now;
+            KazumiLog.playback.info("Playback failed at {}, requesting queue skip",
+                screen.getBlockPos());
+            mc.getConnection().send(new ServerboundCustomPayloadPacket(
+                new me.zuogeren.kazumiplayer.network.packet.GuiActionPacket(
+                    screen.getBlockPos(),
+                    me.zuogeren.kazumiplayer.network.gui.GuiProtocol.ACTION_QUEUE_SKIP_CURRENT,
+                    "{}")));
+        }));
     }
 
     /** 单机世界退出：集成服务端停止时兜底停止所有播放（客户端连远程服时由 LoggingOut 兜底） */

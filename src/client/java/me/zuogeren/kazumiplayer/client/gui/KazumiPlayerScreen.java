@@ -16,7 +16,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
-import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.MultiLineTextWidget;
@@ -24,11 +23,9 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-
-import java.util.ArrayList;
-import java.util.List;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -49,10 +46,12 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private final BlockPos screenPos;
 
     // 左列搜索流状态（static：GUI 关闭重开后保留上次搜索，clearSearch() 清空）
-    private enum ListView { BANGUMI, RULE }
+    private enum ListView { BANGUMI, RULE, CATALOG }
     private static ListView listView = ListView.BANGUMI;
     private static List<GuiPayloads.BangumiResultItem> bangumiItems = List.of();
     private static List<GuiPayloads.RuleResultItem> ruleItems = List.of();
+    /** 频道目录解析结果（CATALOG 视图内容，随 GUI 会话持久化） */
+    private static List<me.zuogeren.kazumiplayer.playback.source.M3u8CatalogCheck.Channel> catalogChannels = List.of();
     /** 当前流式搜源的代次（服务端每轮递增），用于识别新一轮并重置结果 */
     private static long ruleSearchId;
     private static String lastKeyword = "";
@@ -508,13 +507,29 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 this.searchList.addRow(Component.literal((i + 1) + ". " + item.name() + date), -1,
                     () -> this.selectSubject(selected));
             }
-        } else {
+        } else if (this.listView == ListView.RULE) {
             for (int i = 0; i < this.ruleItems.size(); i++) {
                 var item = this.ruleItems.get(i);
                 final var selected = item;
                 this.searchList.addRow(
                     Component.literal("[" + item.rule() + "] " + item.name()).withStyle(ChatFormatting.GOLD), -1,
                     () -> this.selectRuleResult(selected));
+            }
+        } else {
+            // 频道目录视图：每行 [加]=排队追加 / [切]=立即切播
+            for (int i = 0; i < catalogChannels.size(); i++) {
+                final var ch = catalogChannels.get(i);
+                this.searchList.addRowWithTail(
+                    Component.literal((i + 1) + ". " + ch.title()), -1, 0, null,
+                    List.of(new SimpleList.Cell("加", () -> this.sendAction(GuiProtocol.ACTION_QUEUE_ADD,
+                                new GuiPayloads.QueueAddPayload(List.of(ch.url())))),
+                        new SimpleList.Cell("切", () -> this.sendAction(GuiProtocol.ACTION_QUEUE_PLAY_NOW,
+                                new GuiPayloads.QueueAddPayload(List.of(ch.url()))))),
+                    QUEUE_TAIL_W);
+            }
+            if (catalogChannels.isEmpty()) {
+                this.searchList.addRow(
+                    Component.literal("（频道列表为空）").withStyle(ChatFormatting.DARK_GRAY), -1, null);
             }
         }
     }
@@ -590,6 +605,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         listView = ListView.BANGUMI;
         bangumiItems = List.of();
         ruleItems = List.of();
+        catalogChannels = List.of();
         ruleSearchId = 0;
         searchSource = "";
         lastKeyword = "";
@@ -650,7 +666,9 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             Runnable onRemove = () -> this.sendQueueOp(GuiProtocol.ACTION_QUEUE_REMOVE, index);
             this.queueList.addRowWithTail(
                 Component.literal((++pending) + ". " + label), -1, 0, onName,
-                List.of(new SimpleList.Cell("插", onMove), new SimpleList.Cell("删", onRemove)),
+                List.of(new SimpleList.Cell("切", () -> this.sendQueueOp(GuiProtocol.ACTION_QUEUE_JUMP, index)),
+                    new SimpleList.Cell("插", onMove),
+                    new SimpleList.Cell("删", onRemove)),
                 QUEUE_TAIL_W);
         }
     }
@@ -689,6 +707,29 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private void playDirectUrl() {
         String url = this.urlEdit.getValue().trim();
         if (url.isEmpty()) return;
+        // m3u8 排队预检（提示走 GUI 状态条，不进聊天栏）：
+        // 频道目录解析为频道列表展示在搜索结果栏（每条可 加/切）；无法访问的链接不入队
+        if (me.zuogeren.kazumiplayer.playback.source.M3u8CatalogCheck.needsCheck(url)) {
+            this.setStatus("正在校验链接…");
+            me.zuogeren.kazumiplayer.playback.source.M3u8CatalogCheck.probeAsync(url, result ->
+                Minecraft.getInstance().execute(() -> {
+                    switch (result.result()) {
+                        case CATALOG -> {
+                            catalogChannels = result.channels();
+                            listView = ListView.CATALOG;
+                            this.rebuildSearchList();
+                            this.setStatus("已解析频道目录：" + catalogChannels.size() + " 个频道");
+                        }
+                        case UNREACHABLE -> this.setStatus("m3u8 链接无法访问（超时或不可达），未加入队列");
+                        case PLAYABLE -> {
+                            this.sendAction(GuiProtocol.ACTION_QUEUE_ADD,
+                                new GuiPayloads.QueueAddPayload(List.of(url)));
+                            this.setStatus("已提交直链");
+                        }
+                    }
+                }));
+            return;
+        }
         this.sendAction(GuiProtocol.ACTION_QUEUE_ADD, new GuiPayloads.QueueAddPayload(List.of(url)));
         setStatus("已提交直链");
     }

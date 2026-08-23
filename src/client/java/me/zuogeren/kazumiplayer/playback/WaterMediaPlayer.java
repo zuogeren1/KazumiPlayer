@@ -26,10 +26,30 @@ public class WaterMediaPlayer {
      * 自行放弃——否则会产生无人引用的孤儿播放器（音频持续外泄且无法停止）。
      */
     private volatile boolean closed;
+    /** 播放失败回调（MRL 确定失败/加载超时/播放器创建失败）：队列容错自动跳过的信号源 */
+    private volatile Runnable playFailureListener;
+    private final java.util.concurrent.atomic.AtomicBoolean failureFired =
+            new java.util.concurrent.atomic.AtomicBoolean();
     private final List<PlayStateListener> listeners = new ArrayList<>();
 
     public void addListener(PlayStateListener l) { listeners.add(l); }
     public void removeListener(PlayStateListener l) { listeners.remove(l); }
+
+    /** 设置播放失败回调；每次 play 生命周期至多触发一次（重新 play 时自动复位） */
+    public void setPlayFailureListener(Runnable r) {
+        this.playFailureListener = r;
+        this.failureFired.set(false);
+    }
+
+    /** 可能在 MRL-Loader 线程触发，回调实现方自行投递主线程 */
+    private void firePlayFailure() {
+        if (this.playFailureListener != null && this.failureFired.compareAndSet(false, true)) {
+            try {
+                this.playFailureListener.run();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
 
     private static String normalizeUrl(String url) {
         // 本地 Windows/Unix 路径转 file:// URI（正确编码中文等非 ASCII 字符）
@@ -69,6 +89,7 @@ public class WaterMediaPlayer {
                     String detail = raw;
                     KazumiLog.playback.error("MRL load failed ({}): {}", url, detail);
                     mc.execute(() -> KazumiMessages.chatError("视频加载失败：" + detail));
+                    firePlayFailure();
                     return;
                 }
                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
@@ -76,6 +97,7 @@ public class WaterMediaPlayer {
             if (closed) return;
             KazumiLog.playback.error("MRL loading timeout: {} (normalized: {})", videoUrl, url);
             mc.execute(() -> KazumiMessages.chatError("视频加载超时，请检查网络或稍后重试"));
+            firePlayFailure();
         }, "KazumiPlayer-MRL-Loader").start();
     }
 
@@ -89,6 +111,7 @@ public class WaterMediaPlayer {
             if (player == null) {
                 KazumiLog.playback.error("Failed to create player for: {}", mrl.uri);
                 mc.execute(() -> KazumiMessages.chatError("创建播放器失败"));
+                firePlayFailure();
                 return;
             }
             player.start();
@@ -98,6 +121,7 @@ public class WaterMediaPlayer {
             // seek 交给外部 tick 延迟执行（此时 demuxer 尚未就绪）
         } catch (Exception e) {
             KazumiLog.playback.error("Playback failed: {}", e.getMessage());
+            firePlayFailure();
         }
     }
 

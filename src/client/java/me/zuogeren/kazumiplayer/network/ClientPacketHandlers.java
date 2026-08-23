@@ -2,7 +2,6 @@ package me.zuogeren.kazumiplayer.network;
 
 import me.zuogeren.kazumiplayer.client.ClientRuleCache;
 import me.zuogeren.kazumiplayer.client.ClientClockSync;
-import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.client.gui.GuiClientState;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;

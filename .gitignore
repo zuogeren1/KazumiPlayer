@@ -23,6 +23,10 @@ run
 # Game logs
 logs/
 
+# Agent session artifacts
+.agent-teams/
+.zcode/
+
 # Reference files
 reference/
 CLAUDE.md

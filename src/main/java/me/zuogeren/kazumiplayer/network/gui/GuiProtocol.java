@@ -36,6 +36,11 @@ public final class GuiProtocol {
     public static final String ACTION_QUEUE_MOVE = "queue_move";
     /** {index} 从队列移除第 index 项（当前项不可移除） */
     public static final String ACTION_QUEUE_REMOVE = "queue_remove";
+    /** {urls[0]} 立即切播该直链：空闲单项起播；队列中已存在则 jump 到它；
+     *  否则插入当前项之后并切播（原队列顺序保留，播完自动继续）——频道目录「切」按钮用 */
+    public static final String ACTION_QUEUE_PLAY_NOW = "queue_play_now";
+    /** {} 播放失败自动跳过：移除正在播放的队列项并切播下一个；唯一项或非队列模式则停止本屏播放 */
+    public static final String ACTION_QUEUE_SKIP_CURRENT = "queue_skip_current";
 
     // ---- 规则管理器（RuleManagerScreen）----
     /** {} 获取远程仓库规则列表 + 本地安装状态合并 */

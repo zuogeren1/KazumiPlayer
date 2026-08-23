@@ -22,8 +22,6 @@ import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -69,6 +67,11 @@ public class GuiRequestHandlers {
                 case GuiProtocol.ACTION_STOP_SCREEN -> stopScreen(sp, packet.screenPos());
                 case GuiProtocol.ACTION_SCREEN_PROPS -> screenProps(sp, packet.screenPos(), packet.payloadJson());
                 case GuiProtocol.ACTION_QUEUE_ADD -> queueAdd(sp, packet.screenPos(), packet.payloadJson());
+                case GuiProtocol.ACTION_QUEUE_PLAY_NOW -> queuePlayNow(sp, packet.screenPos(), packet.payloadJson());
+                case GuiProtocol.ACTION_QUEUE_SKIP_CURRENT -> {
+                    String err = QueueRequestHandlers.skipCurrent(sp, packet.screenPos());
+                    if (err != null) sendError(sp, err); // 成功反馈经队列面板 NBT 同步与通知体现
+                }
                 case GuiProtocol.ACTION_QUEUE_JUMP -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.JUMP);
                 case GuiProtocol.ACTION_QUEUE_MOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.MOVE);
                 case GuiProtocol.ACTION_QUEUE_REMOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.REMOVE);
@@ -358,6 +361,14 @@ public class GuiRequestHandlers {
         var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.QueueAddPayload.class);
         if (payload == null || payload.urls() == null || payload.urls().isEmpty()) return;
         String err = QueueRequestHandlers.submit(sp, screenPos, payload.urls());
+        if (err != null) sendError(sp, err);
+    }
+
+    /** 立即切播直链（频道目录「切」按钮）：payload 复用 {urls}，取第一条 */
+    private static void queuePlayNow(ServerPlayer sp, BlockPos screenPos, String payloadJson) {
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.QueueAddPayload.class);
+        if (payload == null || payload.urls() == null || payload.urls().isEmpty()) return;
+        String err = QueueRequestHandlers.playNow(sp, screenPos, payload.urls().get(0));
         if (err != null) sendError(sp, err);
     }
 
