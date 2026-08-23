@@ -20,6 +20,7 @@ import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -63,6 +64,10 @@ public class GuiRequestHandlers {
                 case GuiProtocol.ACTION_QUEUE_JUMP -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.JUMP);
                 case GuiProtocol.ACTION_QUEUE_MOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.MOVE);
                 case GuiProtocol.ACTION_QUEUE_REMOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.REMOVE);
+                case GuiProtocol.ACTION_RULE_LIST -> ruleList(sp);
+                case GuiProtocol.ACTION_RULE_PULL -> ruleNameOp(sp, packet.payloadJson(), RuleOp.PULL);
+                case GuiProtocol.ACTION_RULE_DELETE -> ruleNameOp(sp, packet.payloadJson(), RuleOp.DELETE);
+                case GuiProtocol.ACTION_RULE_TEST -> ruleNameOp(sp, packet.payloadJson(), RuleOp.TEST);
                 default -> sendError(sp, "未知操作: " + packet.action());
             }
         });
@@ -310,6 +315,113 @@ public class GuiRequestHandlers {
             case REMOVE -> QueueRequestHandlers.remove(sp, screenPos, payload.index());
         };
         if (err != null) sendError(sp, err);
+    }
+
+    // ---- 规则管理器（RuleManagerScreen）----
+
+    private enum RuleOp { PULL, DELETE, TEST }
+
+    /** 远程目录 + 本地安装状态合并为列表回推 */
+    private static void ruleList(ServerPlayer sp) {
+        ruleManager.getDownloader().fetchIndex()
+            .thenAccept(index -> {
+                List<GuiPayloads.RuleListEntryPayload> entries = new ArrayList<>();
+                // 已安装排最前（本地版本/弃用状态以本地为准，作者取远程目录补充）
+                for (String name : ruleManager.listAll()) {
+                    Rule local = ruleManager.get(name);
+                    if (local == null) continue;
+                    entries.add(new GuiPayloads.RuleListEntryPayload(name, true,
+                        local.getVersion(), findRemoteMeta(index, name, true),
+                        local.isDeprecated(), findRemoteMeta(index, name, false)));
+                }
+                // 远程未安装的
+                for (var ri : index) {
+                    if (!ruleManager.getRules().containsKey(ri.getName())) {
+                        entries.add(new GuiPayloads.RuleListEntryPayload(ri.getName(), false,
+                            "", ri.getVersion(), false, ri.getAuthor()));
+                    }
+                }
+                send(sp, GuiProtocol.DATA_RULE_LIST, GuiPayloads.toJson(entries));
+            })
+            .exceptionally(e -> sendError(sp, "获取规则目录失败: " + friendly(e)));
+    }
+
+    private static void ruleNameOp(ServerPlayer sp, String payloadJson, RuleOp op) {
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.RuleNamePayload.class);
+        if (payload == null || payload.name().isBlank()) return;
+        String name = payload.name();
+        switch (op) {
+            case PULL -> {
+                ruleManager.getDownloader().fetchRule(name)
+                    .thenAccept(rule -> {
+                        ruleManager.install(rule);
+                        broadcastRuleSync();
+                        sendOk(sp, "已安装规则: " + name);
+                        refreshListFor(sp);
+                    })
+                    .exceptionally(e -> sendError(sp,
+                        "拉取规则失败: " + ruleManager.getDownloader().friendlyError(name, e)));
+            }
+            case DELETE -> {
+                if (ruleManager.delete(name)) {
+                    broadcastRuleSync();
+                    sendOk(sp, "已删除规则: " + name);
+                    refreshListFor(sp);
+                } else {
+                    sendError(sp, "规则未安装: " + name);
+                }
+            }
+            case TEST -> {
+                Rule rule = ruleManager.get(name);
+                if (rule == null) {
+                    sendError(sp, "规则未安装: " + name);
+                    return;
+                }
+                long start = System.currentTimeMillis();
+                ruleManager.getEngine().search(rule, "test")
+                    .thenAccept(r -> send(sp, GuiProtocol.DATA_RULE_TEST_RESULT,
+                        GuiPayloads.toJson(new GuiPayloads.RuleTestResultPayload(
+                            name, System.currentTimeMillis() - start, true))))
+                    .exceptionally(e -> {
+                        send(sp, GuiProtocol.DATA_RULE_TEST_RESULT,
+                            GuiPayloads.toJson(new GuiPayloads.RuleTestResultPayload(name, -1, false)));
+                        return null;
+                    });
+            }
+        }
+    }
+
+    /** 安装/删除后把合并列表重新推送给请求者，GUI 无需手动刷新 */
+    private static void refreshListFor(ServerPlayer sp) {
+        ruleList(sp);
+    }
+
+    private static String findRemoteMeta(List<me.zuogeren.kazumiplayer.rule.RuleIndex> index,
+            String name, boolean version) {
+        for (var ri : index) {
+            if (ri.getName().equals(name)) return version ? ri.getVersion() : ri.getAuthor();
+        }
+        return "";
+    }
+
+    private static String friendly(Throwable e) {
+        Throwable t = e;
+        while (t.getCause() != null && t.getCause() != t) t = t.getCause();
+        return t.getMessage() == null || t.getMessage().isEmpty()
+            ? t.getClass().getSimpleName() : t.getMessage();
+    }
+
+    /** 规则变更后向所有在线玩家广播（客户端 /krule 与缓存依赖此同步）；空列表也广播以清空客户端缓存 */
+    private static void broadcastRuleSync() {
+        var rules = ruleManager.listAll();
+        String json = JsonUtil.GSON.toJson(
+            rules.stream().map(ruleManager::get).filter(r -> r != null).toList());
+        MinecraftServer server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            PacketDistributor.sendToPlayer(player,
+                new me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket(json));
+        }
     }
 
     // ---- 辅助 ----

@@ -33,6 +33,16 @@ public final class GuiProtocol {
     /** {index} 从队列移除第 index 项（当前项不可移除） */
     public static final String ACTION_QUEUE_REMOVE = "queue_remove";
 
+    // ---- 规则管理器（RuleManagerScreen）----
+    /** {} 获取远程仓库规则列表 + 本地安装状态合并 */
+    public static final String ACTION_RULE_LIST = "rule_list";
+    /** {name} 从远程拉取并安装规则 */
+    public static final String ACTION_RULE_PULL = "rule_pull";
+    /** {name} 删除本地已安装规则 */
+    public static final String ACTION_RULE_DELETE = "rule_delete";
+    /** {name} 测试规则连通性（服务端计时） */
+    public static final String ACTION_RULE_TEST = "rule_test";
+
     // ---- S→C dataTypes ----
     /** [BangumiResultItem] */
     public static final String DATA_BANGUMI_RESULTS = "bangumi_results";
@@ -44,4 +54,10 @@ public final class GuiProtocol {
     public static final String DATA_PLAY_OK = "play_ok";
     /** ErrorPayload */
     public static final String DATA_ERROR = "error";
+
+    // ---- 规则管理器 ----
+    /** [RuleListEntryPayload] 远程目录+本地安装状态的合并列表 */
+    public static final String DATA_RULE_LIST = "rule_list";
+    /** RuleTestResultPayload 单条规则的连通性测试结果（异步逐条回推） */
+    public static final String DATA_RULE_TEST_RESULT = "rule_test_result";
 }

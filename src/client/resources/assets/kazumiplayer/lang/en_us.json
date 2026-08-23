@@ -4,5 +4,6 @@
   "block.kazumiplayer.speaker": "Speaker (WIP)",
   "item.kazumiplayer.connection_tool": "Speaker Connection Tool (WIP)",
   "item.kazumiplayer.screen_remote": "Screen Remote",
-  "item.kazumiplayer.remote_viewer": "Remote Viewer"
+  "item.kazumiplayer.remote_viewer": "Remote Viewer",
+  "item.kazumiplayer.rule_manager": "Rule Manager"
 }

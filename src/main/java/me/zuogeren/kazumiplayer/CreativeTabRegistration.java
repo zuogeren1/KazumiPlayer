@@ -29,6 +29,7 @@ public class CreativeTabRegistration {
                     output.accept(SpeakerRegistration.CONNECTION_TOOL.get());
                     output.accept(VideoScreenRegistration.SCREEN_REMOTE.get());
                     output.accept(VideoScreenRegistration.REMOTE_VIEWER.get());
+                    output.accept(VideoScreenRegistration.RULE_MANAGER.get());
                 })
                 .build());
 

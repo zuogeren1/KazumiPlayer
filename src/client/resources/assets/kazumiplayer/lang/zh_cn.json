@@ -4,5 +4,6 @@
   "block.kazumiplayer.speaker": "音响 (WIP)",
   "item.kazumiplayer.connection_tool": "音响连接工具 (WIP)",
   "item.kazumiplayer.screen_remote": "屏幕遥控器",
-  "item.kazumiplayer.remote_viewer": "远程观影器"
+  "item.kazumiplayer.remote_viewer": "远程观影器",
+  "item.kazumiplayer.rule_manager": "规则管理器"
 }

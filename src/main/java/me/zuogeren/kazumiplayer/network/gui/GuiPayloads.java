@@ -30,6 +30,9 @@ public final class GuiPayloads {
     /** 队列按序号操作（jump/move/remove 共用），index 为 1-based */
     public record QueueIndexPayload(int index) {}
 
+    /** 规则按名称操作（pull/delete/test 共用） */
+    public record RuleNamePayload(String name) {}
+
     // ---- S→C 响应 ----
 
     public record BangumiResultItem(String name, String date, String summary) {}
@@ -45,6 +48,15 @@ public final class GuiPayloads {
     public record PlayOkPayload(String title) {}
 
     public record ErrorPayload(String message) {}
+
+    // ---- 规则管理器 ----
+
+    /** 远程目录+本地安装状态的合并条目；installed=false 时 installedVersion 为空串 */
+    public record RuleListEntryPayload(String name, boolean installed, String installedVersion,
+            String remoteVersion, boolean deprecated, String author) {}
+
+    /** 单条规则连通性测试结果；ok=false 时 latency 为 -1 */
+    public record RuleTestResultPayload(String name, long latency, boolean ok) {}
 
     // ---- 编解码辅助 ----
 

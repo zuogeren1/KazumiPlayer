@@ -39,6 +39,9 @@ public class VideoScreenRegistration {
     public static final DeferredItem<me.zuogeren.kazumiplayer.item.RemoteViewerItem> REMOTE_VIEWER =
             ITEMS.registerItem("remote_viewer", me.zuogeren.kazumiplayer.item.RemoteViewerItem::new, props -> props);
 
+    public static final DeferredItem<me.zuogeren.kazumiplayer.item.RuleManagerItem> RULE_MANAGER =
+            ITEMS.registerItem("rule_manager", me.zuogeren.kazumiplayer.item.RuleManagerItem::new, props -> props);
+
     // BlockEntityType: (BlockEntitySupplier, onlyOpCanSetNbt, Block...)
     // Docs: onlyOpCanSetNbt = false for normal block entities
     public static final Supplier<BlockEntityType<VideoScreenBlockEntity>> VIDEO_SCREEN_BLOCK_ENTITY =

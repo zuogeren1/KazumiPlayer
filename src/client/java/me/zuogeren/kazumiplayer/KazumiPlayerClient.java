@@ -64,6 +64,11 @@ public class KazumiPlayerClient {
         // 注入屏幕右键 GUI 打开器（common 方块经此钩子打开播放器主界面）
         ScreenGuiOpeners.set(screenPos -> Minecraft.getInstance().setScreen(new KazumiPlayerScreen(screenPos)));
 
+        // 注入规则管理器打开钩子（规则管理器物品经此打开管理界面）
+        me.zuogeren.kazumiplayer.rule.RuleManagerOpener.set(name ->
+            Minecraft.getInstance().setScreen(
+                new me.zuogeren.kazumiplayer.client.gui.RuleManagerScreen()));
+
         // 注入规则请求头增强器（浏览器收割的 Cookie 桥接到规则 HTTP 请求）
         RuleRequestEnhancer.set(BrowserCookieStore::headersFor);
 
