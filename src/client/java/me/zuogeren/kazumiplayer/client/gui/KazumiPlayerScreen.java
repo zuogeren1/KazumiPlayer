@@ -48,6 +48,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private static ListView listView = ListView.BANGUMI;
     private static List<GuiPayloads.BangumiResultItem> bangumiItems = List.of();
     private static List<GuiPayloads.RuleResultItem> ruleItems = List.of();
+    /** 当前流式搜源的代次（服务端每轮递增），用于识别新一轮并重置结果 */
+    private static long ruleSearchId;
     private static String lastKeyword = "";
 
     // 右列状态（同上，随 GUI 会话持久化）
@@ -234,6 +236,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     @Override
     public void removed() {
         GuiClientState.setListener(null);
+        // 界面关闭时取消服务端在途流式搜源（慢源完成后不再回推迟到结果）
+        this.sendAction(GuiProtocol.ACTION_CANCEL_SEARCH, "{}");
         super.removed();
     }
 
@@ -371,12 +375,26 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 this.showBangumiView();
                 if (this.bangumiItems.isEmpty()) setStatus("未找到结果");
             }
-            case GuiProtocol.DATA_RULE_RESULTS -> {
-                this.ruleItems = GuiPayloads.fromJson(json,
-                    new TypeToken<List<GuiPayloads.RuleResultItem>>() {}.getType());
-                this.listView = ListView.RULE;
-                this.rebuildSearchList();
-                if (this.ruleItems.isEmpty()) setStatus("各源均未搜到结果");
+            case GuiProtocol.DATA_RULE_RESULTS_PARTIAL -> {
+                var p = GuiPayloads.fromJson(json, GuiPayloads.RuleSearchPartialPayload.class);
+                if (p == null) return;
+                // 三段式代次判定：更小=已被取消/取代的迟到包丢弃；相等=同轮增量追加；更大=新一轮重置
+                if (p.searchId() < ruleSearchId) return;
+                if (p.searchId() > ruleSearchId) {
+                    ruleSearchId = p.searchId();
+                    ruleItems = new java.util.ArrayList<>();
+                }
+                listView = ListView.RULE;
+                ruleItems.addAll(p.items());
+                rebuildSearchList();
+                // 渐进式状态提示：慢源不再阻塞快源结果的展示
+                if (p.completedRules() >= p.totalRules()) {
+                    setStatus(ruleItems.isEmpty() ? "各源均未搜到结果"
+                        : "搜源完成，共 " + ruleItems.size() + " 条");
+                } else {
+                    setStatus("搜源中 " + p.completedRules() + "/" + p.totalRules()
+                        + " 个源…（已得 " + ruleItems.size() + " 条）");
+                }
             }
             case GuiProtocol.DATA_CHAPTERS -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.ChaptersPayload.class);
@@ -494,6 +512,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     /** 清空搜索状态与界面（搜索结果/规则结果/选集/简介/选中项） */
     private void clearSearch() {
         resetSearchState();
+        // 取消服务端在途流式搜源（慢源完成后不再回推）
+        this.sendAction(GuiProtocol.ACTION_CANCEL_SEARCH, "{}");
         this.searchEdit.setValue("");
         this.rebuildSearchList();
         this.rebuildEpisodeList();
@@ -505,6 +525,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         listView = ListView.BANGUMI;
         bangumiItems = List.of();
         ruleItems = List.of();
+        ruleSearchId = 0;
         lastKeyword = "";
         detailView = DetailView.EPISODES;
         episodeNames = List.of();

@@ -39,6 +39,10 @@ public final class GuiPayloads {
 
     public record RuleResultItem(String rule, String id, String name) {}
 
+    /** 流式规则搜索单源增量（DATA_RULE_RESULTS_PARTIAL）：completed==total 表示全部源已完成 */
+    public record RuleSearchPartialPayload(long searchId, String rule, List<RuleResultItem> items,
+                                           int completedRules, int totalRules) {}
+
     /**
      * roads = 全部线路名列表；road = 本次集数列表对应的线路下标；
      * names/total = 该线路的集数名与总数

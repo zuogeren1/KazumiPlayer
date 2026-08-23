@@ -12,8 +12,10 @@ public final class GuiProtocol {
     // ---- C→S actions ----
     /** {keyword} bgm.tv 搜索 */
     public static final String ACTION_SEARCH_BANGUMI = "search_bangumi";
-    /** {rule(空=全部), keyword} 规则源搜索（keyword 为番剧名） */
+    /** {rule(空=全部), keyword} 规则源搜索（keyword 为番剧名），结果流式增量回推 */
     public static final String ACTION_SEARCH_RULE = "search_rule";
+    /** {} 取消本玩家在途的流式搜源（关闭界面/清空搜索时由客户端发送） */
+    public static final String ACTION_CANCEL_SEARCH = "cancel_search";
     /** {rule, id} 查询集数列表 */
     public static final String ACTION_QUERY_CHAPTERS = "query_chapters";
     /** {rule, id, episode} 在绑定屏幕播放指定集 */
@@ -46,8 +48,12 @@ public final class GuiProtocol {
     // ---- S→C dataTypes ----
     /** [BangumiResultItem] */
     public static final String DATA_BANGUMI_RESULTS = "bangumi_results";
-    /** [RuleResultItem] */
-    public static final String DATA_RULE_RESULTS = "rule_results";
+    /**
+     * RuleSearchPartialPayload {searchId, rule, items, completedRules, totalRules}
+     * 流式规则搜源：每完成一个源推一条增量；completedRules==totalRules 表示全部结束。
+     * searchId 为本轮搜索代次，客户端据此区分新旧一轮并重置结果列表。
+     */
+    public static final String DATA_RULE_RESULTS_PARTIAL = "rule_results_partial";
     /** ChaptersPayload */
     public static final String DATA_CHAPTERS = "chapters";
     /** PlayOkPayload */

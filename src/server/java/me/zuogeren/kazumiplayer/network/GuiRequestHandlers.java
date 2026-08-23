@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.network;
 
+import me.zuogeren.kazumiplayer.Config;
 import me.zuogeren.kazumiplayer.network.gui.GuiPayloads;
 import me.zuogeren.kazumiplayer.network.gui.GuiProtocol;
 import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
@@ -29,6 +30,8 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.UUID;
 
 /**
@@ -56,6 +59,7 @@ public class GuiRequestHandlers {
             switch (packet.action()) {
                 case GuiProtocol.ACTION_SEARCH_BANGUMI -> searchBangumi(sp, packet.payloadJson());
                 case GuiProtocol.ACTION_SEARCH_RULE -> searchRule(sp, packet.payloadJson());
+                case GuiProtocol.ACTION_CANCEL_SEARCH -> cancelSearch(sp);
                 case GuiProtocol.ACTION_QUERY_CHAPTERS -> queryChapters(sp, packet.payloadJson());
                 case GuiProtocol.ACTION_PLAY_EPISODE -> playEpisode(sp, packet.screenPos(), packet.payloadJson());
                 case GuiProtocol.ACTION_JOIN -> join(sp, packet.screenPos());
@@ -97,6 +101,18 @@ public class GuiRequestHandlers {
             });
     }
 
+    /** 搜源代次发生器：客户端据此识别新一轮搜索并重置结果列表 */
+    private static final java.util.concurrent.atomic.AtomicLong SEARCH_ID_SEQ =
+        new java.util.concurrent.atomic.AtomicLong();
+
+    /** 每玩家当前活跃的流式搜源代次：增量回调发送前校验，取消/新搜索即作废旧代次 */
+    private static final Map<java.util.UUID, Long> ACTIVE_SEARCHES = new ConcurrentHashMap<>();
+
+    /**
+     * 流式规则搜源：逐规则发起搜索，每完成一个源立即推送增量（DATA_RULE_RESULTS_PARTIAL），
+     * 慢源/超时源不再阻塞快源结果的展示；单源失败计为一次完成（空增量），计数保证收敛。
+     * 发起新搜索自动作废同玩家旧搜索；关闭界面/清空搜索时客户端发 ACTION_CANCEL_SEARCH 取消。
+     */
     private static void searchRule(ServerPlayer sp, String payloadJson) {
         var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.SearchRulePayload.class);
         if (payload == null || payload.keyword().isBlank()) return;
@@ -112,20 +128,49 @@ public class GuiRequestHandlers {
             }
             rules = Map.of(payload.rule(), rule);
         }
-        Map<String, Rule> finalRules = rules;
-        searchManager.searchAll(finalRules, payload.keyword())
-            .thenAccept(data -> {
-                String sessionId = ruleSessionCache.createSession(payload.rule(), payload.keyword(), data);
-                var session = ruleSessionCache.getSession(sessionId);
-                List<GuiPayloads.RuleResultItem> items = new ArrayList<>();
-                for (var entry : session.data.results().entrySet()) {
-                    for (var e : entry.getValue()) {
-                        items.add(new GuiPayloads.RuleResultItem(entry.getKey(), e.id(), e.item().name()));
+
+        long searchId = SEARCH_ID_SEQ.incrementAndGet();
+        ACTIVE_SEARCHES.put(sp.getUUID(), searchId);
+        long timeoutMs = Config.CONFIG.searchTimeoutMs.get();
+        int total = rules.size();
+        AtomicInteger completed = new AtomicInteger();
+
+        for (Rule rule : rules.values()) {
+            String ruleName = rule.getName();
+            ruleManager.getEngine().search(rule, payload.keyword())
+                .orTimeout(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .handle((result, err) -> {
+                    if (err != null) {
+                        KazumiLog.search.warn("GUI rule search failed for {}: {}", ruleName,
+                            err.getCause() != null ? err.getCause().getMessage() : err.getMessage());
                     }
-                }
-                send(sp, GuiProtocol.DATA_RULE_RESULTS, GuiPayloads.toJson(items));
-            })
-            .exceptionally(e -> sendError(sp, "规则搜索失败: " + e.getMessage()));
+                    List<GuiPayloads.RuleResultItem> items = new ArrayList<>();
+                    if (result != null && isActiveSearch(sp.getUUID(), searchId)) {
+                        for (var item : result.items()) {
+                            String id = searchManager.getCache().store(ruleName, item);
+                            items.add(new GuiPayloads.RuleResultItem(ruleName, id, item.name()));
+                        }
+                    }
+                    // 已被取消/被新一轮取代 → 静默丢弃，不向客户端推送迟到结果
+                    if (isActiveSearch(sp.getUUID(), searchId)) {
+                        send(sp, GuiProtocol.DATA_RULE_RESULTS_PARTIAL, GuiPayloads.toJson(
+                            new GuiPayloads.RuleSearchPartialPayload(searchId, ruleName, items,
+                                completed.incrementAndGet(), total)));
+                    }
+                    return null;
+                });
+        }
+    }
+
+    /** 该玩家的流式搜源是否仍然有效（未被取消、未被新一轮取代） */
+    private static boolean isActiveSearch(java.util.UUID playerId, long searchId) {
+        return Long.valueOf(searchId).equals(ACTIVE_SEARCHES.get(playerId));
+    }
+
+    /** 取消本玩家在途的流式搜源（客户端关闭界面/清空搜索时调用） */
+    @SuppressWarnings("unused")
+    private static void cancelSearch(ServerPlayer sp) {
+        ACTIVE_SEARCHES.remove(sp.getUUID());
     }
 
     private static void queryChapters(ServerPlayer sp, String payloadJson) {
