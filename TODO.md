@@ -46,6 +46,7 @@
 - [ ] **嗅探健壮性收尾**: 已落地——停止/破坏屏幕取消在途嗅探（cancelActiveSniff）、带签名 query 的直链直判快速播放、接管式并发取代在途任务。剩余：接管/取消路径需实机回归；Cookie 桥接的 cf_clearance 时效与刷新策略未验证
 - [~] **Cloudflare 挑战页卡死嗅探 (dmbus/DM84)**: 已落地——常驻共享浏览器（Cookie 跨嗅探保留）、UA 伪装（HTTP头+JS侧+mcef.properties 异常值强制重写，含空闲期）、HTTP 直取播放页解析直链优先（java 路径与浏览器路径可达性不同，互补）、Cookie 桥接（收割 document.cookie 按域名存储，直取/规则请求成对附加 Cookie+伪装 UA——clearance cookie 与签发 UA 绑定）、失败提示区分 CF 拦截、章节/直取请求补 Referer。**实测结论：dmbus 源站分钟级闪断(522)为站点侧问题，与客户端无关**。剩余候选：规则 antiCrawler 配置（验证页检测+自动点击+自定义 JS）
 - [x] **暂停/恢复后播放时间异常增大**: 同步架构重写改 MonoClock 时漏了读取侧调用方——命令/GUI/包处理器共 10 处以墙钟 `System.currentTimeMillis()` 减 MonoClock 基准的 `serverTimestamp`，得到 epoch 级 elapsed 写入权威位置并立即广播 → 客户端漂移兜底硬 seek 到天文位置 → FFmpeg seek 失败管道死亡 → 误判 ended 自动切集；已全部改用 MonoClock.millis()（ServerPacketHandlers/GuiRequestHandlers/PlayCommands/ScreenCommands），客户端硬 resync 增加"目标超出媒体时长即拒绝对随"防御
+- [x] **手动切集后暂停卡死/时间调整无效（偶发，重新 join 才恢复）**: `handleEpisodeSwitch`（GUI/命令的手动 next/prev）只写 BE NBT 未重置权威同步组——周期广播仍携带旧集 URL → 客户端换片保护 `switchingEpisode` 恒为 true，吞掉之后所有暂停/seek 应用；切集前若处于暂停态则新集开局即暂停且无法恢复。已补 `onPlayStart` 重置组（对齐 auto-next 路径）。附带发现：上轮时钟修复在 PlayCommands 漏了 4 处墙钟混算（验证脚本 `-Path 'src\**\*.java'` 不支持 PowerShell 递归导致假阴性），已改用 Get-ChildItem -Recurse 复查清零
 - [x] **鼠标脱离准心**: 网页源嗅探/播放后鼠标指针脱离准心——GLFW 真实光标检测 + 嗅探完成立即强制抓回，已实机确认
 - [x] **视频开头闪烁**: 播放器启动期被同步 seek 反复打断 + 无帧时填充占位色——保留上一帧 + 启动稳定期跳过漂移 seek
 - [x] **配置重启重置**: Cloth 保存只改内存不写盘——保存时显式 `ModConfigSpec.save()` 持久化

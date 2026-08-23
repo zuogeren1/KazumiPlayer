@@ -124,7 +124,7 @@ public class PlayCommands {
                     UUID sid = sc.getScreenId();
                     var g = SyncGroupManager.get().getGroup(sid);
                     if (g != null) {
-                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                        long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
                         sc.updateSyncPosition(g.positionMs + elapsed);
                         SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "停止了播放");
                     }
@@ -153,7 +153,7 @@ public class PlayCommands {
                     UUID sid = sc.getScreenId();
                     var g = SyncGroupManager.get().getGroup(sid);
                     if (g != null) {
-                        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+                        long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
                         sc.updateSyncPosition(g.positionMs + elapsed);
                         SyncNotificationUtil.notifyOtherWatchers(player, screenPos, sid, "离开了同步播放");
                     }
@@ -465,7 +465,7 @@ public class PlayCommands {
     private static long getLivePosition(VideoScreenBlockEntity screen) {
         var g = SyncGroupManager.get().getGroup(screen.getScreenId());
         if (g != null) {
-            long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+            long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
             return g.positionMs + elapsed;
         }
         long nbt = screen.getSyncPositionMs();
@@ -488,7 +488,7 @@ public class PlayCommands {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
         if (g == null) { src.sendFailure(KazumiMessages.error("该屏幕未在播放")); return 0; }
-        long elapsed = g.paused ? 0 : System.currentTimeMillis() - g.serverTimestamp;
+        long elapsed = g.paused ? 0 : MonoClock.millis() - g.serverTimestamp;
         long cur = g.positionMs + elapsed;
         SyncGroupManager.get().updateState(sid, cur, pause);
         screen.updateSyncPosition(cur);

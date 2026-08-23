@@ -227,8 +227,13 @@ public class ServerPacketHandlers implements IServerPacketHandler {
 
         String url = road.data().get(idx - 1);
         screen.setPlaybackFull(url, 0, screen.getRoadIndex(), idx, data);
+        // 重置权威同步组（对齐 auto-next 路径的 onPlayStart）：刷新 videoUrl 为新集、位置归零重计、
+        // paused=false。缺失时周期广播仍携带旧集 URL → 客户端换片保护 switchingEpisode 恒为 true，
+        // 吞掉之后所有暂停/seek 应用——表现为切集后暂停卡死、时间调整无效，直到重新 join 重建组
+        UUID sid = screen.getScreenId();
+        SyncGroupManager.get().onPlayStart(sp, sid, screen.getBlockPos(), url);
         String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
-        SyncNotificationUtil.notifyOtherWatchers(sp, screen.getBlockPos(), screen.getScreenId(),
+        SyncNotificationUtil.notifyOtherWatchers(sp, screen.getBlockPos(), sid,
             "切换到 " + name);
         KazumiLog.network.info("Episode switch to {}: {}", idx, url);
     }
