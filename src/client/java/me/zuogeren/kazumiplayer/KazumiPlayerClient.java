@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer;
 
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
+import me.zuogeren.kazumiplayer.client.ClientPlaybackScheduler;
 import me.zuogeren.kazumiplayer.client.ClientClockSync;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
 import me.zuogeren.kazumiplayer.client.KazumiConfigScreen;
@@ -49,8 +50,10 @@ public class KazumiPlayerClient {
         // 客户端渲染器注册
         modEventBus.register(ClientModEvents.class);
 
-        // 客户端核心调度（每秒 tick）
+        // 客户端杂项事件处理（鼠标防御 / krule 命令）
         NeoForge.EVENT_BUS.register(ClientDisconnectHandler.class);
+        // 播放调度核心（每秒 tick：对账 + 视频屏幕/音响分派 + 生命周期清理）
+        NeoForge.EVENT_BUS.register(ClientPlaybackScheduler.class);
 
         // 时钟同步探测（播放位置插值依赖）
         NeoForge.EVENT_BUS.register(ClientClockSync.class);

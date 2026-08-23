@@ -81,7 +81,7 @@
 - [ ] **反爬 captcha webview 全流程**: 已做 text/regex 验证页检测报错；Kazumi 完整能力含 xpath 检测、captchaImage/Input/Button 定位、captchaScript JS 注入自动验证（WebView 加载+Cookie 保存+重试），需 MCEF 配合【按需：出现实际站点需求再立项】
 - [ ] **API 模式 POST body 模板**: Rule.ApiRequestConfig 缺 body 字段（json/form 模板 + @var 渲染），带 body 的 API 规则无法正确发请求【按需：同上】
 - [x] **RuleManager 重复实例**: `SyncGroupManager.onPlayerJoin` 曾每次玩家进服 `new RuleManager(...).loadAll()` 全量重读磁盘且产生第二实例——已改为 `SyncGroupManager.init(ruleManager)` 注入 KazumiPlayerServer 初始化的单例，进服广播直接读单例
-- [ ] **ClientDisconnectHandler 拆分**: 现 286 行；真正重量集中在 onClientTick 内约 130 行播放调度状态机——只拆出 ClientPlaybackScheduler 即可，鼠标防御/命令注册/生命周期清理均为小段不必单独成类【P2·攒批】
+- [x] **ClientDisconnectHandler 拆分**: 播放调度（原 onClientTick 约 130 行六段状态机）+ 生命周期清理已拆至 `ClientPlaybackScheduler`；顺带删除冗余的 `activeScreens` 双重跟踪结构（与 ScreenPlayerManager 表达同一事实、靠每秒对账维持，其孤儿清理段被 reconcileStaleEntries 的 screenGone 条件完全覆盖），渲染 BE 由两次遍历合并为一次，僵尸阈值移出循环，主菜单空转加守卫
 - [x] **播放器启动逻辑去重**: handlePlayStart 死路径（PlayStartPacket 包+handler+NetworkManager 注册项）已随旧嗅探链路删除；tick 路径走 playback/source 包
 - [~] **PlayStateListener 死代码（改判：决策项而非清理项）**: 已确认 `addListener` 全项目零调用点、listener 从未注册；但 `SpeakerClientAudio implements PlayStateListener`（音响跟随骨架）——直接删会连带删掉音响跟随设计。处置随音响区一同挂起【挂起·待 WaterMedia v3 audio】
 - [x] **VideoSniffer handler 泄漏**: 旧 VideoSniffer 已随嗅探架构重写删除，问题不复存在
@@ -94,7 +94,7 @@
 - [x] **ConnectedSpeakers 编解码去重**: 三处重复逻辑收敛为 `encodeConnectedSpeakers`/`decodeConnectedSpeakers` 静态工具（磁盘 NBT 与同步 getUpdateTag 共用）
 - [x] ~~**BE 双轨序列化统一**~~ → 按"至少抽字段名常量"落地：ValueOutput（磁盘）与 CompoundTag（同步包）双轨保留，字段名统一走 KEY_* 常量消除裸字符串双份维护
 - [x] **SpeakerBlockEntity chunk 加载误清连接**: loadAdditional 曾在服务端 `getLinkedScreen()==null` 时自动 clearLink——但屏幕 chunk 未加载时 getBlockEntity 返回 null，启动加载顺序不定会误删有效连接并写盘；已删除该防御块（所有合法失效路径均已有清理：屏幕破坏 setRemoved 遍历 ConnectedSpeakers / 音响挖除反向通知 / 手动断开双向清理）
-- [ ] **SpeakerConnectPacket UUID 序列化**: STRING_UTF8 存 36 字符膨胀——改 mostSignificantBits+leastSignificantBits VAR_LONG
+- [ ] **SpeakerConnectPacket UUID 序列化**: STRING_UTF8 存 36 字符膨胀——改 mostSignificantBits+leastSignificantBits VAR_LONG；该包仅在手动连接音响时发送，每包省 ~20 字节收益趋近零【低·可弃】
 - [x] ~~**HttpUtil.fetch 双重异步**~~ → 已评估不改：`new CompletableFuture` + runAsync 是受检异常场景的标准手动桥接（仅一层异步提交，非双重异步）；改 supplyAsync 直返会让所有异常被 CompletionException 包裹，而 `e.getMessage()` 在 GUI/命令层有 10+ 处用户可见文案消费点（GuiRequestHandlers/PlayCommands/RuleEngine errors 等），文案将变成 "java.util.concurrent.CompletionException: ..." 噪音，逐处剥壳得不偿失
 - [ ] **PlayCommands 拆分**: 现 490 行含 10+ 子命令+辅助函数，stop/leave 重复、切集逻辑与 ServerPacketHandlers 重复——抽 EpisodeSwitcher 服务消重即可，不必机械拆命令类【P2·攒批】
 - [x] **搜索缓存抽象 TimedCache<T>**: 三个缓存类的 Map+TTL+清理线程同构逻辑收敛到 `TimedCache<V>` 泛型基类（创建时间由包装层管理，Session/Entry 去掉冗余 createdAt/sessionId 字段；showRulePage 改传参取 sessionId）；shutdown() 仍无外部调用方但守护线程不阻塞 JVM 退出
@@ -102,6 +102,5 @@
 - [x] ~~**onClientTick 魔法数字**~~: 核验后仅剩 4 处（20/2/3000/300，其余已在此前重构消化），提为 ClientDisconnectHandler 类内命名常量
 - [x] ~~**SNIFF_SCRIPT 外部化**~~ → 已评估不做：SniffScripts.java 已是嗅探 JS 的单一来源，resources 化只会失去编译期检查与 IDE 高亮
 - [ ] **extractRenderState 跨包引用**: screen 包完全限定名调用 client.ScreenPlayerManager——同属 client source set 内部耦合，不影响 common 纯净性；解耦收益存疑【低·可弃】
-- [ ] **onClientTick 魔法数字**: 3000/8000/5000/800/500/100 散落——提为 TimingConstants 命名常量
 - [ ] **多版本支持**: 适配不同 Minecraft 版本【暂缓——功能快速迭代期聚焦单版本，避免按版本分支/抽象层的双重维护成本；待功能面稳定后再评估】
 - [ ] **多加载器支持**: 除 NeoForge 外支持 Fabric/Quilt【暂缓——理由同上，且前置依赖 MCEF/WaterMedia 生态以 NeoForge 为主】

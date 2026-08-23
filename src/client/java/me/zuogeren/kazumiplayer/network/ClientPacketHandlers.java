@@ -82,10 +82,6 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 player.stop();
                 ScreenPlayerManager.remove(packet.screenPos());
             }
-            // 同步取消跟踪（若屏幕 BE 仍存在则在其上取消）
-            if (mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity s2) {
-                ClientDisconnectHandler.untrackScreen(s2);
-            }
             if (mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity screen) {
                 // 清空播放 URL，防止客户端 tick 循环立即重开播放
                 screen.clearPlayback();
