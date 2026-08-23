@@ -21,6 +21,8 @@ public final class ScreenPlayerManager {
         public boolean endedNotified;
         /** 本次启动后是否进入过播放态——解析失败/租约放弃的播放器永远为 false，供僵尸自愈判定 */
         public boolean everPlayed;
+        /** 本次启动是否已发送首帧锚定上报（PositionReportPacket，每集一次） */
+        public boolean anchorReported;
     }
 
     private static final Map<BlockPos, ScreenPlayer> players = new ConcurrentHashMap<>();

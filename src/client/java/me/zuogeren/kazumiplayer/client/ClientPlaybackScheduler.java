@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.client;
 
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
+import me.zuogeren.kazumiplayer.network.packet.PositionReportPacket;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import net.minecraft.client.Minecraft;
@@ -112,6 +113,7 @@ public class ClientPlaybackScheduler {
             sp.lastEpisodeUrl = url;
             sp.endedNotified = true; // 防止新播放器初始化期间误触发 isEnded()
             sp.everPlayed = false;
+            sp.anchorReported = false; // 新集重新做首帧锚定上报
             long seekMs = screen.getSyncPositionMs();
             if (sp.player != null && seekMs > 0) sp.player.seek(seekMs);
             // 启动快照：屏幕处于暂停时立即暂停（不再依赖每秒轮询）
@@ -133,7 +135,17 @@ public class ClientPlaybackScheduler {
             // 播放自然结束后永远无法触发自动下一集（也顺带覆盖了"播完手动 seek 回去再看"的场景）
             if (sp.player.isPlaying()) {
                 sp.endedNotified = false;
-                sp.everPlayed = true; // 已实际出画面，不参与僵尸自愈判定
+                if (!sp.everPlayed) {
+                    sp.everPlayed = true; // 已实际出画面，不参与僵尸自愈判定
+                    // 首帧锚定上报（每集一次）：服务端以真实播放位置校准权威时钟，
+                    // 消除"组时钟从切换瞬间流逝 vs 播放器经解析/缓冲晚 N 秒出声"的假漂移硬 seek
+                    if (!sp.anchorReported && mc.getConnection() != null) {
+                        sp.anchorReported = true;
+                        mc.getConnection().send(new ServerboundCustomPayloadPacket(
+                            new PositionReportPacket(screen.getBlockPos(), screen.getScreenId(),
+                                sp.player.getTimeMs())));
+                    }
+                }
             }
             // 兜底：部分流（live 型 HLS）永不产生 EOF，用时长逼近视为播完
             boolean ended = sp.player.isEnded()

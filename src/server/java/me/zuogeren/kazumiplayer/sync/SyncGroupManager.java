@@ -48,6 +48,7 @@ public class SyncGroupManager {
         group.positionMs = 0;
         group.paused = false;
         group.serverTimestamp = MonoClock.millis();
+        group.anchorEstablished = false; // 等待首个观看者出画后以真实位置重新锚定
     }
 
     public void join(ServerPlayer player, UUID screenId, String videoUrl) {
@@ -122,9 +123,10 @@ public class SyncGroupManager {
 
     private static void sendSyncState(SyncGroup g, MinecraftServer server, long now) {
         if (server == null || g.players.isEmpty()) return;
-        // 权威实时位置: 基准位置 + 未暂停时的流逝时间
-        long elapsed = g.paused ? 0 : now - g.serverTimestamp;
-        long livePos = Math.max(0, g.positionMs + elapsed);
+        // 权威实时位置: 基准位置 + 未暂停时的流逝时间；首帧锚定前组时钟冻结（等待真实位置校准）
+        long livePos = Math.max(0, g.anchorEstablished
+            ? g.positionMs + (g.paused ? 0 : now - g.serverTimestamp)
+            : g.positionMs);
         SyncStatePacket pkt = new SyncStatePacket(g.screenPos, g.videoUrl, livePos, g.paused, now);
         int sent = 0;
         for (UUID pid : g.players) {
@@ -183,6 +185,20 @@ public class SyncGroupManager {
         }
     }
 
+    /**
+     * 首帧锚定：接受首个观看者出画后的真实播放位置，校准权威时钟。
+     * 仅每次切集（onPlayStart）后的第一次上报生效。@return 是否已接受
+     */
+    public boolean acceptAnchor(UUID screenId, long positionMs) {
+        SyncGroup g = groups.get(screenId);
+        if (g == null || g.anchorEstablished) return false;
+        g.positionMs = Math.max(0, positionMs);
+        g.paused = false;
+        g.serverTimestamp = MonoClock.millis();
+        g.anchorEstablished = true;
+        return true;
+    }
+
     public static class SyncGroup {
         public final UUID screenId;
         public final BlockPos screenPos;
@@ -190,6 +206,8 @@ public class SyncGroupManager {
         public long positionMs;
         public boolean paused;
         public long serverTimestamp;
+        /** 首帧锚定：true 表示组时钟已由首个出画观看者的真实位置校准，此后正常流逝 */
+        public boolean anchorEstablished;
         public final Set<UUID> players = ConcurrentHashMap.newKeySet();
 
         SyncGroup(UUID screenId, BlockPos pos, String url) {
@@ -204,8 +222,10 @@ public class SyncGroupManager {
             return String.join(",", players.stream().map(UUID::toString).toList());
         }
 
-        /** 权威实时位置 = 基准位置 + 未暂停时的流逝时间（MonoClock 单调钟，勿用墙钟另行计算） */
+        /** 权威实时位置 = 基准位置 + 未暂停时的流逝时间（MonoClock 单调钟，勿用墙钟另行计算）。
+         * 首帧锚定前组时钟冻结——播放器尚在解析/缓冲，流逝只会制造假漂移 */
         public long livePositionMillis() {
+            if (!anchorEstablished) return positionMs;
             long elapsed = paused ? 0 : MonoClock.millis() - serverTimestamp;
             return positionMs + elapsed;
         }

@@ -5,6 +5,7 @@ import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
+import me.zuogeren.kazumiplayer.network.packet.PositionReportPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteOpenPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
@@ -47,6 +48,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
     static {
         register(NextEpisodePacket.class, ServerPacketHandlers::handleNextEpisode);
         register(PlaybackControlPacket.class, ServerPacketHandlers::handlePlaybackControl);
+        register(PositionReportPacket.class, ServerPacketHandlers::handlePositionReport);
         register(SpeakerConnectPacket.class, ServerPacketHandlers::handleSpeakerConnect);
         register(RemoteOpenPacket.class, ServerPacketHandlers::handleRemoteOpen);
         register(RemoteFullscreenPacket.class, ServerPacketHandlers::handleRemoteFullscreen);
@@ -189,6 +191,22 @@ public class ServerPacketHandlers implements IServerPacketHandler {
                     PlaybackController.livePosition(screen) - packet.value() * 1000);
                 case SEEK_GOTO -> PlaybackController.seekTo(sp, packet.screenPos(), screen, packet.value());
             }
+        });
+    }
+
+    /** 首帧锚定上报：新集出画后以真实播放位置校准组时钟（仅每次切集后的第一次生效），并立即广播对齐全组 */
+    private static void handlePositionReport(PositionReportPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer sp)) return;
+            var be = sp.level().getBlockEntity(packet.screenPos());
+            if (!(be instanceof VideoScreenBlockEntity screen)) return;
+            if (!packet.screenId().equals(screen.getScreenId())) return;
+            var g = SyncGroupManager.get().getGroup(packet.screenId());
+            if (g == null || !g.players.contains(sp.getUUID())) return;
+            if (!SyncGroupManager.get().acceptAnchor(packet.screenId(), packet.positionMs())) return;
+            SyncGroupManager.get().broadcastSyncState(packet.screenId(), sp.level().getServer());
+            KazumiLog.sync.debug("Anchor established at {} by {} ({}ms)",
+                packet.screenPos(), sp.getName().getString(), packet.positionMs());
         });
     }
 
