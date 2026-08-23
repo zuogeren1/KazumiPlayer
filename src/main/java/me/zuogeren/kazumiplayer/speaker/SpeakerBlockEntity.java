@@ -68,12 +68,10 @@ public class SpeakerBlockEntity extends BlockEntity {
         this.linkedScreenId = input.getString("LinkedScreenId")
             .filter(s -> !s.isEmpty()).map(UUID::fromString).orElse(null);
         this.linkedScreenPos = input.read("LinkedScreenPos", net.minecraft.core.BlockPos.CODEC).orElse(null);
-        // 防御性检查：清除无效连接
-        if (linkedScreenId != null || linkedScreenPos != null) {
-            if (level != null && !level.isClientSide() && getLinkedScreen() == null) {
-                clearLink();
-            }
-        }
+        // 注意：此处不做"屏幕不存在即清连接"的防御——加载顺序不可靠，
+        // 屏幕 chunk 未加载时 getBlockEntity 返回 null，会误删有效连接并写盘。
+        // 合法失效路径均已有清理：屏幕破坏 setRemoved 遍历 ConnectedSpeakers 清 link、
+        // 音响挖除 setRemoved 反向通知、手动断开双向清理。
     }
 
     @Override
