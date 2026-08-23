@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.client.gui;
 
 import com.google.gson.reflect.TypeToken;
+import me.zuogeren.kazumiplayer.client.ClientRuleCache;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.network.gui.GuiPayloads;
 import me.zuogeren.kazumiplayer.network.gui.GuiProtocol;
@@ -51,6 +52,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     /** 当前流式搜源的代次（服务端每轮递增），用于识别新一轮并重置结果 */
     private static long ruleSearchId;
     private static String lastKeyword = "";
+    /** 搜源限定规则名：空 = 全部已装规则（GUI 会话持久化） */
+    private static String searchSource = "";
 
     // 右列状态（同上，随 GUI 会话持久化）
     private enum DetailView { EPISODES, SUMMARY }
@@ -90,6 +93,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private int sideRefreshCounter;
     private Button pauseButton;
     private SeekSlider seekSlider;
+    private Button sourceButton;       // 搜源来源限定下拉（全部/各已装规则）
+    private boolean sourceDropdownOpen;
 
     public KazumiPlayerScreen(BlockPos screenPos) {
         super(Component.literal("KazumiPlayer"));
@@ -110,13 +115,26 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
      * 左列搜索流 | 中列预览 + 选集/简介/线路 | 右列队列 + 观看玩家。
      * 预览高度按中列宽锁定 16:9（主流视频比例，避免竖长条黑边），
      * 剩余高度全部让给选集列表（至少保留 3 行）。
+     * 宽度三列均随窗口比例收缩：右列无 175px 硬下限（窄窗口不再挤压中列），
+     * 中列保底 70px，极窄窗口下各列等比让步。
      */
     private Layout layout(int w, int h) {
         int leftW = Math.max(140, w / 3);
-        int sideW = Math.min(220, Math.max(175, w / 4));
+        int sideW = Math.max(110, Math.min(220, w / 4));
         int rightX = 6 + leftW + 8;
-        int rightW = w - rightX - sideW - 14;
         int sideX = w - sideW - 6;
+        int rightW = Math.max(70, w - rightX - sideW - 14);
+        if (rightX + rightW > sideX) {
+            // 极窄窗口兜底：中列与最右列重叠时压缩两侧列
+            int overlap = rightX + rightW - sideX;
+            int shrinkL = Math.min(overlap, Math.max(0, leftW - 130));
+            leftW -= shrinkL;
+            int shrinkS = Math.min(overlap - shrinkL, Math.max(0, sideW - 100));
+            sideW -= shrinkS;
+            rightX = 6 + leftW + 8;
+            sideX = w - sideW - 6;
+            rightW = Math.max(60, sideX - 6 - rightX);
+        }
         int listBottom = h - 78;
         int previewH = Math.min(Math.max(63, rightW * 9 / 16),
             listBottom - 30 - 20 - ROW_HEIGHT * 3);
@@ -141,10 +159,11 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             .bounds(w - 52, 6, 46, 16).build());
 
         // ---- 左列：搜索行 + 结果列表 ----
-        // 四个操作：搜索(bgm 番剧) / 搜源(跳过 bgm 直接搜全部规则源，bgm 不可达时用) / 清空 / 返回
-        int btnW = 32;
+        // 四个操作：搜索(bgm 番剧) / 搜源(直接搜规则源) / 来源限定下拉 / 清空
+        // 按钮宽随左列自适应（leftW=140 物理下限时 4×24+12=108，输入框仍保留 28px）
+        int btnW = Math.max(24, Math.min(32, (L.leftW() - 48) / 4));
         int rowBtnsX = 6 + L.leftW() - (btnW * 4 + 12);
-        this.searchEdit = new EditBox(this.font, 6, 30, L.leftW() - (btnW * 4 + 12) - 4, 16, Component.literal("搜索"));
+        this.searchEdit = new EditBox(this.font, 6, 30, Math.max(28, L.leftW() - (btnW * 4 + 12) - 4), 16, Component.literal("搜索"));
         this.searchEdit.setMaxLength(128);
         this.searchEdit.setHint(Component.literal("搜索番剧或直接搜源..."));
         this.addRenderableWidget(this.searchEdit);
@@ -152,9 +171,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             .bounds(rowBtnsX, 30, btnW, 16).build());
         this.addRenderableWidget(Button.builder(Component.literal("搜源"), b -> this.doDirectRuleSearch())
             .bounds(rowBtnsX + btnW + 4, 30, btnW, 16).build());
+        // 来源限定下拉：全部来源 / 各已装规则，搜源时只请求选中源
+        this.sourceButton = Button.builder(Component.literal("来源"),
+                b -> this.sourceDropdownOpen = !this.sourceDropdownOpen)
+            .bounds(rowBtnsX + (btnW + 4) * 2, 30, btnW, 16).build();
+        this.addRenderableWidget(this.sourceButton);
+        this.updateSourceButtonLabel();
         this.addRenderableWidget(Button.builder(Component.literal("清空"), b -> this.clearSearch())
-            .bounds(rowBtnsX + (btnW + 4) * 2, 30, btnW, 16).build());
-        this.addRenderableWidget(Button.builder(Component.literal("返回"), b -> this.showBangumiView())
             .bounds(rowBtnsX + (btnW + 4) * 3, 30, btnW, 16).build());
 
         this.searchList = new SimpleList(this.minecraft, L.leftW(), L.listBottom() - 50, 50, ROW_HEIGHT);
@@ -294,6 +317,24 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 graphics.fill(dx, y0, dx + dw, y0 + ROW_HEIGHT,
                     hovered ? 0xFF3C3C52 : (i == selectedRoad ? 0xF0252545 : 0xE0000000));
                 String label = (i == selectedRoad ? "> " : "") + this.roadNames.get(i);
+                graphics.text(this.font, Component.literal(label).withStyle(ChatFormatting.GRAY), dx + 4, y0 + 4, -1);
+            }
+        }
+
+        // 来源限定下拉展开层（渲染在搜索列表之上）
+        if (this.sourceDropdownOpen) {
+            var options = sourceOptions();
+            int dx = this.sourceButton.getX();
+            int dw = Math.max(this.sourceButton.getWidth(), 110);
+            int dy = this.sourceButton.getY() + 16;
+            for (int i = 0; i < options.size(); i++) {
+                int y0 = dy + i * ROW_HEIGHT;
+                boolean hovered = mouseX >= dx && mouseX < dx + dw && mouseY >= y0 && mouseY < y0 + ROW_HEIGHT;
+                boolean selected = (i == 0 && this.searchSource.isEmpty())
+                    || (i > 0 && options.get(i).equals(this.searchSource));
+                graphics.fill(dx, y0, dx + dw, y0 + ROW_HEIGHT,
+                    hovered ? 0xFF3C3C52 : (selected ? 0xF0252545 : 0xE0000000));
+                String label = (selected ? "> " : "") + options.get(i);
                 graphics.text(this.font, Component.literal(label).withStyle(ChatFormatting.GRAY), dx + 4, y0 + 4, -1);
             }
         }
@@ -526,6 +567,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         bangumiItems = List.of();
         ruleItems = List.of();
         ruleSearchId = 0;
+        searchSource = "";
         lastKeyword = "";
         detailView = DetailView.EPISODES;
         episodeNames = List.of();
@@ -635,14 +677,45 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.sendAction(GuiProtocol.ACTION_SEARCH_BANGUMI, new GuiPayloads.SearchBangumiPayload(keyword));
     }
 
-    /** 跳过 bgm 直接在全部已装规则中搜索关键词（bgm 不可达时的替代路径） */
+    /** 跳过 bgm 直接在规则源中搜索关键词（bgm 不可达时的替代路径）；来源由「来源▾」下拉限定 */
     private void doDirectRuleSearch() {
         String keyword = this.searchEdit.getValue().trim();
         if (keyword.isEmpty()) return;
         this.lastKeyword = keyword;
-        setStatus("正在所有规则中搜索: " + keyword + " ...");
+        if (this.searchSource.isEmpty()) {
+            setStatus("正在所有规则中搜索: " + keyword + " ...");
+        } else {
+            setStatus("正在 " + this.searchSource + " 中搜索: " + keyword + " ...");
+        }
         this.sendAction(GuiProtocol.ACTION_SEARCH_RULE,
-            new GuiPayloads.SearchRulePayload("", keyword));
+            new GuiPayloads.SearchRulePayload(this.searchSource, keyword));
+    }
+
+    // ---- 来源限定下拉 ----
+
+    /** 下拉选项：首项"全部来源"，其后为全部已装规则名 */
+    private static List<String> sourceOptions() {
+        var opts = new java.util.ArrayList<String>();
+        opts.add("全部来源");
+        opts.addAll(ClientRuleCache.listAll());
+        return opts;
+    }
+
+    private void selectSource(int idx) {
+        this.sourceDropdownOpen = false;
+        var all = sourceOptions();
+        if (idx < 0 || idx >= all.size()) return;
+        this.searchSource = idx == 0 ? "" : all.get(idx);
+        updateSourceButtonLabel();
+        setStatus(this.searchSource.isEmpty() ? "搜源范围: 全部来源" : "搜源限定: " + this.searchSource);
+    }
+
+    private void updateSourceButtonLabel() {
+        if (this.sourceButton == null) return;
+        String label = this.searchSource.isEmpty() ? "来源"
+            : (this.searchSource.length() > 5
+                ? this.searchSource.substring(0, 4) + "…" : this.searchSource);
+        this.sourceButton.setMessage(Component.literal(label));
     }
 
     private void playEpisode(int ep) {
@@ -674,7 +747,20 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
-        // 下拉展开时优先处理：点中选项则切线；点击下拉区域外则收起
+        // 来源下拉展开时优先处理：点中选项则切换限定源；点击区域外则收起
+        if (this.sourceDropdownOpen) {
+            int dx = this.sourceButton.getX();
+            int dw = Math.max(this.sourceButton.getWidth(), 110);
+            int dy = this.sourceButton.getY() + 16;
+            int mx = (int) event.x(), my = (int) event.y();
+            var options = sourceOptions();
+            if (mx >= dx && mx < dx + dw && my >= dy && my < dy + options.size() * ROW_HEIGHT) {
+                selectSource((my - dy) / ROW_HEIGHT);
+                return true;
+            }
+            this.sourceDropdownOpen = false;
+        }
+        // 线路下拉展开时优先处理：点中选项则切线；点击下拉区域外则收起
         if (this.roadDropdownOpen && !this.roadNames.isEmpty()) {
             int dx = this.roadButton.getX();
             int dw = Math.max(this.roadButton.getWidth(), 110);
