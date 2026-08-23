@@ -100,6 +100,20 @@ public final class KazumiConfigScreen {
                 .setDefaultValue(true)
                 .setSaveConsumer(value -> ClientConfig.CONFIG.autoJoinSync.set(value))
                 .build());
+        playbackCategory.addEntry(entry.startIntField(
+                        Component.literal("全屏观影画面覆盖程度 (%)"),
+                        ClientConfig.CONFIG.fullscreenCoverage.get())
+                .setDefaultValue(100).setMin(1).setMax(100)
+                .setTooltip(Component.literal("全屏观影画面占窗口的百分比，居中显示，小于 100 时四周透出游戏世界"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.fullscreenCoverage.set(value))
+                .build());
+        playbackCategory.addEntry(entry.startIntField(
+                        Component.literal("全屏观影画面不透明度 (%)"),
+                        ClientConfig.CONFIG.fullscreenOpacity.get())
+                .setDefaultValue(100).setMin(10).setMax(100)
+                .setTooltip(Component.literal("全屏观影画面的不透明度，越低越透出背后的游戏世界"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.fullscreenOpacity.set(value))
+                .build());
 
         // 保存时：日志级别即时应用 + 显式写盘（ModConfigSpec.set 只改内存，不调 save 重启会重置）
         builder.setSavingRunnable(() -> {
