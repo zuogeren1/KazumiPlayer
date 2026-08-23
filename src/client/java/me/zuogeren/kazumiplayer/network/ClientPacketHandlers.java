@@ -74,8 +74,10 @@ public class ClientPacketHandlers implements IClientPacketHandler {
         context.enqueueWork(() -> {
             var mc = Minecraft.getInstance();
             if (mc.level == null) return;
-            // 屏幕停止/被破坏时取消在途嗅探，避免浏览器继续空转加载
-            me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance().cancelAllResolves();
+            // 屏幕停止/被破坏时取消该屏在途嗅探，避免浏览器继续空转加载
+            // （按屏取消：多屏场景下不应波及其他屏幕的在途解析）
+            me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance()
+                .cancelResolve(packet.screenPos());
             // 屏幕方块可能已被移除（BE 已不存在），直接按位置停止本地播放器
             var player = ScreenPlayerManager.getPlayer(packet.screenPos());
             if (player != null) {

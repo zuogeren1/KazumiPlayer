@@ -173,6 +173,8 @@ public class ClientPlaybackScheduler {
     }
 
     private static void stopAllActive() {
+        // 取消全部在途解析（否则解析完成后起播——虽有会话守卫弃播，但让浏览器白跑一趟）
+        me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance().cancelAllResolves();
         // 先统一 stop 所有播放器，再清空跟踪集合（remove 也会 stop，但显式 stopAll 保证顺序）
         ScreenPlayerManager.stopAll();
         SpeakerClientAudio.stopAll();

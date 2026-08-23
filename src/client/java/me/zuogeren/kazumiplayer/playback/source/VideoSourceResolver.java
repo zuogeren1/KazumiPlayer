@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.playback.source;
 
 import me.zuogeren.kazumiplayer.ClientConfig;
+import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 
@@ -42,6 +43,9 @@ public final class VideoSourceResolver {
         screen.setVideoState(VideoState.LOADING);
         KazumiLog.sniff.info("[source] begin playback at {} url={}", screen.getBlockPos(), episodeUrl);
         WaterMediaPlayer player = new WaterMediaPlayer();
+        // 会话身份：解析是异步的，完成时据此判断"这次启动是否仍然被需要"
+        // （条目被 stopAll/remove 置空 player、或被新播放器实例顶替 → 本次结果作废）
+        ScreenPlayerManager.ScreenPlayer session = ScreenPlayerManager.get(screen.getBlockPos());
 
         if (looksLikeDirectVideo(episodeUrl)) {
             KazumiLog.sniff.info("[source] direct video URL, playing without sniffing");
@@ -50,7 +54,7 @@ public final class VideoSourceResolver {
             return player;
         }
 
-        resolveWithRetry(screen, episodeUrl, player, 0);
+        resolveWithRetry(screen, episodeUrl, player, session, 0);
         return player;
     }
 
@@ -65,7 +69,7 @@ public final class VideoSourceResolver {
     }
 
     private void resolveWithRetry(VideoScreenBlockEntity screen, String episodeUrl,
-            WaterMediaPlayer player, int attempt) {
+            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session, int attempt) {
         String key = screen.getBlockPos().toString();
         // 换集/重播场景：先取消该屏在途解析再取租约
         pool.cancel(key);
@@ -89,11 +93,7 @@ public final class VideoSourceResolver {
             .thenAccept(source -> {
                 KazumiLog.sniff.info("[source] resolved video URL: {} ({}ms)",
                     source.url(), System.currentTimeMillis() - startedAt);
-                Minecraft.getInstance().execute(() -> {
-                    if (screen.isRemoved()) return;
-                    player.play(source.url());
-                    screen.setVideoState(VideoState.PLAYING);
-                });
+                startWhenValid(screen, session, player, source.url());
             })
             .exceptionally(t -> {
                 Throwable cause = unwrap(t);
@@ -104,12 +104,36 @@ public final class VideoSourceResolver {
                 if (attempt < MAX_ATTEMPTS - 1 && !lease.isCancelled()) {
                     KazumiLog.sniff.warn("[source] resolve failed ({}), retrying...",
                         String.valueOf(cause.getMessage()));
-                    resolveWithRetry(screen, episodeUrl, player, attempt + 1);
+                    resolveWithRetry(screen, episodeUrl, player, session, attempt + 1);
                     return null;
                 }
                 failPlayback(screen, cause);
                 return null;
             });
+    }
+
+    /**
+     * 异步解析完成的受守卫起播。解析期间以下任一情况发生即丢弃结果并回收播放器，
+     * 否则会产生无人引用的孤儿播放器（音频持续外漏，只能重启游戏才能停掉）：
+     * <ul>
+     *   <li>已离开世界（level==null，退主菜单场景）</li>
+     *   <li>屏幕方块已拆除（isRemoved）</li>
+     *   <li>会话失效：注册表条目被 stopAll/remove 置空、或 player 已被新实例顶替（换片/停止后重启）——
+     *       同时天然封死"PlayStopPacket 先 stop、解析回调后 play 复活"的队列竞态窗口</li>
+     * </ul>
+     */
+    private void startWhenValid(VideoScreenBlockEntity screen,
+            ScreenPlayerManager.ScreenPlayer session, WaterMediaPlayer player, String resolvedUrl) {
+        Minecraft.getInstance().execute(() -> {
+            if (Minecraft.getInstance().level == null || screen.isRemoved() || session.player != player) {
+                KazumiLog.sniff.debug("[source] discard stale resolution for {} (session no longer valid)",
+                        screen.getBlockPos());
+                player.stop();
+                return;
+            }
+            player.play(resolvedUrl);
+            screen.setVideoState(VideoState.PLAYING);
+        });
     }
 
     private void failPlayback(VideoScreenBlockEntity screen, Throwable cause) {
@@ -123,6 +147,7 @@ public final class VideoSourceResolver {
         }
         KazumiLog.sniff.warn("[source] resolution failed: {}", reason);
         Minecraft.getInstance().execute(() -> {
+            if (Minecraft.getInstance().level == null) return; // 已离开世界，聊天提示无意义
             screen.setVideoState(VideoState.STOPPED);
             KazumiMessages.chatError("视频源解析失败：" + reason);
         });
