@@ -40,8 +40,8 @@ public class KazumiPlayerServer {
         ruleManager.loadAll();
         SearchManager searchManager = new SearchManager(ruleEngine);
 
-        // 同步组管理（服务端权威状态）
-        SyncGroupManager.init();
+        // 同步组管理（服务端权威状态），注入规则管理器单例供进服广播复用
+        SyncGroupManager.init(ruleManager);
         NeoForge.EVENT_BUS.register(SyncGroupManager.get());
         // 屏幕方块被移除时：停止所有观看者的播放 + 清理同步组
         ScreenRemovalListeners.set((screenId, screenPos) -> {

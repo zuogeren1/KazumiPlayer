@@ -9,7 +9,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import me.zuogeren.kazumiplayer.util.MonoClock;
-import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -25,9 +24,15 @@ public class SyncGroupManager {
     private static final int SYNC_INTERVAL_TICKS = 100;
 
     private static SyncGroupManager instance;
+    private static RuleManager ruleManager;
 
     public static SyncGroupManager get() { return instance; }
-    public static void init() { instance = new SyncGroupManager(); }
+
+    /** @param ruleManager 复用 KazumiPlayerServer 初始化的单例（进服广播规则用） */
+    public static void init(RuleManager ruleManager) {
+        instance = new SyncGroupManager();
+        SyncGroupManager.ruleManager = ruleManager;
+    }
 
     private final Map<UUID, SyncGroup> groups = new ConcurrentHashMap<>();
     private int syncTickCounter;
@@ -138,13 +143,13 @@ public class SyncGroupManager {
     @SubscribeEvent
     public void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
-            // 进服时同步已安装的规则到客户端
-            var rm = new RuleManager(FMLPaths.CONFIGDIR.get());
-            rm.loadAll();
-            var rules = rm.listAll();
+            // 进服时同步已安装的规则到客户端（读 KazumiPlayerServer 初始化的单例，
+            // 勿在此 new RuleManager：既重复读盘，又产生与命令/GUI 路径不同步的第二实例）
+            if (ruleManager == null) return;
+            var rules = ruleManager.listAll();
             if (!rules.isEmpty()) {
                 String json = me.zuogeren.kazumiplayer.util.JsonUtil.GSON.toJson(
-                    rules.stream().map(rm::get).filter(r -> r != null).toList());
+                    rules.stream().map(ruleManager::get).filter(r -> r != null).toList());
                 PacketDistributor.sendToPlayer(sp, new RuleSyncPacket(json));
             }
         }
