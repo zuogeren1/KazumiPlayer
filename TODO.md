@@ -9,6 +9,13 @@
 - [ ] **连接工具空手右键音响断开**: 当前只实现了连接，断开需挖掉音响或屏幕
 - [ ] **音响方块合成配方**
 
+## 已完成的实用物品（README 功能清单）
+
+- [x] **屏幕遥控器**: Shift+右键绑定屏幕（CUSTOM_DATA 持久化），手持右键远程打开播放器 GUI，Shift+右键空中解绑；服务端校验（强制加载区块）——屏幕被破坏提示「未找到屏幕方块」。公共骨架抽为 AbstractScreenRemoteItem（RemoteOpenPacket/OpenRemoteGuiPacket）
+- [x] **远程观影器**: 与屏幕遥控器同机制，右键直接进入全屏观影（纯观看无操作）；RemoteFullscreenPacket/OpenRemoteFullscreenPacket；全屏进入来源标记——GUI 进入退出回 GUI、观影器直接进入退出回世界
+- [x] **规则管理器**: 右键打开规则管理界面（RuleManagerScreen）——远程仓库规则列表（index.json 与本地合并）、拉取/删除规则、连通性延迟测试（测/测试全部）、弃用红色标记；经 GuiProtocol 通用通道（rule_list/pull/delete/test），服务端处理并入 GuiRequestHandlers；common 经 RuleManagerOpener 钩子打开客户端界面
+- [x] **创造模式物品栏标签页**: CreativeTabRegistration 聚合全模组物品（图标=视频屏幕方块）
+
 ## 功能增强
 
 - [x] **配置功能完善**: Cloth Config 配置界面（可选依赖，未装 Cloth 时仅无界面），保存后即时应用
