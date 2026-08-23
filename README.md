@@ -4,11 +4,12 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 
 ## 功能
 
-- **播放器式 GUI**：右键屏幕方块打开——bgm.tv 搜索、规则源搜索（可跳过 bgm 直接搜源）、选集、播放线路切换、视频实时预览、番剧简介、进度条拖动、播放控制、直链输入、观看玩家列表，打开不暂停游戏世界
+- **播放器式 GUI**：右键屏幕方块打开——bgm.tv 搜索、规则源搜索（「来源▾」下拉限定单源；**流式增量显示**：每个源搜完立即上列表，慢源不阻塞快源）、选集、播放线路切换、视频实时预览、番剧简介、进度条拖动、播放控制、直链输入、观看玩家列表，打开不暂停游戏世界
 - **番剧搜索**：bgm.tv API 搜索番剧元数据 + KazumiRules 规则引擎查源站（`search-rule` 支持会话翻页）
 - **视频播放**：WaterMedia V3 (FFmpeg) 解码；直链解析三级容错——java HTTP 直取播放页 → MCEF 浏览器嗅探（JS 嗅探 + 原生网络层拦截，支持 iframe 嵌套解析站）→ 自动重试；常驻浏览器保留 Cookie 跨集直通，UA 伪装过 Cloudflare 防护，任意分辨率自适应
-- **多人同步**：NBT 驱动播放状态，服务端计时，自动同步进度/切集/暂停
+- **多人同步**：NBT 驱动播放状态，服务端单调钟计时 + 客户端钟差校准 + **首帧锚定**（以首个出画观看者的真实位置校准组时钟），自动同步进度/切集/暂停
 - **剧集管理**：自动下一集、手动切集、时间快进/快退/跳转
+- **屏幕属性调整**：GUI 预览区左上角「设置」进入独立界面——朝向、宽高、XYZ 偏移步进或直接输入，即时生效且背景透明可对照世界中的屏幕实际位置
 - **直链队列**：播放中粘贴直链自动排队（顶栏按钮「播放/排队」智能切换），队列面板支持插队/删除/点击切播，播完自动连播
 - **全屏观影**：GUI 预览右下角一键进入——画面铺满（覆盖度/不透明度可配），底部进度条，聊天键 T 原生可用，右上角退出
 - **进度条**：视频下方实时进度条
@@ -71,21 +72,23 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 | 命令 | 说明 |
 |------|------|
 | `/kazumi episodes <规则> <结果ID>` | 查看集数列表 |
-| `/kazumi play <规则> <结果ID> <集数>` | 播放指定集 |
-| `/kazumi play-url <URL>` | 直接播放 URL |
-| `/kazumi join` | 加入同步播放 |
-| `/kazumi play leave` | 离开同步播放 |
+| `/kazumi play <规则> <结果ID> <集数> [线路]` | 播放指定集 |
+| `/kazumi play url <URL>` | 直接播放 URL |
+| `/kazumi play join` | 加入同步播放 |
+| `/kazumi play leave` / `stop` | 离开同步 / 停止本端播放 |
 
 ### 控制
 | 命令 | 说明 |
 |------|------|
-| `/kazumi next` | 下一集 |
-| `/kazumi prev` | 上一集 |
-| `/kazumi pause` | 暂停 |
-| `/kazumi resume` | 恢复 |
-| `/kazumi time forward <秒>` | 快进 |
-| `/kazumi time back <秒>` | 快退 |
-| `/kazumi time goto <分:秒>` | 跳转到指定时间 |
+| `/kazumi control next` | 下一集 |
+| `/kazumi control prev` | 上一集 |
+| `/kazumi control pause` | 暂停 |
+| `/kazumi control resume` | 恢复 |
+| `/kazumi control time forward <秒>` | 快进 |
+| `/kazumi control time back <秒>` | 快退 |
+| `/kazumi control time goto <分:秒>` | 跳转到指定时间 |
+
+> 兼容别名：`/kazumi next` `prev` `pause` `resume` `time …` 与 `/kazumi play-url` `/kazumi join` 仍可用（推荐逐步迁移到上表新写法）。
 
 ### 屏幕
 | 命令 | 说明 |
