@@ -143,9 +143,10 @@ public final class QueueRequestHandlers {
     /**
      * 播放失败自动跳过（客户端 WaterMediaPlayer 失败回调触发，非手动操作）：
      * <ul>
-     *   <li>队列模式 → 移除正在播放项并自动切播下一个（原 cur+1 位置；末项取新末尾）；
+     *   <li>多项目队列 → 移除正在播放项并自动切播下一个（原 cur+1 位置；末项取新末尾）；
      *       连续坏源会逐个跳过直至队列耗尽或遇到可播项</li>
-     *   <li>唯一项被跳过或无队列上下文（单项直链/残留状态）→ 清空并停止本屏播放</li>
+     *   <li>无队列上下文（规则剧集/单项直链/残留状态，无下一项可推进）→ 仅发起者本端停播
+     *       并退出同步：一人网络抖动不得清空服务端状态殃及全组，其他观看者继续观看</li>
      * </ul>
      */
     public static GuiPayloads.ErrorPayload skipCurrent(ServerPlayer sp, BlockPos screenPos) {
@@ -153,16 +154,15 @@ public final class QueueRequestHandlers {
         if (!(be instanceof VideoScreenBlockEntity screen)) return GuiPayloads.ErrorPayload.of("kazumiplayer.err.not_screen");
         List<String> urls = DirectLinkQueue.parseUrls(screen.getEpisodeData());
         if (screen.getEpisodeUrl().isEmpty() || urls == null || urls.isEmpty()) {
-            clearAndStop(sp, screenPos, screen, Component.translatable("kazumiplayer.msg.notify.skipped_broken"));
-            KazumiLog.network.info("Queue skip-current with no queue at {}, stopped", screenPos.toShortString());
+            stopLocalOnly(sp, screenPos, screen);
+            KazumiLog.network.info("Queue skip-current with no queue at {}, stopped requester only", screenPos.toShortString());
             return null;
         }
         int cur = Math.max(1, Math.min(screen.getEpisodeIndex(), urls.size()));
         String label = labelAt(urls, cur);
         if (urls.size() == 1) {
-            clearAndStop(sp, screenPos, screen, Component.translatable("kazumiplayer.msg.notify.skipped_named", label));
-            KazumiMessages.sendSuccessKey(sp, "kazumiplayer.msg.skipped_stopped", label);
-            KazumiLog.network.info("Queue skip-current (last item) at {}", screenPos.toShortString());
+            stopLocalOnly(sp, screenPos, screen);
+            KazumiLog.network.info("Queue skip-current (single item) at {}, stopped requester only", screenPos.toShortString());
             return null;
         }
         List<String> remaining = new ArrayList<>(urls);
@@ -176,10 +176,16 @@ public final class QueueRequestHandlers {
         return null;
     }
 
-    /** 清空播放状态并停整屏：委托 PlaybackController 唯一权威实现（存位置/清 NBT 含观看者/删组/停播包/通知） */
-    private static void clearAndStop(ServerPlayer sp, BlockPos screenPos,
-            VideoScreenBlockEntity screen, net.minecraft.network.chat.Component reasonText) {
-        PlaybackController.stopScreen(sp, screenPos, screen, reasonText);
+    /**
+     * 播放失败的本端降级收尾：委托 leaveOwn 仅让发起者退出同步（存实时位置/退组/
+     * PlayStopPacket 单播/对齐 WatchingPlayers），服务端播放状态与组内其他观看者保持不动。
+     * 发起者退出后 WatchingPlayers 不再包含其 UUID，客户端不会对失效源自动重启。
+     */
+    private static void stopLocalOnly(ServerPlayer sp, BlockPos screenPos,
+            VideoScreenBlockEntity screen) {
+        PlaybackController.leaveOwn(sp, screenPos, screen,
+            Component.translatable("kazumiplayer.msg.notify.failed_local_exit"));
+        KazumiMessages.sendWarnKey(sp, "kazumiplayer.msg.playback_failed_local");
     }
 
     // ---- 内部 ----
