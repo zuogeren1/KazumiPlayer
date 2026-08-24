@@ -162,7 +162,9 @@ public final class PlaybackController {
         long newPos = Math.max(0, targetMs);
         screen.updateSyncPosition(newPos);
         SyncGroupManager.get().updateState(sid, newPos, g.paused);
-        SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
+        // forceSeek 广播：全组收到后立即跳转，不依赖客户端兜底漂移校正
+        // （±10s 内的位移永远够不到漂移阈值，无此指令则 seek 对画面无效且永不收敛）
+        SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer(), true);
         SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid,
             Component.translatable("kazumiplayer.msg.notify.seeked", KazumiMessages.formatMs(newPos)));
         return OpResult.ok(Component.literal(KazumiMessages.formatMs(newPos)));

@@ -12,11 +12,13 @@ import net.minecraft.resources.Identifier;
  * 服务端 → 客户端: 同步播放状态。
  * serverTimestamp 为服务器发送时刻的 MonoClock.millis()（服务器单调毫秒锚点），
  * 客户端经时钟同步握手（ClientClockSync）补偿两端钟差后做锚点插值。
+ * forceSeek 为 seek 类操作后的即时广播标记：客户端须无条件跳转到目标位置，
+ * 不做漂移阈值判断（±10s 内的小幅位置变化永远够不到兜底阈值，必须显式指令才会生效）。
  * 处理逻辑见客户端模块 ClientPacketHandlers。
  */
 public record SyncStatePacket(
         BlockPos screenPos, String videoUrl, long positionMs,
-        boolean paused, long serverTimestamp) implements CustomPacketPayload {
+        boolean paused, long serverTimestamp, boolean forceSeek) implements CustomPacketPayload {
 
     public static final Type<SyncStatePacket> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(KazumiPlayer.MODID, "sync_state"));
@@ -28,6 +30,7 @@ public record SyncStatePacket(
                     ByteBufCodecs.VAR_LONG, SyncStatePacket::positionMs,
                     ByteBufCodecs.BOOL, SyncStatePacket::paused,
                     ByteBufCodecs.VAR_LONG, SyncStatePacket::serverTimestamp,
+                    ByteBufCodecs.BOOL, SyncStatePacket::forceSeek,
                     SyncStatePacket::new);
 
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }

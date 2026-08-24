@@ -100,9 +100,18 @@ public class SyncGroupManager {
      * 向指定屏幕组内所有观看者广播权威播放状态（即时操作后调用）。
      */
     public void broadcastSyncState(UUID screenId, MinecraftServer server) {
+        broadcastSyncState(screenId, server, false);
+    }
+
+    /**
+     * 同 {@link #broadcastSyncState(UUID, MinecraftServer)}，forceSeek=true 时客户端
+     * 收到广播后无条件跳转到权威位置（seek 类操作专用：±10s 内的位置变化够不到
+     * 客户端兜底漂移阈值，必须显式指令才能让全组立即对齐）。
+     */
+    public void broadcastSyncState(UUID screenId, MinecraftServer server, boolean forceSeek) {
         SyncGroup g = groups.get(screenId);
         if (g == null) return;
-        sendSyncState(g, server, MonoClock.millis());
+        sendSyncState(g, server, MonoClock.millis(), forceSeek);
     }
 
     /**
@@ -117,17 +126,17 @@ public class SyncGroupManager {
         for (SyncGroup g : groups.values()) {
             if (g.players.isEmpty()) continue;
             if (g.videoUrl == null || g.videoUrl.isEmpty()) continue; // 待机组不广播
-            sendSyncState(g, server, now);
+            sendSyncState(g, server, now, false);
         }
     }
 
-    private static void sendSyncState(SyncGroup g, MinecraftServer server, long now) {
+    private static void sendSyncState(SyncGroup g, MinecraftServer server, long now, boolean forceSeek) {
         if (server == null || g.players.isEmpty()) return;
         // 权威实时位置: 基准位置 + 未暂停时的流逝时间；首帧锚定前组时钟冻结（等待真实位置校准）
         long livePos = Math.max(0, g.anchorEstablished
             ? g.positionMs + (g.paused ? 0 : now - g.serverTimestamp)
             : g.positionMs);
-        SyncStatePacket pkt = new SyncStatePacket(g.screenPos, g.videoUrl, livePos, g.paused, now);
+        SyncStatePacket pkt = new SyncStatePacket(g.screenPos, g.videoUrl, livePos, g.paused, now, forceSeek);
         int sent = 0;
         for (UUID pid : g.players) {
             ServerPlayer p = server.getPlayerList().getPlayer(pid);

@@ -4,6 +4,7 @@ import me.zuogeren.kazumiplayer.client.ClientRuleCache;
 import me.zuogeren.kazumiplayer.client.ClientClockSync;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.client.gui.GuiClientState;
+import me.zuogeren.kazumiplayer.playback.WaterMediaPlayer;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
@@ -14,6 +15,7 @@ import me.zuogeren.kazumiplayer.network.packet.TimeSyncResponsePacket;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
@@ -110,22 +112,24 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 if (sp.bypassSync) return;
                 // 锚点插值：target = 快照位置 + (映射到服务器单调钟的当前值 - 锚点时刻)
                 // serverTimestamp 为服务器发送时的 MonoClock.millis()，钟差由 ClientClockSync 握手补偿；
-                // 时钟未同步时跳过位置校正（只应用暂停状态），避免墙钟偏差造成恒定误差
+                // 时钟未同步时退回包内快照位置（广播刚发出，误差≈单程延迟，定向 seek 仍可接受）
                 long serverNow = ClientClockSync.serverNowMillis();
-                long targetPos;
+                long targetPos = packet.positionMs();
                 // 服务端已换片而本地尚未跟进（tick 轮询有 ≤1s 延迟）时禁止兜底 seek 与暂停应用：
                 // 否则新片 target≈0 与旧播放器时间相差悬殊，误触发硬 seek 打断即将重建的播放
                 boolean switchingEpisode = !sp.lastEpisodeUrl.equals(packet.videoUrl());
                 if (serverNow != Long.MIN_VALUE) {
                     long elapsed = packet.paused() ? 0 : Math.max(0, serverNow - packet.serverTimestamp());
-                    targetPos = packet.positionMs() + elapsed;
+                    targetPos += elapsed;
                     boolean seekCooldown =
                             System.currentTimeMillis() - player.getLastSeekMs() < SEEK_COOLDOWN_MS;
                     // 启动期保护：切集后组的时钟从切换瞬间起算，而播放器要经解析+缓冲才出声，
                     // 两者天然差数秒——出画（everPlayed）之前不做漂移校正，否则会把新集 seek 到错误位置
                     boolean startingUp = !sp.everPlayed;
                     long drift = Math.abs(player.getTimeMs() - targetPos);
-                    if (!seekCooldown && !switchingEpisode && !startingUp && drift > DRIFT_HARD_LIMIT_MS) {
+                    // 定向 seek 广播自带跳转指令，不再走漂移兜底（同帧双 seek 会连续清空解码队列）
+                    if (!packet.forceSeek() && !seekCooldown && !switchingEpisode
+                            && !startingUp && drift > DRIFT_HARD_LIMIT_MS) {
                         long duration = player.getDurationMs();
                         if (duration > 0 && targetPos >= duration) {
                             // 目标位置超出媒体时长：权威状态已被污染（历史教训：墙钟混入 MonoClock 运算），
@@ -140,12 +144,33 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                         }
                     }
                 }
+                if (!switchingEpisode && packet.forceSeek()) {
+                    applyForcedSeek(player, targetPos, screen.getBlockPos());
+                }
                 if (!switchingEpisode) {
                     if (packet.paused()) player.pause();
                     else player.resume();
                 }
             }
         });
+    }
+
+    /**
+     * 定向立即 seek：seek 类操作后的服务端广播要求全组无条件对齐权威位置，
+     * 绕过漂移阈值与冷却判断（±10s 内的位移永远够不到兜底阈值）。
+     * 播放器未就绪/暂停中时由 pendingSeek 机制在可播放后补跳。
+     */
+    private static void applyForcedSeek(WaterMediaPlayer player, long targetPos, BlockPos pos) {
+        long duration = player.getDurationMs();
+        if (duration > 0 && targetPos >= duration) {
+            // 与漂移兜底同一污染防护：目标超出媒体时长时拒绝跟随，
+            // seek 到天文位置会让 FFmpeg 重开输入失败、管道死亡、误判 ended
+            KazumiLog.sync.error(
+                "Rejected insane sync target {}ms (duration={}ms) at {}", targetPos, duration, pos);
+            return;
+        }
+        KazumiLog.sync.info("Forced seek to {}ms at {}", targetPos, pos);
+        player.seek(targetPos);
     }
 
     private static void handleRuleSync(RuleSyncPacket packet, IPayloadContext context) {
