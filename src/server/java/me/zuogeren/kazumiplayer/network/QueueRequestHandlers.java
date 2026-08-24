@@ -3,6 +3,7 @@ package me.zuogeren.kazumiplayer.network;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
 import me.zuogeren.kazumiplayer.network.gui.GuiPayloads;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
+import me.zuogeren.kazumiplayer.sync.PlaybackController;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.DirectLinkQueue;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
@@ -175,25 +176,10 @@ public final class QueueRequestHandlers {
         return null;
     }
 
-    /** 清空播放状态并停整屏：clear NBT + 清观看者 + 删组，其他观看者收 PlayStopPacket 即时停播与取消在途嗅探 */
+    /** 清空播放状态并停整屏：委托 PlaybackController 唯一权威实现（存位置/清 NBT 含观看者/删组/停播包/通知） */
     private static void clearAndStop(ServerPlayer sp, BlockPos screenPos,
             VideoScreenBlockEntity screen, net.minecraft.network.chat.Component reasonText) {
-        UUID sid = screen.getScreenId();
-        var g = SyncGroupManager.get().getGroup(sid);
-        List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
-
-        screen.clearPlayback();
-        screen.setWatchingPlayers("");
-        SyncGroupManager.get().leaveByScreenId(sid);
-
-        var server = sp.level().getServer();
-        for (UUID pid : watchers) {
-            ServerPlayer p = server.getPlayerList().getPlayer(pid);
-            if (p != null && p != sp) {
-                PacketDistributor.sendToPlayer(p, new PlayStopPacket(screenPos));
-                KazumiMessages.sendInfo(p, sp.getName().getString() + " " + reasonText);
-            }
-        }
+        PlaybackController.stopScreen(sp, screenPos, screen, reasonText);
     }
 
     // ---- 内部 ----

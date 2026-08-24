@@ -24,9 +24,12 @@ public class SyncNotificationUtil {
     public static void notifyOtherWatchers(ServerPlayer actor, BlockPos pos, UUID screenId, Component action) {
         var g = SyncGroupManager.get().getGroup(screenId);
         if (g == null) return;
-        String actorName = actor.getName().getString();
-        Component msg = KazumiMessages.warnKey("kazumiplayer.msg.notify_other",
-                actorName, action.getString(), String.valueOf(pos.getX()), String.valueOf(pos.getY()), String.valueOf(pos.getZ()));
+        // 参数直传组件：getString 扁平化会在专用服上把翻译 key 原样发出（语言表只在客户端）
+        Component msg = KazumiMessages.warnKeyNested("kazumiplayer.msg.notify_other",
+                actor.getName(), action,
+                Component.literal(String.valueOf(pos.getX())),
+                Component.literal(String.valueOf(pos.getY())),
+                Component.literal(String.valueOf(pos.getZ())));
         var server = ((ServerLevel) actor.level()).getServer();
         UUID actorId = actor.getUUID();
         for (UUID pid : g.players) {
@@ -45,8 +48,11 @@ public class SyncNotificationUtil {
     public static void broadcastToGroup(ServerPlayer contextPlayer, BlockPos pos, UUID screenId, Component action) {
         var g = SyncGroupManager.get().getGroup(screenId);
         if (g == null) return;
-        Component msg = KazumiMessages.infoKey("kazumiplayer.msg.broadcast_to_group",
-                action.getString(), String.valueOf(pos.getX()), String.valueOf(pos.getY()), String.valueOf(pos.getZ()));
+        Component msg = KazumiMessages.infoKeyNested("kazumiplayer.msg.broadcast_to_group",
+                action,
+                Component.literal(String.valueOf(pos.getX())),
+                Component.literal(String.valueOf(pos.getY())),
+                Component.literal(String.valueOf(pos.getZ())));
         var server = ((ServerLevel) contextPlayer.level()).getServer();
         for (UUID pid : g.players) {
             ServerPlayer p = server.getPlayerList().getPlayer(pid);

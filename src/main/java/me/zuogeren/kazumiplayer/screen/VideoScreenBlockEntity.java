@@ -233,7 +233,17 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.watchingPlayers = input.getString(KEY_WATCHING_PLAYERS).orElse("");
         this.playbackPaused = input.getBooleanOr(KEY_PLAYBACK_PAUSED, false);
         this.skinBlock = input.getString(KEY_SKIN_BLOCK).orElse("");
-        this.screenId = input.getString(KEY_SCREEN_ID).filter(s -> !s.isEmpty()).map(UUID::fromString).orElse(null);
+        // 畸形 ScreenId（损坏存档/旧版残留）回落 null，走 lazy 重新生成路径而非中断区块加载
+        this.screenId = input.getString(KEY_SCREEN_ID)
+                .filter(s -> !s.isEmpty())
+                .map(s -> {
+                    try {
+                        return UUID.fromString(s);
+                    } catch (IllegalArgumentException e) {
+                        return null;
+                    }
+                })
+                .orElse(null);
         this.offsetX = input.getFloatOr(KEY_OFFSET_X, 0.0f);
         this.offsetY = input.getFloatOr(KEY_OFFSET_Y, 0.0f);
         this.offsetZ = input.getFloatOr(KEY_OFFSET_Z, 0.0f);

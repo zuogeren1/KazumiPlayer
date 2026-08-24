@@ -290,9 +290,9 @@ public class ScreenPropsScreen extends Screen implements Listener {
         };
     }
 
-    /** 保留至多两位小数并去尾零（3.00→3、0.25→0.25） */
+    /** 保留至多两位小数并去尾零（3.00→3、0.25→0.25）；Locale.ROOT 保证小数点为 "."，逗号 locale 下 Float.parseFloat 才能回读 */
     private static String trim1(float v) {
-        var s = String.format("%.2f", v);
+        var s = String.format(java.util.Locale.ROOT, "%.2f", v);
         if (s.endsWith("00")) s = s.substring(0, s.length() - 3);
         else if (s.endsWith("0")) s = s.substring(0, s.length() - 1);
         return s;

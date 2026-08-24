@@ -140,9 +140,9 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             String nextUrl = road.data().get(idx - 1);
             PlaybackController.applyEpisodeSwitch(sp, packet.screenPos(), screen, nextUrl, ri, idx,
                 JsonUtil.GSON.toJson(roads));
-            // 通知所有观看者（包括触发者，因为自动切集没有单独提示）
-            String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1)
-                    : Component.translatable("kazumiplayer.gui.main.episode_n", idx).getString();
+            // 通知所有观看者（包括触发者，因为自动切集没有单独提示）；集名回退为嵌套 translatable
+            Component name = road.identifier().size() > idx - 1 ? Component.literal(road.identifier().get(idx - 1))
+                    : Component.translatable("kazumiplayer.gui.main.episode_n", idx);
             SyncNotificationUtil.broadcastToGroup(sp, packet.screenPos(), screen.getScreenId(),
                 Component.translatable("kazumiplayer.msg.notify.auto_switched", name));
             KazumiLog.network.info("Auto next episode {}: {}", idx, nextUrl);
@@ -150,31 +150,10 @@ public class ServerPacketHandlers implements IServerPacketHandler {
     }
 
     private static void stopPlaybackAndNotify(ServerPlayer triggerPlayer, VideoScreenBlockEntity screen, BlockPos pos) {
-        UUID sid = screen.getScreenId();
-        var g = SyncGroupManager.get().getGroup(sid);
-
-        // 保存实时位置到 NBT（组权威实时值，勿用墙钟）
-        if (g != null) {
-            screen.updateSyncPosition(g.livePositionMillis());
-        }
-
-        // 收集观看者列表（删组前）
-        List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
-
-        // 停止播放
-        screen.clearPlayback();
-        SyncGroupManager.get().leaveByScreenId(sid);
-
-        // 停止所有观看者客户端
-        var server = ((ServerLevel) triggerPlayer.level()).getServer();
-        for (UUID pid : watchers) {
-            ServerPlayer p = server.getPlayerList().getPlayer(pid);
-            if (p != null) PacketDistributor.sendToPlayer(p, new PlayStopPacket(pos));
-        }
-        // 通知所有观看者
-        SyncNotificationUtil.broadcastToGroup(triggerPlayer, pos, sid,
+        // 唯一权威实现；actor=null 表示自动事件：PlayStopPacket 与通知均发给全组（含触发者）
+        PlaybackController.stopScreen(null, pos, screen,
                 Component.translatable("kazumiplayer.msg.notify.playback_ended"));
-        KazumiLog.network.info("Playback ended at {} ({} watchers notified)", pos, watchers.size());
+        KazumiLog.network.info("Playback ended at {}", pos);
     }
 
     private static void handlePlaybackControl(PlaybackControlPacket packet, IPayloadContext context) {
@@ -228,16 +207,17 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             if (!packet.screenId().equals(screen.getScreenId())) return;
 
             if (packet.connect()) {
-                // 建立连接：双向更新
+                // 建立连接：双向更新（坐标为纯字面量参数）
                 spk.setLink(packet.screenId(), packet.screenPos());
                 screen.addConnectedSpeaker(packet.speakerPos());
-                KazumiMessages.sendSuccess(sp, "音响已连接到屏幕 ("
-                    + packet.screenPos().getX() + ", " + packet.screenPos().getY() + ", " + packet.screenPos().getZ() + ")");
+                KazumiMessages.sendSuccessKey(sp, "kazumiplayer.msg.notify.speaker_connected",
+                    String.valueOf(packet.screenPos().getX()), String.valueOf(packet.screenPos().getY()),
+                    String.valueOf(packet.screenPos().getZ()));
             } else {
                 // 断开连接：双向清空
                 spk.clearLink();
                 screen.removeConnectedSpeaker(packet.speakerPos());
-                KazumiMessages.sendWarn(sp, "音响已断开连接");
+                KazumiMessages.sendWarnKey(sp, "kazumiplayer.msg.notify.speaker_disconnected");
             }
         });
     }

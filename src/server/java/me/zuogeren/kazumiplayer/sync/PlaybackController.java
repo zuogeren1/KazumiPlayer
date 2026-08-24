@@ -49,6 +49,38 @@ public final class PlaybackController {
     // ---- 切集 ----
 
     /**
+     * 线路/集数序号统一钳制：roadIdxZeroBased 越界钳入有效线路，episode（1-based）钳入该线路集数范围。
+     * 返回 {roadIdx, episodeIdx}；调用方必须用同一返回值取 URL/生成文案/落盘，杜绝"URL 取钳制值而索引存原始值"的分叉。
+     */
+    public static int[] clampEpisodePosition(List<Road> roads, int roadIdxZeroBased, int episode) {
+        int roadIdx = Math.max(0, Math.min(roadIdxZeroBased, roads.size() - 1));
+        Road road = roads.get(roadIdx);
+        int size = road.data().size();
+        int idx = size == 0 ? 1 : Math.max(1, Math.min(episode, size));
+        return new int[]{roadIdx, idx};
+    }
+
+    /**
+     * 规则剧集播放的唯一入口（命令 /kazumi play 与 GUI play_episode 共用）：
+     * 写完整 NBT（RoadIndex/EpisodeData 持久化，自动连播依赖）→ 重置同步组 → 同步观看者
+     * → 设置番剧标题 → 立即广播。禁止调用方手搓组合。
+     *
+     * @param roadIdx / episodeIdx 必须来自 {@link #clampEpisodePosition} 的返回值
+     */
+    public static void playFromSearch(ServerPlayer actor, BlockPos screenPos,
+            VideoScreenBlockEntity screen, List<Road> roads, int roadIdx, int episodeIdx, String title) {
+        Road road = roads.get(roadIdx);
+        String url = road.data().get(episodeIdx - 1);
+        screen.setPlaybackFull(url, 0, roadIdx, episodeIdx, JsonUtil.GSON.toJson(roads));
+        UUID sid = screen.getScreenId();
+        SyncGroupManager.get().onPlayStart(actor, sid, screenPos, url);
+        syncWatchingPlayers(screen);
+        screen.setPlayingTitle(title);
+        SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
+    }
+
+
+    /**
      * 手动切换上一集/下一集（GUI 按钮、命令共用）。
      * 无剧集数据、越界时返回失败原因；成功 detail 为新集名。
      */
@@ -64,12 +96,14 @@ public final class PlaybackController {
         if (idx > road.data().size()) return OpResult.fail(Component.translatable("kazumiplayer.err.already_last"));
 
         String url = road.data().get(idx - 1);
-        String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1)
-                : Component.translatable("kazumiplayer.gui.main.episode_n", idx).getString();
+        // 集名回退用嵌套组件：getString 在专用服上会返回 key 原文（语言表只在客户端）
+        Component name = road.identifier().size() > idx - 1
+                ? Component.literal(road.identifier().get(idx - 1))
+                : Component.translatable("kazumiplayer.gui.main.episode_n", idx);
         applyEpisodeSwitch(actor, screenPos, screen, url, screen.getRoadIndex(), idx, JsonUtil.GSON.toJson(roads));
         SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, screen.getScreenId(),
-                Component.translatable("kazumiplayer.msg.notify.switched", name));
-        return OpResult.ok(Component.literal(name));
+                KazumiMessages.warnKeyNested("kazumiplayer.msg.notify.switched", name));
+        return OpResult.ok(name);
     }
 
     /**
@@ -185,10 +219,11 @@ public final class PlaybackController {
 
     /**
      * 个人离开同步（不整组停止）：保存实时位置到 NBT → 退出组 → 给自己发 PlayStopPacket
-     * → 对齐 WatchingPlayers。@param notifyText 通知他人的动词（"停止了播放"/"离开了同步播放"）
+     * → 对齐 WatchingPlayers。@param notifyText 通知他人的动词短语，可本地化组件
+     * （服务端语言表不含 mod 词条，通知文本禁止 getString 扁平化）
      */
     public static void leaveOwn(ServerPlayer actor, BlockPos screenPos,
-            VideoScreenBlockEntity screen, String notifyText) {
+            VideoScreenBlockEntity screen, Component notifyText) {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
         if (g != null) {
@@ -201,6 +236,52 @@ public final class PlaybackController {
         PacketDistributor.sendToPlayer(actor, pkt);
         var g2 = SyncGroupManager.get().getGroup(sid);
         screen.setWatchingPlayers(g2 != null ? g2.watchingPlayersString() : "");
+    }
+
+    /** String 便捷重载：按字面量包装后委托组件版（历史签名兼容） */
+    public static void leaveOwn(ServerPlayer actor, BlockPos screenPos,
+            VideoScreenBlockEntity screen, String notifyText) {
+        leaveOwn(actor, screenPos, screen, Component.literal(notifyText));
+    }
+
+    // ---- 整屏停止 ----
+
+    /**
+     * 整屏停止的唯一权威实现（自动播完/GUI 停止屏幕/命令 screen stop/队列耗尽共用）：
+     * 保存实时位置 → 清 NBT（含 WatchingPlayers，防止残留陈旧观看者）→ 删组
+     * → 向全部在线观看者发 PlayStopPacket（含发起者自身，保证其客户端同步停播）
+     * → 向除发起者外的观看者发通知。
+     *
+     * @param actor      发起者；null 表示无人发起的自动事件（播完/队列耗尽），此时通知发给全组
+     * @param actionText 通知动词短语（如"停止了屏幕播放"/"播放已结束"），可本地化组件
+     */
+    public static void stopScreen(ServerPlayer actor, BlockPos screenPos,
+            VideoScreenBlockEntity screen, Component actionText) {
+        UUID sid = screen.getScreenId();
+        var g = SyncGroupManager.get().getGroup(sid);
+        if (g != null) {
+            screen.updateSyncPosition(g.livePositionMillis());
+        }
+        List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
+
+        screen.clearPlayback();
+        screen.setWatchingPlayers("");
+        SyncGroupManager.get().leaveByScreenId(sid);
+
+        if (!(screen.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel)) return;
+        var server = serverLevel.getServer();
+        Component body = actor != null
+                ? Component.literal("").append(actor.getName())
+                    .append(Component.literal(" ")).append(actionText)
+                : actionText;
+        for (UUID pid : watchers) {
+            ServerPlayer p = server.getPlayerList().getPlayer(pid);
+            if (p == null) continue;
+            PacketDistributor.sendToPlayer(p, new me.zuogeren.kazumiplayer.network.packet.PlayStopPacket(screenPos));
+            if (actor == null || p != actor) {
+                p.sendSystemMessage(KazumiMessages.infoOf(body));
+            }
+        }
     }
 
     // ---- 内部 ----

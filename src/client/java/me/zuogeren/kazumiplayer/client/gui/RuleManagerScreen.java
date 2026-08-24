@@ -145,7 +145,8 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
             }
             case GuiProtocol.DATA_PLAY_OK -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.PlayOkPayload.class);
-                setStatus(p != null ? Component.literal(p.title()) : Component.translatable("kazumiplayer.gui.main.status_done"));
+                // title 可为 null（服务端只发 i18n key），Component.literal(null) 必 NPE
+                setStatus(p != null ? p.toComponent() : Component.translatable("kazumiplayer.gui.main.status_done"));
             }
             case GuiProtocol.DATA_ERROR -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.ErrorPayload.class);

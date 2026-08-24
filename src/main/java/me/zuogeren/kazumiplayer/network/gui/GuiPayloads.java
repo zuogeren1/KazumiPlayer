@@ -5,7 +5,7 @@ import me.zuogeren.kazumiplayer.util.JsonUtil;
 import java.util.List;
 
 /**
- * GUI 通用通道的 payload DTO（Gson 序列化，字段必须 public，禁 private——见 CLAUDE.md）。
+ * GUI 通用通道的 payload DTO（Gson 序列化，字段必须 public，禁 private）。
  * 服务端与客户端共用同一形状。
  */
 public final class GuiPayloads {

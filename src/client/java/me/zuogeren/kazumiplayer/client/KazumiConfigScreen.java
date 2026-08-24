@@ -58,16 +58,6 @@ public final class KazumiConfigScreen {
                     .build());
         }
 
-        // ---- MCEF 浏览器 ----
-        ConfigCategory mcefCategory = builder.getOrCreateCategory(Component.literal("MCEF"));
-        mcefCategory.addEntry(entry.startEnumSelector(
-                        Component.translatable("kazumiplayer.config.mcef_lifecycle"),
-                        ClientConfig.McefLifecycle.class,
-                        ClientConfig.CONFIG.mcefLifecycle.get())
-                .setDefaultValue(ClientConfig.McefLifecycle.ON_DEMAND)
-                .setSaveConsumer(value -> ClientConfig.CONFIG.mcefLifecycle.set(value))
-                .build());
-
         // ---- 播放 ----
         ConfigCategory playbackCategory = builder.getOrCreateCategory(Component.translatable("kazumiplayer.config.category_playback"));
         playbackCategory.addEntry(entry.startDoubleField(
@@ -94,12 +84,6 @@ public final class KazumiConfigScreen {
                         ClientConfig.CONFIG.sniffTimeoutSeconds.get())
                 .setDefaultValue(30).setMin(5).setMax(120)
                 .setSaveConsumer(value -> ClientConfig.CONFIG.sniffTimeoutSeconds.set(value))
-                .build());
-        playbackCategory.addEntry(entry.startBooleanToggle(
-                        Component.translatable("kazumiplayer.config.auto_join"),
-                        ClientConfig.CONFIG.autoJoinSync.get())
-                .setDefaultValue(true)
-                .setSaveConsumer(value -> ClientConfig.CONFIG.autoJoinSync.set(value))
                 .build());
         playbackCategory.addEntry(entry.startEnumSelector(
                         Component.translatable("kazumiplayer.config.video_fit"),

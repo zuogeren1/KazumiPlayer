@@ -44,6 +44,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private static final int QUEUE_TAIL_W = 20;
 
     private final BlockPos screenPos;
+    /** 上次打开 GUI 的屏幕：换屏时丢弃旧会话，同屏重开则保留 */
+    private static BlockPos lastSessionScreenPos;
 
     // 左列搜索流状态（static：GUI 关闭重开后保留上次搜索，clearSearch() 清空）
     private enum ListView { BANGUMI, RULE, CATALOG }
@@ -111,6 +113,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     public KazumiPlayerScreen(BlockPos screenPos) {
         super(Component.literal("KazumiPlayer"));
         this.screenPos = screenPos;
+        // 会话按屏幕隔离：A 屏的搜索/选集上下文带到 B 屏会误导操作（点选集会把 A 选的剧播到 B）
+        if (lastSessionScreenPos == null) {
+            lastSessionScreenPos = screenPos;
+        } else if (!lastSessionScreenPos.equals(screenPos)) {
+            resetSearchState();
+            lastSessionScreenPos = screenPos;
+        }
     }
 
     /** 打开 GUI 不暂停单人游戏世界 */

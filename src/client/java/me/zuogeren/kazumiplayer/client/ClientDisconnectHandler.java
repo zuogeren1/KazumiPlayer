@@ -1,4 +1,6 @@
 package me.zuogeren.kazumiplayer.client;
+
+import me.zuogeren.kazumiplayer.client.KazumiClientMessages;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -84,29 +86,36 @@ public class ClientDisconnectHandler {
 
     private static void testAllRules() {
         var names = ClientRuleCache.listAll();
-        if (names.isEmpty()) { KazumiMessages.chatError("无规则，请先执行 /kazumi rule pull-all"); return; }
-        KazumiMessages.chatInfo("测试 " + names.size() + " 个规则...");
+        if (names.isEmpty()) { KazumiClientMessages.chatError("无规则，请先执行 /kazumi rule pull-all"); return; }
+        KazumiClientMessages.chatInfo("测试 " + names.size() + " 个规则...");
+        var mc = net.minecraft.client.Minecraft.getInstance();
         for (String name : names) {
             Rule rule = ClientRuleCache.get(name);
             if (rule == null) continue;
             String n = name;
             long t0 = System.currentTimeMillis();
             ruleEngine.search(rule, "test")
-                .thenAccept(r -> KazumiMessages.chatSuccess(n + " §7" + (System.currentTimeMillis() - t0) + "ms"))
-                .exceptionally(e -> { KazumiMessages.chatError(n + " 失败"); return null; });
+                // 回调在 ForkJoinPool 线程执行，聊天列表仅渲染线程安全——必须投递回主线程
+                .thenAccept(r -> mc.execute(() ->
+                    KazumiClientMessages.chatSuccess(n + " §7" + (System.currentTimeMillis() - t0) + "ms")))
+                .exceptionally(e -> { mc.execute(() ->
+                    KazumiClientMessages.chatError(n + " 失败")); return null; });
         }
     }
 
     private static void testOneRule(String name) {
         Rule rule = ClientRuleCache.get(name);
-        if (rule == null) { KazumiMessages.chatError("规则不存在: " + name); return; }
+        if (rule == null) { KazumiClientMessages.chatError("规则不存在: " + name); return; }
         if (rule.isDeprecated()) {
-            KazumiMessages.chatWarn("警告: 规则 " + name + " 已被官方标记为已弃用 (deprecated)，可能已失效");
+            KazumiClientMessages.chatWarn("警告: 规则 " + name + " 已被官方标记为已弃用 (deprecated)，可能已失效");
         }
-        KazumiMessages.chatInfo("测试 " + name + " ...");
+        KazumiClientMessages.chatInfo("测试 " + name + " ...");
         long t0 = System.currentTimeMillis();
+        var mc = net.minecraft.client.Minecraft.getInstance();
         ruleEngine.search(rule, "test")
-            .thenAccept(r -> KazumiMessages.chatSuccess(name + " §7" + (System.currentTimeMillis() - t0) + "ms §7" + r.items().size() + "条"))
-            .exceptionally(e -> { KazumiMessages.chatError(name + " 失败: " + e.getMessage()); return null; });
+            .thenAccept(r -> mc.execute(() ->
+                KazumiClientMessages.chatSuccess(name + " §7" + (System.currentTimeMillis() - t0) + "ms §7" + r.items().size() + "条")))
+            .exceptionally(e -> { mc.execute(() ->
+                KazumiClientMessages.chatError(name + " 失败: " + e.getMessage())); return null; });
     }
 }

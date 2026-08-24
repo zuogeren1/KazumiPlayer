@@ -1,5 +1,15 @@
 # TODO
 
+## 深度审计修复（2026-08-24）
+
+- [x] **P1 RuleManagerScreen 成功回包 NPE**: 服务端 PlayOkPayload 只填 key（title=null），客户端 `Component.literal(null)` 必崩 → 改用 `p.toComponent()`
+- [x] **P1 HttpUtil SSRF 重定向绕过**: Redirect.NEVER + 手动循环逐跳 checkSsrf（≤5 跳）；CGNAT/ULA 拦截配置化（`ssrfBlockCgnat` 默认 true / `ssrfBlockUlaIpv6` 默认 false 兼容 TUN 代理）；白名单归一化；单次 getAllByName 全地址校验
+- [x] **P2 服务端六项**: 通知组件 getString 扁平化（专用服显示原始 key）/ Component 拼接 toString 调试串 / translatable.getString 系统性违规 12+ 处 / 整屏停止四处收敛 PlaybackController.stopScreen（含通知死代码与 WatchingPlayers 清理）/ RuleManager 损坏文件容错+原子写盘 / playFromSearch 统一播放入口+集数钳制落盘
+- [x] **P2 客户端三项**: BrowserCookieStore 移除（收割端从未接线+UA 不配对，文档债同步修正）/ 死配置处理（maxConcurrentPlays 接入调度闸门、videoVolume 总系数接线；mcefLifecycle、autoJoinSync 移除）/ GUI static 会话换屏重置
+- [x] **P2 公共层五项**: DNS 单次解析全地址校验 / 内网段字节级判定（CGNAT/ULA/组播/240/4）/ EpisodeUrlNormalizer 孤立 % 容错 / 两处 BE loadAdditional UUID 容错 / common 四文件 net.minecraft.client 引用解耦（ClientPacketSender 钩子 + KazumiClientMessages 迁移）
+- [x] **P3 必修两条**（复核确认）: krule 异步回调 mc.execute 投递（CME 路径）/ ScreenPropsScreen Locale.ROOT
+- [x] **配套**: 语言键全量比对补缺 8 个（status_done/speaker_connected/disconnected/ok.joined/played_episode_n/cmd.rule.testing/play_limit/item.*×7）；调试物品 debug_verify（外壳永久保留，验证区提交前清空）
+
 ## 音响系统（⛔ 整体挂起——先决条件：前置 mod WaterMedia v3 完善 audio 能力（video/audio 独立开关）；就绪前不动此区）
 
 - [ ] **音响发声**: WaterMedia v3 当前 `MediaAPI.createPlayer(mrl, gfx, sfx)` 不支持 video/audio 独立开关。`SpeakerBlockEntity.startAudio()` 为占位
@@ -32,7 +42,7 @@
 - [x] **播放器式 GUI**: 右键屏幕打开主界面（搜索流/视频实时预览/选集/番剧简介/进度条拖动/控制栏/直链输入），搜源按钮跳过 bgm 直接搜规则源，搜索状态会话内持久化，isPauseScreen=false 不暂停单人世界
 - [x] **GUI 通用网络通道**: GuiActionPacket/GuiDataPacket + GuiProtocol/GuiPayloads，新增 GUI 操作零包成本；服务端 GuiRequestHandlers 与聊天命令共用会话缓存和 resultId
 - [x] **播放多级容错**: HTTP 直取播放页解析直链优先（java 路径与浏览器路径对源站可达性互补）→ MCEF 常驻浏览器嗅探（UA 伪装+Cookie 保留+接管式并发+取消入口）→ 重试归因提示；带签名 query 的直链去参后直判快速播放
-- [x] **Cookie 桥接**: 嗅探期间收割 document.cookie 按 host 存入 BrowserCookieStore，RuleRequestEnhancer 钩子使直取/规则请求成对附加 Cookie+伪装 UA
+- [x] **Cookie 桥接**: ~~收割 document.cookie 按域名存储，直取/规则请求成对附加~~ → 审计确认收割端从未接线（saveFromBrowser 零调用者）且伪装 UA 与现嗅探 UA 池不配对，桥接整体不可用；已随深度审计修复整体移除（BrowserCookieStore 删除，RuleRequestEnhancer 钩子保留空转），如需 CF 直取能力须重新设计收割端+UA 配对
 - [x] **停止屏幕全量通知**: GUI 停止屏幕向全部观看者发 PlayStopPacket + 聊天提示（原 /kazumi screen stop 不通知观看者端）
 - [x] **全屏观影模式**: GUI 预览右下角「全屏」按钮 → 关闭 GUI 由 HUD 层接管画面（RenderGuiLayerEvent.Post@HOTBAR，盖住准心/血条、聊天层浮于其上——T 键原生可用）。覆盖度 fullscreenCoverage(1-100)/不透明度 fullscreenOpacity(10-100) 可配，底部进度条+时间；右上角「退出」按钮点击返回世界（鼠标全程可见可点，InputEvent.MouseButton.Pre 拦截按钮命中点击不下发世界）
 - [ ] **渲染性能优化**: 多屏幕同时播放时帧率优化

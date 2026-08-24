@@ -139,8 +139,7 @@ public class RuleCommands {
                         ruleManager.getEngine().search(rule, "test")
                             .thenAccept(result -> {
                                 long latency = System.currentTimeMillis() - start;
-                                KazumiMessages.sendSuccess(src,
-                                    Component.translatable("kazumiplayer.gui.rule.test_ok", name, latency).getString());
+                                KazumiMessages.sendSuccessKey(src, "kazumiplayer.gui.rule.test_ok", name, String.valueOf(latency));
                             })
                             .exceptionally(e -> {
                                 KazumiMessages.sendErrorKey(src, "kazumiplayer.gui.rule.test_fail", name);
@@ -245,8 +244,7 @@ public class RuleCommands {
                     })
                     .toList();
                 if (!deprecated.isEmpty()) {
-                    KazumiMessages.sendWarn(src,
-                        Component.translatable("kazumiplayer.cmd.rule.deprecated_list", String.join(", ", deprecated)).getString());
+                    KazumiMessages.sendWarnKey(src, "kazumiplayer.cmd.rule.deprecated_list", String.join(", ", deprecated));
                 }
                 broadcastRuleSync(ruleManager);
             });

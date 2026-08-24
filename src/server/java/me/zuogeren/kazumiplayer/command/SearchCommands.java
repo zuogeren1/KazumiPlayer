@@ -88,7 +88,8 @@ public class SearchCommands {
             if (!ruleManager.getRules().isEmpty()) {
                 src.sendSystemMessage(ChatComponentUtil.clickable(
                     Component.translatable("kazumiplayer.cmd.search.check_sources"), "/kazumi search-rule all " + name,
-                    Component.translatable("kazumiplayer.cmd.search.search_all", name).append(Component.literal("   [查源]"))));
+                    Component.translatable("kazumiplayer.cmd.search.search_all", name)
+                        .append(Component.translatable("kazumiplayer.cmd.search.check_sources"))));
             }
         }
         var nav = Component.literal("").withStyle(net.minecraft.ChatFormatting.GRAY);
@@ -174,8 +175,7 @@ public class SearchCommands {
             }
             rules = Map.of(ruleName, rule);
             if (rule.isDeprecated()) {
-                KazumiMessages.sendWarn(src,
-                    Component.translatable("kazumiplayer.cmd.rule_deprecated_warn", ruleName).getString());
+                KazumiMessages.sendWarnKey(src, "kazumiplayer.cmd.rule_deprecated_warn", ruleName);
             }
             KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.search_rule.searching_in", ruleName, keyword);
         }

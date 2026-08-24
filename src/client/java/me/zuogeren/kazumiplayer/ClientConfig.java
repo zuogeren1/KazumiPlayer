@@ -7,9 +7,7 @@ public class ClientConfig {
     public static final ClientConfig CONFIG;
     public static final ModConfigSpec SPEC;
 
-    // MCEF 浏览器生命周期策略
-    public final ModConfigSpec.EnumValue<McefLifecycle> mcefLifecycle;
-    // 视频默认音量 (0.0 - 1.0)
+    // 视频默认音量 (0.0 - 1.0)，与原版唱片机滑块相乘
     public final ModConfigSpec.DoubleValue videoVolume;
     // 最大同时嗅探数
     public final ModConfigSpec.IntValue maxConcurrentSniffs;
@@ -17,8 +15,6 @@ public class ClientConfig {
     public final ModConfigSpec.IntValue maxConcurrentPlays;
     // 嗅探超时 (秒)
     public final ModConfigSpec.IntValue sniffTimeoutSeconds;
-    // 瞄准屏幕时自动加入同步播放
-    public final ModConfigSpec.BooleanValue autoJoinSync;
     // 全屏观影画面覆盖窗口的百分比 (1-100)
     public final ModConfigSpec.IntValue fullscreenCoverage;
     // 全屏观影画面不透明度百分比 (10-100)
@@ -36,21 +32,7 @@ public class ClientConfig {
         CONTAIN
     }
 
-    public enum McefLifecycle {
-        ON_DEMAND,
-        PERSISTENT
-    }
-
     private ClientConfig(ModConfigSpec.Builder builder) {
-        builder.push("mcef");
-
-        mcefLifecycle = builder
-                .comment("MCEF 浏览器生命周期策略",
-                        "ON_DEMAND - 每次播放创建浏览器，嗅探完成后释放",
-                        "PERSISTENT - 保持单个浏览器实例复用")
-                .defineEnum("mcefLifecycle", McefLifecycle.ON_DEMAND);
-
-        builder.pop();
         builder.push("playback");
 
         videoVolume = builder
@@ -68,10 +50,6 @@ public class ClientConfig {
         sniffTimeoutSeconds = builder
                 .comment("视频嗅探超时时间 (秒)")
                 .defineInRange("sniffTimeoutSeconds", 30, 5, 120);
-
-        autoJoinSync = builder
-                .comment("瞄准屏幕时自动加入同步播放")
-                .define("autoJoinSync", true);
 
         fullscreenCoverage = builder
                 .comment("全屏观影画面占窗口的百分比 (1-100)，居中显示，小于 100 时四周透出游戏世界")

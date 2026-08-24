@@ -5,10 +5,8 @@ import me.zuogeren.kazumiplayer.client.ClientPlaybackScheduler;
 import me.zuogeren.kazumiplayer.client.ClientClockSync;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
 import me.zuogeren.kazumiplayer.client.KazumiConfigScreen;
-import me.zuogeren.kazumiplayer.client.BrowserCookieStore;
 import me.zuogeren.kazumiplayer.client.gui.KazumiPlayerScreen;
 import me.zuogeren.kazumiplayer.network.ClientPacketHandlers;
-import me.zuogeren.kazumiplayer.rule.RuleRequestEnhancer;
 import me.zuogeren.kazumiplayer.network.PacketDispatcher;
 import me.zuogeren.kazumiplayer.screen.ScreenGuiOpeners;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
@@ -64,6 +62,12 @@ public class KazumiPlayerClient {
         // 注入 S→C 网络包处理器
         PacketDispatcher.setClientHandler(new ClientPacketHandlers());
 
+        // 注入 C→S 发包钩子（common 物品经此发送自定义包，不直接引用客户端连接类）
+        me.zuogeren.kazumiplayer.network.ClientPacketSender.set(pkt -> {
+            var conn = Minecraft.getInstance().getConnection();
+            if (conn != null) conn.send(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(pkt));
+        });
+
         // 注入屏幕右键 GUI 打开器（common 方块经此钩子打开播放器主界面）
         ScreenGuiOpeners.set(screenPos -> Minecraft.getInstance().setScreen(new KazumiPlayerScreen(screenPos)));
 
@@ -72,8 +76,7 @@ public class KazumiPlayerClient {
             Minecraft.getInstance().setScreen(
                 new me.zuogeren.kazumiplayer.client.gui.RuleManagerScreen()));
 
-        // 注入规则请求头增强器（浏览器收割的 Cookie 桥接到规则 HTTP 请求）
-        RuleRequestEnhancer.set(BrowserCookieStore::headersFor);
+        // RuleRequestEnhancer 不注入实现：纯服务端/无凭据场景下按原样放行请求头
 
         KazumiLog.general.info("KazumiPlayer client side initialized");
     }

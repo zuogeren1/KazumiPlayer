@@ -92,19 +92,24 @@ public class EpisodeUrlNormalizer {
     /**
      * 宽容 resolve：href 含未编码非法字符（中文/空格/竖线等站点常见写法）时，
      * percent 编码非法字节后重试（URI.resolve(String) 内部 create 失败会直接抛）。
+     * 重试仍失败返回 null，由调用方按"无法解析"处理，异常不得逃出 normalize()。
      */
     private static URI resolveLenient(URI base, String ref) {
         try {
             return base.resolve(ref);
         } catch (Exception e) {
-            return base.resolve(encodeIllegalChars(ref));
+            try {
+                return base.resolve(encodeIllegalChars(ref));
+            } catch (Exception e2) {
+                return null;
+            }
         }
     }
 
     /** 保留 RFC 3986 合法字符与已有的百分号编码，其余字节按 UTF-8 percent 编码 */
     private static String encodeIllegalChars(String s) {
         StringBuilder sb = new StringBuilder(s.length() + 16);
-        for (byte b : s.getBytes(StandardCharsets.UTF_8)) {
+        for (byte b : escapeStrayPercent(s).getBytes(StandardCharsets.UTF_8)) {
             char c = (char) (b & 0xFF);
             if (c == '%') {
                 sb.append(c); // 已有百分号编码原样保留，避免双重编码
@@ -116,5 +121,27 @@ public class EpisodeUrlNormalizer {
             }
         }
         return sb.toString();
+    }
+
+    /** 孤立 %（后两个字符非 hex）编码为 %25：如 "50%off.html"，否则 resolve 双次失败且异常逃逸 */
+    private static String escapeStrayPercent(String s) {
+        if (s.indexOf('%') < 0) return s;
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            boolean validEscape = c == '%'
+                    && i + 2 < s.length()
+                    && isHexDigit(s.charAt(i + 1)) && isHexDigit(s.charAt(i + 2));
+            if (c == '%' && !validEscape) {
+                sb.append("%25");
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static boolean isHexDigit(char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
     }
 }

@@ -1,4 +1,6 @@
 package me.zuogeren.kazumiplayer.playback;
+
+import me.zuogeren.kazumiplayer.client.KazumiClientMessages;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
@@ -88,7 +90,7 @@ public class WaterMediaPlayer {
                     if (raw.length() > 120) raw = raw.substring(0, 120) + "…";
                     String detail = raw;
                     KazumiLog.playback.error("MRL load failed ({}): {}", url, detail);
-                    mc.execute(() -> KazumiMessages.chatError("视频加载失败：" + detail));
+                    mc.execute(() -> KazumiClientMessages.chatError("视频加载失败：" + detail));
                     firePlayFailure();
                     return;
                 }
@@ -96,7 +98,7 @@ public class WaterMediaPlayer {
             }
             if (closed) return;
             KazumiLog.playback.error("MRL loading timeout: {} (normalized: {})", videoUrl, url);
-            mc.execute(() -> KazumiMessages.chatError("视频加载超时，请检查网络或稍后重试"));
+            mc.execute(() -> KazumiClientMessages.chatError("视频加载超时，请检查网络或稍后重试"));
             firePlayFailure();
         }, "KazumiPlayer-MRL-Loader").start();
     }
@@ -110,7 +112,7 @@ public class WaterMediaPlayer {
                 () -> MediaAPI.alEngine());
             if (player == null) {
                 KazumiLog.playback.error("Failed to create player for: {}", mrl.uri);
-                mc.execute(() -> KazumiMessages.chatError("创建播放器失败"));
+                mc.execute(() -> KazumiClientMessages.chatError("创建播放器失败"));
                 firePlayFailure();
                 return;
             }
@@ -125,12 +127,16 @@ public class WaterMediaPlayer {
         }
     }
 
-    /** 从原版唱片机/音符盒音量滑块读取并应用音量 (0-100) */
+    /**
+     * 从原版唱片机/音符盒音量滑块读取并应用音量 (0-100)，
+     * 乘以客户端配置的默认视频音量 videoVolume 作为总系数。
+     */
     public void applyVolumeFromOptions() {
         if (player == null) return;
         float vol = Minecraft.getInstance().options.getSoundSourceVolume(
             net.minecraft.sounds.SoundSource.RECORDS);
-        player.volume((int) (vol * 100));
+        float configured = me.zuogeren.kazumiplayer.ClientConfig.CONFIG.videoVolume.get().floatValue();
+        player.volume((int) (vol * configured * 100));
     }
 
     public boolean isPlaying() {

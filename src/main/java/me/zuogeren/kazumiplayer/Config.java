@@ -21,6 +21,10 @@ public class Config {
     public final ModConfigSpec.IntValue maxSearchResponseBytes;
     // SSRF 域名白名单 (为空时仅允许公网地址)
     public final ModConfigSpec.ConfigValue<List<? extends String>> ssrfWhitelist;
+    // 是否拦截 CGNAT 100.64/10 段（VPC/Docker 内网常见；代理 TUN 环境极少用该段映射）
+    public final ModConfigSpec.BooleanValue ssrfBlockCgnat;
+    // 是否拦截 IPv6 ULA fc00::/7 段（Clash/Mihomo 等 TUN 代理常用该段映射被代理域名，默认放行以兼容）
+    public final ModConfigSpec.BooleanValue ssrfBlockUlaIpv6;
 
     private Config(ModConfigSpec.Builder builder) {
         builder.push("general");
@@ -56,6 +60,16 @@ public class Config {
                 .comment("SSRF 域名白名单 (为空时仅允许公网地址)")
                 .defineListAllowEmpty("ssrfWhitelist", List::of,
                         o -> o instanceof String s && !s.isBlank());
+
+        ssrfBlockCgnat = builder
+                .comment("SSRF 拦截 CGNAT 100.64/10 段（VPC/Docker 内网常见）",
+                        "代理 TUN 环境若用该段映射外部域名需关闭")
+                .define("ssrfBlockCgnat", true);
+
+        ssrfBlockUlaIpv6 = builder
+                .comment("SSRF 拦截 IPv6 ULA fc00::/7 段",
+                        "Clash/Mihomo 等 TUN 代理常用该段映射被代理域名，默认放行以兼容；专用服务器建议开启")
+                .define("ssrfBlockUlaIpv6", false);
 
         builder.pop();
     }

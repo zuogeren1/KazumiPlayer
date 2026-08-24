@@ -6,6 +6,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlock;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.screen.VideoScreenRegistration;
+import me.zuogeren.kazumiplayer.sync.PlaybackController;
 import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import net.minecraft.ChatFormatting;
@@ -68,13 +69,9 @@ public class ScreenCommands {
                         return 0;
                     }
                     UUID sid = screen.getScreenId();
-                    // 停止前保存当前计时到 NBT
-                    var g = SyncGroupManager.get().getGroup(sid);
-                    if (g != null) {
-                        screen.updateSyncPosition(g.livePositionMillis());
-                    }
-                    screen.clearPlayback();
-                    SyncGroupManager.get().leaveByScreenId(sid);
+                    // 唯一权威实现：存位置→清 NBT（含观看者）→删组→其他观看者停播包+通知
+                    PlaybackController.stopScreen(player, pos, screen,
+                        Component.translatable("kazumiplayer.msg.notify.stop_screen"));
                     ctx.getSource().sendSuccess(() -> KazumiMessages.successKey("kazumiplayer.cmd.screen.stopped"), true);
                     return 1;
                 }))
@@ -161,8 +158,9 @@ public class ScreenCommands {
         if (level.getBlockEntity(pos) instanceof VideoScreenBlockEntity be) {
             be.setScreenSize(width, height);
             be.setFacing(facing);
-            src.sendSuccess(() -> KazumiMessages.success(
-                Component.translatable("kazumiplayer.cmd.screen.created", pos.toShortString(), String.valueOf(width), String.valueOf(height), facing.getName()).getString()), true);
+            // 坐标/尺寸/朝向均为纯字面量参数，走 key 由客户端本地化渲染
+            src.sendSuccess(() -> KazumiMessages.successKey("kazumiplayer.cmd.screen.created",
+                pos.toShortString(), String.valueOf(width), String.valueOf(height), facing.getName()), true);
         }
         return 1;
     }

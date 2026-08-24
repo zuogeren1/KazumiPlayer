@@ -206,8 +206,9 @@ public class GuiRequestHandlers {
                 int total = road.data().size();
                 List<String> names = new ArrayList<>();
                 for (int i = 0; i < total; i++) {
+                    // payload 只能承载字符串；无集名时回退为纯序号（服务端语言表不含 mod 词条，不可 getString 翻译）
                     names.add(road.identifier().size() > i ? road.identifier().get(i)
-                    : Component.translatable("kazumiplayer.gui.main.episode_n", i + 1).getString());
+                    : String.valueOf(i + 1));
                 }
                 send(sp, GuiProtocol.DATA_CHAPTERS,
                     GuiPayloads.toJson(new GuiPayloads.ChaptersPayload(roadNames, roadIdx, names, total)));
@@ -240,34 +241,34 @@ public class GuiRequestHandlers {
                     sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.episodes.not_found_list"));
                     return;
                 }
-                // 对齐 Kazumi 切线语义：保持集数序号，取目标线路的同序号集
-                int roadIdx = Math.max(0, Math.min(payload.road(), result.roads().size() - 1));
+                // 对齐 Kazumi 切线语义：保持集数序号，取目标线路的同序号集；统一钳制避免越界落盘
+                int[] posIdx = PlaybackController.clampEpisodePosition(result.roads(), payload.road(), payload.episode());
+                int roadIdx = posIdx[0];
+                int idx = posIdx[1];
                 Road road = result.roads().get(roadIdx);
-                int idx = Math.max(1, Math.min(payload.episode(), road.data().size()));
-                String epUrl = road.data().get(idx - 1);
-                String roadJson = JsonUtil.GSON.toJson(result.roads());
 
-                String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1)
-                    : Component.translatable("kazumiplayer.gui.main.episode_n", idx).getString();
+                // 集名回退为嵌套 translatable：聊天通知直传组件；playOk 的 payload 只能承载字符串，
+                // 回退分支换用带集数占位的独立 key（args 全为纯数据字符串）
+                boolean hasEpName = road.identifier().size() > idx - 1;
+                Component epName = hasEpName ? Component.literal(road.identifier().get(idx - 1))
+                    : Component.translatable("kazumiplayer.gui.main.episode_n", idx);
 
                 MinecraftServer server = sp.level().getServer();
                 server.execute(() -> {
                     var beNow = sp.level().getBlockEntity(screenPos);
                     if (!(beNow instanceof VideoScreenBlockEntity screen)) return;
-                    UUID sid = screen.getScreenId();
-                    SyncGroupManager.get().onPlayStart(sp, sid, screenPos, epUrl);
-                    screen.setPlaybackFull(epUrl, 0, roadIdx, idx, roadJson);
-                    screen.setPlayingTitle(entry.item().name());
-                    var g = SyncGroupManager.get().getGroup(sid);
-                    if (g != null) screen.setWatchingPlayers(g.watchingPlayersString());
-                    SyncGroupManager.get().broadcastSyncState(sid, server);
-                    SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid,
+                    PlaybackController.playFromSearch(sp, screenPos, screen,
+                        result.roads(), roadIdx, idx, entry.item().name());
+                    SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, screen.getScreenId(),
                         Component.translatable("kazumiplayer.msg.notify.played_episode",
-                            entry.item().name(), name, road.name()));
+                            entry.item().name(), epName, road.name()));
                 });
                 send(sp, GuiProtocol.DATA_PLAY_OK,
-                    GuiPayloads.toJson(GuiPayloads.PlayOkPayload.of("kazumiplayer.msg.ok.played_episode",
-                        entry.item().name(), name, road.name())));
+                    GuiPayloads.toJson(hasEpName
+                        ? GuiPayloads.PlayOkPayload.of("kazumiplayer.msg.ok.played_episode",
+                            entry.item().name(), road.identifier().get(idx - 1), road.name())
+                        : GuiPayloads.PlayOkPayload.of("kazumiplayer.msg.ok.played_episode_n",
+                            entry.item().name(), String.valueOf(idx), road.name())));
             })
             .exceptionally(e -> sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.err.play_failed", String.valueOf(e.getMessage()))));
     }
@@ -277,43 +278,30 @@ public class GuiRequestHandlers {
     private static void join(ServerPlayer sp, BlockPos screenPos) {
         var be = sp.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) return;
-        // 业务委托 PlaybackController（与命令层同一实现）
-        sendOk(sp, PlaybackController.joinScreen(sp, screenPos, screen).detail().getString());
+        // 业务委托 PlaybackController（与命令层同一实现）；反馈统一走 key 由客户端本地化
+        PlaybackController.joinScreen(sp, screenPos, screen);
+        sendOkKey(sp, "kazumiplayer.msg.ok.joined");
     }
 
     private static void leave(ServerPlayer sp, BlockPos screenPos) {
         var be = sp.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) return;
-        PlaybackController.leaveOwn(sp, screenPos, screen, "离开了同步播放");
+        // 通知他人的动词短语走可本地化组件（leaveOwn 组件重载）
+        PlaybackController.leaveOwn(sp, screenPos, screen,
+            Component.translatable("kazumiplayer.msg.notify.left_sync"));
         PacketDistributor.sendToPlayer(sp, new PlayStopPacket(screenPos));
-        sendOk(sp, "已离开同步播放");
+        sendOkKey(sp, "kazumiplayer.msg.ok.left");
     }
 
     /** 停止整块屏幕的播放：保存进度 → 清 NBT → 删组 → 向所有观看者发 PlayStopPacket（比 /kazumi screen stop 多通知步骤） */
     private static void stopScreen(ServerPlayer sp, BlockPos screenPos) {
         var be = sp.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) return;
-        UUID sid = screen.getScreenId();
-        var g = SyncGroupManager.get().getGroup(sid);
-        if (g != null) {
-            screen.updateSyncPosition(g.livePositionMillis());
-        }
-        List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
-
-        screen.clearPlayback();
-        screen.setWatchingPlayers("");
-        SyncGroupManager.get().leaveByScreenId(sid);
-
-        var server = sp.level().getServer();
-        for (UUID pid : watchers) {
-            ServerPlayer p = server.getPlayerList().getPlayer(pid);
-            if (p != null) {
-                PacketDistributor.sendToPlayer(p, new PlayStopPacket(screenPos));
-                KazumiMessages.sendInfo(p, sp.getName().getString() + " 停止了屏幕播放");
-            }
-        }
-        KazumiLog.network.info("GUI stop screen {} ({} watchers notified)", screenPos.toShortString(), watchers.size());
-        sendOk(sp, "已停止屏幕播放");
+        // 唯一权威实现（含 WatchingPlayers 清理与其他观看者的停播包+通知）
+        PlaybackController.stopScreen(sp, screenPos, screen,
+                Component.translatable("kazumiplayer.msg.notify.stop_screen"));
+        KazumiLog.network.info("GUI stop screen {}", screenPos.toShortString());
+        sendOkKey(sp, "kazumiplayer.msg.ok.screen_stopped");
     }
 
     // ---- 屏幕几何属性（朝向/大小/偏移）----

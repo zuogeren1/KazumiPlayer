@@ -39,8 +39,8 @@ public abstract class AbstractScreenRemoteItem extends Item {
             tag.putInt("TargetZ", pos.getZ());
             CustomData.set(DataComponents.CUSTOM_DATA, ctx.getItemInHand(), tag);
             if (level.isClientSide()) {
-                KazumiMessages.sendSuccess(player,
-                    "已绑定屏幕 (" + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+                player.sendSystemMessage(KazumiMessages.successKey("kazumiplayer.item.remote.bound",
+                    String.valueOf(pos.getX()), String.valueOf(pos.getY()), String.valueOf(pos.getZ())));
             }
             return InteractionResult.SUCCESS;
         }
@@ -53,14 +53,14 @@ public abstract class AbstractScreenRemoteItem extends Item {
         if (player.isShiftKeyDown()) {
             stack.remove(DataComponents.CUSTOM_DATA);
             if (level.isClientSide()) {
-                KazumiMessages.sendWarn(player, "已清除绑定的屏幕");
+                player.sendSystemMessage(KazumiMessages.warnKey("kazumiplayer.item.remote.clear"));
             }
             return InteractionResult.SUCCESS;
         }
         BlockPos target = readBinding(stack);
         if (target == null) {
             if (level.isClientSide()) {
-                KazumiMessages.sendInfo(player, "请先 Shift+右键一个屏幕方块进行绑定");
+                player.sendSystemMessage(KazumiMessages.infoKey("kazumiplayer.item.remote.need_bind"));
             }
             return InteractionResult.PASS;
         }

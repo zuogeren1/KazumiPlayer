@@ -16,6 +16,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
@@ -23,16 +24,15 @@ import java.util.concurrent.CompletableFuture;
  * HTTP 客户端，内置 SSRF 防护和响应大小限制
  */
 public class HttpUtil {
+    /** 跟随重定向的上限：每跳都重新过 SSRF 校验，超限视为可疑链路 */
+    private static final int MAX_REDIRECTS = 5;
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            // 禁止自动重定向：跳转目标必须逐跳过 SSRF 校验，否则公网 302 可直达内网
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
     private static final Random RANDOM = new Random();
 
-    // 内网地址段
-    private static final List<String> BLOCKED_NETWORKS = List.of(
-            "10.", "172.16.", "192.168.", "127.", "0."
-    );
     private static final String LOCALHOST = "localhost";
     private static final String LOCALHOST6 = "[::1]";
 
@@ -79,51 +79,73 @@ public class HttpUtil {
 
         CompletableFuture.runAsync(() -> {
             try {
-                URI uri = URI.create(urlString);
-                KazumiLog.http.debug("HTTP {} {} (host: {})", method, urlString, uri.getHost());
-                checkSsrf(uri);
+                // query 参数只作用于首跳；重定向目标以 Location 为准，不再追加
+                String currentUrl = buildUrl(urlString, queryParams);
+                // lambda 内可变副本（捕获参数须 effectively final）；303/301/302 对 POST 降级为 GET，307/308 保留方法与 body
+                String currentMethod = method;
+                String currentBody = body;
+                for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+                    URI uri = URI.create(currentUrl);
+                    KazumiLog.http.debug("HTTP {} {} (host: {})", currentMethod, currentUrl, uri.getHost());
+                    checkSsrf(uri);
 
-                // 构建 URL (添加 query params)
-                String fullUrl = buildUrl(urlString, queryParams);
+                    HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                            .uri(uri)
+                            .timeout(Duration.ofSeconds(Math.max(5, Config.CONFIG.searchTimeoutMs.get() / 1000)))
+                            .header("User-Agent", getRandomUserAgent())
+                            .header("Accept-Language", "zh-CN,zh;q=0.9");
 
-                // 构建请求
-                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                        .uri(URI.create(fullUrl))
-                        .timeout(Duration.ofSeconds(Math.max(5, Config.CONFIG.searchTimeoutMs.get() / 1000)))
-                        .header("User-Agent", getRandomUserAgent())
-                        .header("Accept-Language", "zh-CN,zh;q=0.9");
+                    headers.forEach(requestBuilder::header);
 
-                // 添加自定义 headers
-                headers.forEach(requestBuilder::header);
+                    if ("POST".equalsIgnoreCase(currentMethod)) {
+                        requestBuilder.POST(currentBody != null
+                                ? HttpRequest.BodyPublishers.ofString(currentBody, StandardCharsets.UTF_8)
+                                : HttpRequest.BodyPublishers.noBody());
+                    } else {
+                        requestBuilder.GET();
+                    }
 
-                if ("POST".equalsIgnoreCase(method)) {
-                    requestBuilder.POST(body != null
-                            ? HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)
-                            : HttpRequest.BodyPublishers.noBody());
-                } else {
-                    requestBuilder.GET();
+                    HttpResponse<InputStream> response = CLIENT.send(
+                            requestBuilder.build(),
+                            HttpResponse.BodyHandlers.ofInputStream());
+
+                    int status = response.statusCode();
+                    String location = response.headers().firstValue("Location").orElse(null);
+                    boolean redirect = (status == 301 || status == 302 || status == 303
+                            || status == 307 || status == 308) && location != null;
+
+                    if (!redirect) {
+                        if (status >= 400) {
+                            // 非 2xx 不再静默解析成 0 条结果，如实上报（站点宕机/反爬可辨别）
+                            KazumiLog.http.warn("HTTP {} {} -> {}", currentMethod, currentUrl, status);
+                            future.completeExceptionally(
+                                    new RuntimeException("站点返回 HTTP " + status + "（可能宕机或被反爬拦截）"));
+                            return;
+                        }
+
+                        int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
+                        String responseBody = readResponseBody(response, maxBytes);
+
+                        KazumiLog.http.debug("HTTP {} {} -> {} ({} bytes)",
+                                currentMethod, uri.getHost(), response.statusCode(), responseBody.length());
+                        future.complete(responseBody);
+                        return;
+                    }
+
+                    // 重定向：排空并关闭当前响应体后校验跳转目标（相对 Location 以当前 URI 为基准解析）
+                    try (InputStream drain = response.body()) {
+                        drain.readAllBytes();
+                    }
+                    URI target = uri.resolve(location.trim());
+                    if ("POST".equalsIgnoreCase(currentMethod) && status != 307 && status != 308) {
+                        currentMethod = "GET";
+                        currentBody = null;
+                    }
+                    KazumiLog.http.debug("HTTP redirect {} -> {}", status, target);
+                    currentUrl = target.toString();
                 }
-
-                // 发送请求
-                HttpResponse<InputStream> response = CLIENT.send(
-                        requestBuilder.build(),
-                        HttpResponse.BodyHandlers.ofInputStream());
-
-                int status = response.statusCode();
-                if (status >= 400) {
-                    // 非 2xx 不再静默解析成 0 条结果，如实上报（站点宕机/反爬可辨别）
-                    KazumiLog.http.warn("HTTP {} {} -> {}", method, fullUrl, status);
-                    future.completeExceptionally(
-                            new RuntimeException("站点返回 HTTP " + status + "（可能宕机或被反爬拦截）"));
-                    return;
-                }
-
-                int maxBytes = Config.CONFIG.maxSearchResponseBytes.get();
-                String responseBody = readResponseBody(response, maxBytes);
-
-                KazumiLog.http.debug("HTTP {} {} -> {} ({} bytes)",
-                        method, uri.getHost(), response.statusCode(), responseBody.length());
-                future.complete(responseBody);
+                future.completeExceptionally(new RuntimeException(
+                        "重定向次数超过 " + MAX_REDIRECTS + "，已中止（可疑链路）"));
             } catch (SsrfBlockedException e) {
                 future.completeExceptionally(e);
             } catch (java.net.UnknownHostException e) {
@@ -168,56 +190,76 @@ public class HttpUtil {
     }
 
     /**
-     * SSRF 防护: 禁止请求内网地址
+     * SSRF 防护: 禁止请求内网地址。
+     * 对 host 的全部解析结果逐一校验（round-robin DNS 可能同时返回公网与内网记录）；
+     * 校验与后续 CLIENT.send 共享同一 JVM DNS 缓存视图，消除多次解析间的选址漂移窗口。
      */
     private static void checkSsrf(URI uri) throws SsrfBlockedException {
         String host = uri.getHost();
         if (host == null) {
             throw new SsrfBlockedException(uri, "无法解析主机名");
         }
-        String lower = host.toLowerCase();
-        String resolvedIp;
+        String lower = host.toLowerCase(Locale.ROOT);
 
         // 检查 localhost
         if (LOCALHOST.equals(lower) || LOCALHOST6.equals(lower)) {
             throw new SsrfBlockedException(uri, "禁止访问 localhost");
         }
 
-        // 检查白名单
+        // 检查白名单（配置项归一化：trim + 小写，避免写大写或带空格静默失效）
         List<? extends String> whitelist = Config.CONFIG.ssrfWhitelist.get();
         for (String w : whitelist) {
-            if (lower.equals(w) || lower.endsWith("." + w)) {
+            if (w == null) continue;
+            String normalized = w.trim().toLowerCase(Locale.ROOT);
+            if (normalized.isEmpty()) continue;
+            if (lower.equals(normalized) || lower.endsWith("." + normalized)) {
                 return; // 在白名单中，放行
             }
         }
 
-        // 解析 DNS 并检查是否为内网 IP
+        // 单次解析取全部地址并逐个校验
+        InetAddress[] addresses;
         try {
-            InetAddress addr = InetAddress.getByName(host);
-            resolvedIp = addr.getHostAddress();
+            addresses = InetAddress.getAllByName(host);
         } catch (IOException e) {
             throw new SsrfBlockedException(uri, "无法解析主机: " + e.getMessage());
         }
-
-        // 检查内网 IP
-        for (String blocked : BLOCKED_NETWORKS) {
-            if (resolvedIp.startsWith(blocked)) {
-                throw new SsrfBlockedException(uri,
-                        "禁止访问内网地址: " + resolvedIp);
-            }
+        for (InetAddress addr : addresses) {
+            assertPrivateAddress(uri, addr);
         }
+    }
 
-        // 检查是否为私有/站点本地地址
-        InetAddress addr;
-        try {
-            addr = InetAddress.getByName(host);
-        } catch (IOException e) {
-            throw new SsrfBlockedException(uri, "无法解析主机");
-        }
+    /** 结构化判定单个地址是否私网/保留段（字节级，覆盖 IPv4 特殊段与 IPv6 ULA） */
+    private static void assertPrivateAddress(URI uri, InetAddress addr) throws SsrfBlockedException {
         if (addr.isSiteLocalAddress() || addr.isLoopbackAddress()
-                || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()) {
-            throw new SsrfBlockedException(uri,
-                    "禁止访问私有/本地地址: " + addr.getHostAddress());
+                || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()
+                || addr.isMulticastAddress()) {
+            throw new SsrfBlockedException(uri, "禁止访问私有/本地地址: " + addr.getHostAddress());
+        }
+        byte[] octets = addr.getAddress();
+        if (octets.length == 4) {
+            int b0 = octets[0] & 0xFF;
+            int b1 = octets[1] & 0xFF;
+            boolean cgnatHit = (b0 == 100 && (b1 & 0xC0) == 64);   // 100.64/10 CGNAT（VPC/Docker 常见）
+            if (cgnatHit && !Config.CONFIG.ssrfBlockCgnat.get()) return;
+            boolean privateV4 = b0 == 0                       // 0.0.0.0/8 "this network"
+                    || b0 == 10                                // 10/8 私网
+                    || b0 == 127                               // 127/8 回环
+                    || (cgnatHit && Config.CONFIG.ssrfBlockCgnat.get())
+                    || (b0 == 169 && b1 == 254)                // 169.254/16 链路本地
+                    || (b0 == 172 && (b1 & 0xF0) == 16)        // 172.16/12 私网
+                    || (b0 == 192 && b1 == 168)                // 192.168/16 私网
+                    || b0 >= 240;                              // 240/4 保留段（含 255.255.255.255）
+            if (privateV4) {
+                throw new SsrfBlockedException(uri, "禁止访问内网地址: " + addr.getHostAddress());
+            }
+        } else if (octets.length == 16) {
+            int first = octets[0] & 0xFF;
+            // fc00::/7 Unique Local Address（JDK isSiteLocalAddress 只覆盖 fec0::/10 已废弃段）；
+            // Clash/Mihomo 等 TUN 代理常用该段映射被代理域名，故默认放行、由配置开启拦截
+            if ((first & 0xFE) == 0xFC && Config.CONFIG.ssrfBlockUlaIpv6.get()) {
+                throw new SsrfBlockedException(uri, "禁止访问内网地址: " + addr.getHostAddress());
+            }
         }
     }
 

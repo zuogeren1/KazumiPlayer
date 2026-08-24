@@ -1,5 +1,7 @@
 package me.zuogeren.kazumiplayer.playback.source;
 
+import me.zuogeren.kazumiplayer.client.KazumiClientMessages;
+
 import me.zuogeren.kazumiplayer.ClientConfig;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
@@ -84,7 +86,7 @@ public final class VideoSourceResolver {
             KazumiLog.sniff.warn("[source] resolver pool exhausted, giving up screen {}", key);
             Minecraft.getInstance().execute(() -> {
                 screen.setVideoState(VideoState.STOPPED);
-                KazumiMessages.chatWarn("已达最大同时嗅探数，无法解析该屏幕视频");
+                KazumiClientMessages.chatWarn("已达最大同时嗅探数，无法解析该屏幕视频");
             });
             return;
         }
@@ -155,7 +157,7 @@ public final class VideoSourceResolver {
         Minecraft.getInstance().execute(() -> {
             if (Minecraft.getInstance().level == null) return; // 已离开世界，聊天提示无意义
             screen.setVideoState(VideoState.STOPPED);
-            KazumiMessages.chatError("视频源解析失败：" + reason);
+            KazumiClientMessages.chatError("视频源解析失败：" + reason);
         });
     }
 

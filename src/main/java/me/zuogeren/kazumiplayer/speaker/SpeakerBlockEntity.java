@@ -65,13 +65,27 @@ public class SpeakerBlockEntity extends BlockEntity {
 
     @Override
     protected void loadAdditional(ValueInput input) {
-        this.linkedScreenId = input.getString("LinkedScreenId")
-            .filter(s -> !s.isEmpty()).map(UUID::fromString).orElse(null);
+        // 畸形 UUID（损坏存档/旧版残留）回落 null 重新生成，不让区块加载中断
+        this.linkedScreenId = parseUuidLenient(input, "LinkedScreenId");
         this.linkedScreenPos = input.read("LinkedScreenPos", net.minecraft.core.BlockPos.CODEC).orElse(null);
         // 注意：此处不做"屏幕不存在即清连接"的防御——加载顺序不可靠，
         // 屏幕 chunk 未加载时 getBlockEntity 返回 null，会误删有效连接并写盘。
         // 合法失效路径均已有清理：屏幕破坏 setRemoved 遍历 ConnectedSpeakers 清 link、
         // 音响挖除 setRemoved 反向通知、手动断开双向清理。
+    }
+
+    /** 宽容解析 NBT 中的 UUID 字符串：非法格式返回 null 而非抛 IllegalArgumentException */
+    private static UUID parseUuidLenient(ValueInput input, String key) {
+        return input.getString(key)
+            .filter(s -> !s.isEmpty())
+            .map(s -> {
+                try {
+                    return UUID.fromString(s);
+                } catch (IllegalArgumentException e) {
+                    return null;
+                }
+            })
+            .orElse(null);
     }
 
     @Override

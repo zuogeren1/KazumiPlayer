@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.item;
 
+import me.zuogeren.kazumiplayer.network.ClientPacketSender;
 import me.zuogeren.kazumiplayer.network.packet.SpeakerConnectPacket;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.speaker.SpeakerBlockEntity;
@@ -7,7 +8,7 @@ import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
@@ -42,8 +43,8 @@ public class ConnectionToolItem extends Item {
             tag.putInt("TargetZ", pos.getZ());
             CustomData.set(DataComponents.CUSTOM_DATA, stack, tag);
             if (level.isClientSide()) {
-                KazumiMessages.sendSuccess(player, "已选中屏幕 ("
-                    + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+                player.sendSystemMessage(KazumiMessages.successKey("kazumiplayer.item.conn.selected",
+                    String.valueOf(pos.getX()), String.valueOf(pos.getY()), String.valueOf(pos.getZ())));
             }
             return InteractionResult.SUCCESS;
         }
@@ -52,7 +53,7 @@ public class ConnectionToolItem extends Item {
             CompoundTag tag = readSelection(stack);
             if (tag == null || !tag.contains("TargetId")) {
                 if (level.isClientSide()) {
-                    KazumiMessages.sendError(player, "请先右键一个屏幕来选中目标");
+                    player.sendSystemMessage(KazumiMessages.errorKey("kazumiplayer.item.conn.select_first"));
                 }
                 return InteractionResult.FAIL;
             }
@@ -65,11 +66,7 @@ public class ConnectionToolItem extends Item {
                 int tz = tag.getInt("TargetZ").orElse(0);
                 BlockPos targetPos = new BlockPos(tx, ty, tz);
                 if (level.isClientSide()) {
-                    var conn = net.minecraft.client.Minecraft.getInstance().getConnection();
-                    if (conn != null) {
-                        conn.send(new ServerboundCustomPayloadPacket(
-                            new SpeakerConnectPacket(ctx.getClickedPos(), targetPos, targetId, true)));
-                    }
+                    ClientPacketSender.send(new SpeakerConnectPacket(ctx.getClickedPos(), targetPos, targetId, true));
                 }
             } catch (IllegalArgumentException ignored) {}
             return InteractionResult.SUCCESS;
@@ -84,14 +81,15 @@ public class ConnectionToolItem extends Item {
         if (player.isShiftKeyDown()) {
             stack.remove(DataComponents.CUSTOM_DATA);
             if (level.isClientSide()) {
-                KazumiMessages.sendWarn(player, "已清除选中的屏幕");
+                player.sendSystemMessage(KazumiMessages.warnKey("kazumiplayer.item.conn.cleared"));
             }
             return InteractionResult.SUCCESS;
         }
         CompoundTag tag = readSelection(stack);
         if (tag != null && tag.contains("TargetX") && level.isClientSide()) {
-            KazumiMessages.sendSuccess(player, "当前已选中屏幕 ("
-                + tag.getInt("TargetX").orElse(0) + ", " + tag.getInt("TargetY").orElse(0) + ", " + tag.getInt("TargetZ").orElse(0) + ")");
+            player.sendSystemMessage(KazumiMessages.successKey("kazumiplayer.item.conn.current",
+                tag.getInt("TargetX").orElse(0) + "", tag.getInt("TargetY").orElse(0) + "",
+                tag.getInt("TargetZ").orElse(0) + ""));
         }
         return InteractionResult.PASS;
     }

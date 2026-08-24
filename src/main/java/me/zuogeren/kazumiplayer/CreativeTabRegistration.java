@@ -30,6 +30,7 @@ public class CreativeTabRegistration {
                     output.accept(VideoScreenRegistration.SCREEN_REMOTE.get());
                     output.accept(VideoScreenRegistration.REMOTE_VIEWER.get());
                     output.accept(VideoScreenRegistration.RULE_MANAGER.get());
+                    output.accept(VideoScreenRegistration.DEBUG_VERIFY.get());
                 })
                 .build());
 

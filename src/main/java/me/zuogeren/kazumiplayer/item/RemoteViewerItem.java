@@ -1,9 +1,8 @@
 package me.zuogeren.kazumiplayer.item;
 
+import me.zuogeren.kazumiplayer.network.ClientPacketSender;
 import me.zuogeren.kazumiplayer.network.packet.RemoteFullscreenPacket;
-import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 
 /**
  * 远程观影器：右键跳过 GUI 直接进入绑定屏幕的全屏观影（ClientFullscreenState），
@@ -17,9 +16,6 @@ public class RemoteViewerItem extends AbstractScreenRemoteItem {
 
     @Override
     protected void openRemote(BlockPos target) {
-        var conn = Minecraft.getInstance().getConnection();
-        if (conn != null) {
-            conn.send(new ServerboundCustomPayloadPacket(new RemoteFullscreenPacket(target)));
-        }
+        ClientPacketSender.send(new RemoteFullscreenPacket(target));
     }
 }

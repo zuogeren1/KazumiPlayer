@@ -14,6 +14,7 @@ import me.zuogeren.kazumiplayer.sync.SyncGroupManager;
 import me.zuogeren.kazumiplayer.util.ChatComponentUtil;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
+import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
@@ -62,14 +63,13 @@ public class PlayCommands {
         PlaybackController.OpResult run(ServerPlayer player, BlockPos pos, VideoScreenBlockEntity screen);
     }
 
-    /** 控制类命令通用执行：委托 Controller → 按结果回显 */
-    private static int execute(CommandSourceStack src, String successPrefix, ControlOp op) {
+    /** 控制类命令通用执行：委托 Controller → 按结果回显（detail 为组件直接嵌套发送，服务端不做 getString 扁平化） */
+    private static int execute(CommandSourceStack src, ControlOp op) {
         try {
             Target t = target(src);
             if (t == null) return 0;
             var r = op.run(t.player(), t.pos(), t.screen());
-            if (r.success()) src.sendSuccess(() -> KazumiMessages.successKey("kazumiplayer.msg.ok.generic",
-                    r.detail().getString()), false);
+            if (r.success()) src.sendSuccess(() -> KazumiMessages.successOf(r.detail()), false);
             else src.sendFailure(KazumiMessages.errorOf(r.detail()));
             return r.success() ? 1 : 0;
         } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
@@ -99,18 +99,18 @@ public class PlayCommands {
 
         // /kazumi play join
         var join = Commands.literal("join")
-            .executes(ctx -> execute(ctx.getSource(), "", (p, pos, s) -> PlaybackController.joinScreen(p, pos, s)));
+            .executes(ctx -> execute(ctx.getSource(), (p, pos, s) -> PlaybackController.joinScreen(p, pos, s)));
 
         // /kazumi play stop
         var stop = Commands.literal("stop")
-            .executes(ctx -> execute(ctx.getSource(), "",
-                (p, pos, s) -> { PlaybackController.leaveOwn(p, pos, s, Component.translatable("kazumiplayer.msg.notify.stop_playing").getString());
+            .executes(ctx -> execute(ctx.getSource(),
+                (p, pos, s) -> { PlaybackController.leaveOwn(p, pos, s, Component.translatable("kazumiplayer.msg.notify.stop_playing"));
                     return PlaybackController.OpResult.ok(Component.translatable("kazumiplayer.msg.ok.stopped_client")); }));
 
         // /kazumi play leave
         var leave = Commands.literal("leave")
-            .executes(ctx -> execute(ctx.getSource(), "",
-                (p, pos, s) -> { PlaybackController.leaveOwn(p, pos, s, Component.translatable("kazumiplayer.msg.notify.left_sync").getString());
+            .executes(ctx -> execute(ctx.getSource(),
+                (p, pos, s) -> { PlaybackController.leaveOwn(p, pos, s, Component.translatable("kazumiplayer.msg.notify.left_sync"));
                     return PlaybackController.OpResult.ok(Component.translatable("kazumiplayer.msg.ok.left")); }));
 
         return play.then(playUrl).then(join).then(stop).then(leave);
@@ -121,22 +121,22 @@ public class PlayCommands {
     public static LiteralArgumentBuilder<CommandSourceStack> buildControl() {
         return Commands.literal("control")
             .then(Commands.literal("next")
-                .executes(ctx -> execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.switched_to").getString(), (p, pos, s) -> PlaybackController.switchEpisode(p, pos, s, true))))
+                .executes(ctx -> execute(ctx.getSource(), (p, pos, s) -> PlaybackController.switchEpisode(p, pos, s, true))))
             .then(Commands.literal("prev")
-                .executes(ctx -> execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.switched_to").getString(), (p, pos, s) -> PlaybackController.switchEpisode(p, pos, s, false))))
+                .executes(ctx -> execute(ctx.getSource(), (p, pos, s) -> PlaybackController.switchEpisode(p, pos, s, false))))
             .then(Commands.literal("pause")
-                .executes(ctx -> execute(ctx.getSource(), "", (p, pos, s) -> PlaybackController.setPaused(p, pos, s, true))))
+                .executes(ctx -> execute(ctx.getSource(), (p, pos, s) -> PlaybackController.setPaused(p, pos, s, true))))
             .then(Commands.literal("resume")
-                .executes(ctx -> execute(ctx.getSource(), "", (p, pos, s) -> PlaybackController.setPaused(p, pos, s, false))))
+                .executes(ctx -> execute(ctx.getSource(), (p, pos, s) -> PlaybackController.setPaused(p, pos, s, false))))
             .then(Commands.literal("time")
                 .then(Commands.literal("forward")
                     .then(Commands.argument("seconds", IntegerArgumentType.integer(1))
-                        .executes(ctx -> execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.time_adjusted").getString(),
+                        .executes(ctx -> execute(ctx.getSource(),
                             (p, pos, s) -> PlaybackController.adjustTime(p, pos, s,
                                 IntegerArgumentType.getInteger(ctx, "seconds"))))))
                 .then(Commands.literal("back")
                     .then(Commands.argument("seconds", IntegerArgumentType.integer(1))
-                        .executes(ctx -> execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.time_adjusted").getString(),
+                        .executes(ctx -> execute(ctx.getSource(),
                             (p, pos, s) -> PlaybackController.adjustTime(p, pos, s,
                                 -IntegerArgumentType.getInteger(ctx, "seconds"))))))
                 .then(Commands.literal("goto")
@@ -147,7 +147,7 @@ public class PlayCommands {
                                 ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.play.bad_time_format")));
                                 return 0;
                             }
-                            return execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.goto").getString(),
+                            return execute(ctx.getSource(),
                                 (p, pos, s) -> PlaybackController.seekTo(p, pos, s, ms));
                         }))));
     }
@@ -160,7 +160,7 @@ public class PlayCommands {
                     .executes(ctx -> submitQueueUrl(ctx)))));
         dispatcher.register(Commands.literal("kazumi")
             .then(Commands.literal("join").executes(ctx ->
-                execute(ctx.getSource(), "", (p, pos, s) -> PlaybackController.joinScreen(p, pos, s)))));
+                execute(ctx.getSource(), (p, pos, s) -> PlaybackController.joinScreen(p, pos, s)))));
     }
 
     private static int submitQueueUrl(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
@@ -233,8 +233,7 @@ public class PlayCommands {
             return 0;
         }
         if (rule.isDeprecated()) {
-            KazumiMessages.sendWarn(ctx.getSource(),
-                Component.translatable("kazumiplayer.cmd.rule_deprecated_warn", ruleName).getString());
+            KazumiMessages.sendWarnKey(ctx.getSource(), "kazumiplayer.cmd.rule_deprecated_warn", ruleName);
         }
 
         var entry = searchManager.getCache().lookup(resultId);
@@ -252,28 +251,35 @@ public class PlayCommands {
                     ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.episodes.not_found_list")));
                     return;
                 }
-                int roadIdx = Math.max(0, Math.min(roadNumber - 1, result.roads().size() - 1));
+                // 统一钳制：URL/文案/落盘共用同一返回值，避免 EpisodeIndex 越界落盘
+                int[] posIdx = PlaybackController.clampEpisodePosition(result.roads(), roadNumber - 1, episode);
+                int roadIdx = posIdx[0];
+                int idx = posIdx[1];
                 Road road = result.roads().get(roadIdx);
-                int idx = Math.max(0, Math.min(episode - 1, road.data().size() - 1));
-                String epUrl = road.data().get(idx);
-                String roadJson = JsonUtil.GSON.toJson(result.roads());
 
                 player.level().getServer().execute(() -> {
                     var be = player.level().getBlockEntity(screenPos);
                     if (be instanceof VideoScreenBlockEntity screen) {
-                        SyncGroupManager.get().onPlayStart(player, screen.getScreenId(), screenPos, epUrl);
-                        screen.setPlaybackFull(epUrl, 0, roadIdx, episode, roadJson);
-                        syncWatchingPlayers(screen);
-                        screen.setPlayingTitle(entry.item().name());
+                        PlaybackController.playFromSearch(player, screenPos, screen,
+                            result.roads(), roadIdx, idx, entry.item().name());
+                        SyncNotificationUtil.notifyOtherWatchers(player, screenPos, screen.getScreenId(),
+                            Component.translatable("kazumiplayer.msg.notify.played_episode",
+                                entry.item().name(),
+                                road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1)
+                                    : Component.translatable("kazumiplayer.gui.main.episode_n", idx),
+                                road.name()));
                     }
                 });
-                String epName = road.identifier().size() > idx ? road.identifier().get(idx) : Component.translatable("kazumiplayer.gui.main.episode_n", episode).getString();
+                // 集名回退为嵌套 translatable：专用服语言表无 mod 词条，禁止 getString 扁平化
+                Component epNameArg = road.identifier().size() > idx - 1
+                    ? Component.literal(road.identifier().get(idx - 1))
+                    : Component.translatable("kazumiplayer.gui.main.episode_n", idx);
                 KazumiMessages.sendSuccess(ctx.getSource(),
-                    Component.translatable("kazumiplayer.cmd.play.now_playing_road", epName, episode, road.name()).getString());
+                    Component.translatable("kazumiplayer.cmd.play.now_playing_road", epNameArg, episode, road.name()));
             })
             .exceptionally(e -> {
-                ctx.getSource().sendFailure(KazumiMessages.error(
-                    "获取剧集失败: " + e.getMessage()));
+                ctx.getSource().sendFailure(KazumiMessages.errorOf(
+                    Component.translatable("kazumiplayer.cmd.episodes.failed", String.valueOf(e.getMessage()))));
                 return null;
             });
 
@@ -302,15 +308,21 @@ public class PlayCommands {
                 int end = Math.min(start + perPage, total);
 
                 src.sendSystemMessage(KazumiMessages.separator());
-                src.sendSystemMessage(Component.literal("=== " + entry.item().name()
-                    + Component.translatable("kazumiplayer.cmd.episodes.header", total, cp, totalPages).getString() + " ==="));;
+                src.sendSystemMessage(Component.literal("=== ")
+                    .append(Component.translatable("kazumiplayer.cmd.episodes.header",
+                        entry.item().name(), total, cp, totalPages))
+                    .append(Component.literal(" ===")));
 
                 var line = Component.literal("");
                 int count = 0;
                 for (int i = start; i < end; i++) {
-                    String label = road.identifier().size() > i ? road.identifier().get(i) : Component.translatable("kazumiplayer.gui.main.episode_n", i+1).getString();
+                    // 集名回退为嵌套 translatable，避免服务端 getString 扁平化
+                    Component label = road.identifier().size() > i ? Component.literal(road.identifier().get(i))
+                        : Component.translatable("kazumiplayer.gui.main.episode_n", i + 1);
                     String cmd = "/kazumi play " + ruleName + " " + resultId + " " + (i + 1);
-                    line.append(ChatComponentUtil.clickable("[" + label + "] ", cmd, Component.translatable("kazumiplayer.cmd.play.click_play", label).getString()));
+                    line.append(ChatComponentUtil.clickable(
+                        Component.literal("[").append(label).append(Component.literal("] ")),
+                        cmd, Component.translatable("kazumiplayer.cmd.play.click_play", label)));
                     count++;
                     if (count % 6 == 0) {
                         src.sendSystemMessage(line);
@@ -323,13 +335,17 @@ public class PlayCommands {
                     var nav = Component.literal("").withStyle(net.minecraft.ChatFormatting.GRAY);
                     if (cp > 1) {
                         int prev = cp - 1;
-                        nav.append(ChatComponentUtil.clickable("<<< 上一页  ",
-                            "/kazumi episodes " + ruleName + " " + resultId + " " + prev, Component.translatable("kazumiplayer.cmd.page.n", prev).getString()));
+                        nav.append(ChatComponentUtil.clickable(
+                            Component.translatable("kazumiplayer.cmd.nav.prev"),
+                            "/kazumi episodes " + ruleName + " " + resultId + " " + prev,
+                            Component.translatable("kazumiplayer.cmd.page.n", prev)));
                     }
                     if (cp < totalPages) {
                         int next = cp + 1;
-                        nav.append(ChatComponentUtil.clickable(">>> 下一页",
-                            "/kazumi episodes " + ruleName + " " + resultId + " " + next, Component.translatable("kazumiplayer.cmd.page.n", next).getString()));
+                        nav.append(ChatComponentUtil.clickable(
+                            Component.translatable("kazumiplayer.cmd.nav.next"),
+                            "/kazumi episodes " + ruleName + " " + resultId + " " + next,
+                            Component.translatable("kazumiplayer.cmd.page.n", next)));
                     }
                     src.sendSystemMessage(nav);
                 }

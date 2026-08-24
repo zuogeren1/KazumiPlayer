@@ -42,6 +42,10 @@ public class VideoScreenRegistration {
     public static final DeferredItem<me.zuogeren.kazumiplayer.item.RuleManagerItem> RULE_MANAGER =
             ITEMS.registerItem("rule_manager", me.zuogeren.kazumiplayer.item.RuleManagerItem::new, props -> props);
 
+    // 审计验证工具（外壳永久保留）：验证内容在 DebugVerifyItem 验证区按需填充、提交前清空
+    public static final DeferredItem<me.zuogeren.kazumiplayer.item.DebugVerifyItem> DEBUG_VERIFY =
+            ITEMS.registerItem("debug_verify", me.zuogeren.kazumiplayer.item.DebugVerifyItem::new, props -> props);
+
     // BlockEntityType: (BlockEntitySupplier, onlyOpCanSetNbt, Block...)
     // Docs: onlyOpCanSetNbt = false for normal block entities
     public static final Supplier<BlockEntityType<VideoScreenBlockEntity>> VIDEO_SCREEN_BLOCK_ENTITY =

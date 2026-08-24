@@ -83,6 +83,28 @@ public class ClientPlaybackScheduler {
         }
     }
 
+    /** 每屏限流提示时间戳：达播放上限时 15s 一次，避免每秒刷屏 */
+    private static final java.util.Map<net.minecraft.core.BlockPos, Long> PLAY_LIMIT_NOTICE_AT =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 客户端最大同时播放屏数（maxConcurrentPlays 配置）：活跃播放器计数是否仍在预算内 */
+    private static boolean withinConcurrentPlayBudget() {
+        long active = ScreenPlayerManager.getAll().values().stream()
+                .filter(s -> s.player != null).count();
+        return active < me.zuogeren.kazumiplayer.ClientConfig.CONFIG.maxConcurrentPlays.get();
+    }
+
+    private static void notifyPlayLimitThrottled(net.minecraft.core.BlockPos pos) {
+        long now = System.currentTimeMillis();
+        if (now - PLAY_LIMIT_NOTICE_AT.getOrDefault(pos, 0L) > 15000) {
+            PLAY_LIMIT_NOTICE_AT.put(pos, now);
+            KazumiClientMessages.chatWarn(me.zuogeren.kazumiplayer.util.KazumiMessages
+                .warnKey("kazumiplayer.msg.warn.play_limit",
+                    String.valueOf(me.zuogeren.kazumiplayer.ClientConfig.CONFIG.maxConcurrentPlays.get()),
+                    pos.toShortString()).getString());
+        }
+    }
+
     /**
      * 单个视频屏幕的六段调度。段落间有顺序约定，勿随意调换：
      * 僵尸自愈 → 新播放 → pendingSeek 重试 → 音量 → ended 检测 → URL 变更停旧。
@@ -107,6 +129,11 @@ public class ClientPlaybackScheduler {
         // 只有 WatchingPlayers 中的玩家才自动播放（手动 join 后才能播）
         if (sp.player == null && !url.isEmpty() && isWatching(screen, mc)
                 && System.currentTimeMillis() - sp.playbackStartedAt > PLAYBACK_START_COOLDOWN_MS) {
+            // 客户端最大同时播放屏数：达上限不再为新屏起播（N 屏 = N 路 FFmpeg 全速运行，必须有资源闸）
+            if (!withinConcurrentPlayBudget()) {
+                notifyPlayLimitThrottled(screen.getBlockPos());
+                return;
+            }
             sp.playbackStartedAt = System.currentTimeMillis();
             sp.bypassSync = false; // 先复位上一集的直播直连标记（beginPlayback 检测到直播直链会重新置位）
             sp.player = me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver
