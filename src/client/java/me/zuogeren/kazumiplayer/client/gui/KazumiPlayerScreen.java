@@ -106,7 +106,12 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private Button nextButton;
     private Button seekBackButton;
     private Button seekForwardButton;
+    private Button joinButton;         // 加入同步：已在观看时置灰
+    private Button leaveButton;        // 离开同步：未在观看时置灰
     private SeekSlider seekSlider;
+    private VolumeSlider volumeSlider; // 本屏独立音量（叠加 RECORDS×videoVolume 之上）
+    private Button muteButton;         // 本屏静音开关
+    private Button cancelStartupButton; // 起播等待期的取消（预览区底部，仅等待中可见）
     private Button sourceButton;       // 搜源来源限定下拉（全部/各已装规则）
     private boolean sourceDropdownOpen;
 
@@ -241,8 +246,19 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.addRenderableWidget(this.watchList);
 
         // ---- 底部：状态行 + 进度条 + 控制按钮 ----
-        this.seekSlider = new SeekSlider(8, h - 46, w - 16, 14);
+        // 进度条右侧放 本屏音量滑块 + 静音开关（窄窗口下进度条让位，最短 60px）
+        int volumeTotal = 100;
+        this.seekSlider = new SeekSlider(8, h - 46, Math.max(60, w - 16 - volumeTotal), 14);
         this.addRenderableWidget(this.seekSlider);
+        this.volumeSlider = new VolumeSlider(8 + Math.max(60, w - 16 - volumeTotal) + 4, h - 46, 62, 14);
+        this.addRenderableWidget(this.volumeSlider);
+        this.muteButton = Button.builder(Component.translatable(
+                ScreenPlayerManager.get(this.screenPos).muted
+                    ? "kazumiplayer.gui.main.btn_unmute" : "kazumiplayer.gui.main.btn_mute"),
+                b -> this.toggleMute())
+            .bounds(this.volumeSlider.getX() + this.volumeSlider.getWidth() + 4, h - 46, 30, 14)
+            .build();
+        this.addRenderableWidget(this.muteButton);
 
         int by = h - 28;
         int bw = Math.max(44, (w - 12 - 7 * 4) / 8);
@@ -261,10 +277,12 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.seekForwardButton = Button.builder(Component.literal("+10s"), b -> this.sendControl(PlaybackAction.SEEK_FORWARD, 10))
             .bounds(6 + (bw + 4) * 4, by, bw, 18).build();
         this.addRenderableWidget(this.seekForwardButton);
-        this.addRenderableWidget(Button.builder(Component.translatable("kazumiplayer.gui.main.btn_join"), b -> this.sendAction(GuiProtocol.ACTION_JOIN, "{}"))
-            .bounds(6 + (bw + 4) * 5, by, bw, 18).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("kazumiplayer.gui.main.btn_leave"), b -> this.sendAction(GuiProtocol.ACTION_LEAVE, "{}"))
-            .bounds(6 + (bw + 4) * 6, by, bw, 18).build());
+        this.joinButton = Button.builder(Component.translatable("kazumiplayer.gui.main.btn_join"), b -> this.sendAction(GuiProtocol.ACTION_JOIN, "{}"))
+            .bounds(6 + (bw + 4) * 5, by, bw, 18).build();
+        this.addRenderableWidget(this.joinButton);
+        this.leaveButton = Button.builder(Component.translatable("kazumiplayer.gui.main.btn_leave"), b -> this.sendAction(GuiProtocol.ACTION_LEAVE, "{}"))
+            .bounds(6 + (bw + 4) * 6, by, bw, 18).build();
+        this.addRenderableWidget(this.leaveButton);
         this.addRenderableWidget(Button.builder(Component.translatable("kazumiplayer.gui.main.btn_stop"), b -> this.stopScreen())
             .bounds(6 + (bw + 4) * 7, by, bw, 18).build());
 
@@ -282,6 +300,12 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.addRenderableWidget(Button.builder(Component.translatable("kazumiplayer.gui.main.btn_settings"), b ->
                 this.minecraft.setScreen(new ScreenPropsScreen(this.screenPos)))
             .bounds(L.rightX() + 4, 34, 40, 14).build());
+        // 预览区底部中央：取消起播（仅解析/加载等待期可见）
+        this.cancelStartupButton = Button.builder(
+                Component.translatable("kazumiplayer.gui.main.startup_cancel"), b -> this.cancelStartup())
+            .bounds(L.rightX() + L.rightW() / 2 - 24, 30 + L.previewH() - 26, 48, 14).build();
+        this.cancelStartupButton.visible = false;
+        this.addRenderableWidget(this.cancelStartupButton);
         GuiClientState.setListener(this);
     }
 
@@ -316,6 +340,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.nextButton.active = liveCtl;
         this.seekBackButton.active = liveCtl;
         this.seekForwardButton.active = liveCtl;
+        // 加入/离开按观看态互斥置灰（与右列 ▶ 标记同一数据源：BE 同步的 WatchingPlayers）
+        boolean selfWatching = this.isSelfWatching();
+        this.joinButton.active = !selfWatching;
+        this.leaveButton.active = selfWatching;
+        // 起播等待可视化：取消按钮仅在解析/加载期间可点
+        var spState = ScreenPlayerManager.get(this.screenPos);
+        this.cancelStartupButton.visible = spState.player != null && !spState.everPlayed;
         // 直链提交按钮随屏幕状态切换语义；右侧两面板低频刷新（BE NBT 同步与 TabList 解析均有延迟）
         var screen = this.boundScreen();
         if (this.playUrlButton != null) {
@@ -424,13 +455,39 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         return sb.toString();
     }
 
-    /** 右上视频预览：把绑定屏幕的动态纹理按比例 blit 进区域，无帧时画占位 */
+    /** 右上视频预览：把绑定屏幕的动态纹理按比例 blit 进区域，无帧时画占位/等待/失败状态 */
     private void drawPreview(GuiGraphicsExtractor graphics, int x, int y, int areaW, int areaH) {
         graphics.fill(x, y, x + areaW, y + areaH, 0xFF000000);
         var tex = VideoScreenRenderer.getScreenTexture(this.screenPos);
         var player = this.getPlayer();
+        var sp = ScreenPlayerManager.get(this.screenPos);
+        long now = System.currentTimeMillis();
+        boolean starting = player != null && !sp.everPlayed;
+        boolean failed = player == null && sp.lastFailedAt > 0 && now - sp.lastFailedAt < 20000
+            && sp.lastFailedUrl.equals(this.boundScreen() != null ? this.boundScreen().getEpisodeUrl() : "");
         if (tex == null || !tex.hasValidFrame() || player == null
                 || player.getWidth() <= 0 || player.getHeight() <= 0) {
+            if (starting) {
+                // 起播等待：已耗时秒数 + 阶段说明（取消按钮由 tick 控制可见性）
+                long sec = Math.max(0, (now - sp.playbackStartedAt) / 1000);
+                graphics.centeredText(this.font, Component.translatable(
+                        "kazumiplayer.gui.main.startup_status", String.valueOf(sec)),
+                    x + areaW / 2, y + areaH / 2 - 10, 0xFFCCCCCC);
+                var be = this.boundScreen();
+                boolean episodeContext = be != null && !be.getEpisodeData().isEmpty()
+                    && !me.zuogeren.kazumiplayer.util.DirectLinkQueue.isQueueData(be.getEpisodeData());
+                Component detail = episodeContext
+                    ? Component.translatable("kazumiplayer.gui.main.startup_episode",
+                        String.valueOf(be.getEpisodeIndex()))
+                    : Component.translatable("kazumiplayer.gui.main.startup_hint");
+                graphics.centeredText(this.font, detail, x + areaW / 2, y + areaH / 2 + 6, 0xFF667788);
+                return;
+            }
+            if (failed) {
+                graphics.centeredText(this.font, Component.translatable(
+                        "kazumiplayer.gui.main.fail_banner"), x + areaW / 2, y + areaH / 2 - 4, 0xFFFF8888);
+                return;
+            }
             graphics.centeredText(this.font, Component.translatable("kazumiplayer.gui.main.preview_no_signal"), x + areaW / 2, y + areaH / 2 - 4, 0xFF888888);
             return;
         }
@@ -441,6 +498,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         int px = x + (areaW - pw) / 2;
         int py = y + (areaH - ph) / 2;
         graphics.blit(tex.getTextureId(), px, py, px + pw, py + ph, 0.0F, 1.0F, 0.0F, 1.0F);
+    }
+
+    /** 取消起播：放弃在途嗅探并退出本屏同步（服务端 leaveOwn 停本端播放，不动其他观看者） */
+    private void cancelStartup() {
+        me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance()
+            .cancelResolve(this.screenPos);
+        this.sendAction(GuiProtocol.ACTION_LEAVE, "{}");
     }
 
     // ---- 数据到达（网络线程已 enqueueWork 到主线程）----
@@ -520,8 +584,10 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 var item = this.bangumiItems.get(i);
                 String date = item.date().isEmpty() ? "" : " (" + item.date() + ")";
                 final var selected = item;
-                this.searchList.addRow(Component.literal((i + 1) + ". " + item.name() + date), -1,
-                    () -> this.selectSubject(selected));
+                this.searchList.addDoubleClickableRow(
+                    Component.literal((i + 1) + ". " + item.name() + date), -1,
+                    () -> this.selectSubject(selected),
+                    () -> this.searchSubject(selected));
             }
         } else if (this.listView == ListView.RULE) {
             for (int i = 0; i < this.ruleItems.size(); i++) {
@@ -550,17 +616,24 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         }
     }
 
-    /** 点击番剧 → 在全部规则中搜索该名（对齐聊天 [查源]），并记录简介 */
+    /** 单击番剧结果：仅选中并显示简介，不发网络请求（重操作留给双击，防误点全源搜源） */
     private void selectSubject(GuiPayloads.BangumiResultItem item) {
+        this.searchList.clearRowHighlights();
         this.subjectName = item.name();
         this.subjectSummary = item.summary();
         this.summaryWidget.setMessage(Component.literal(
             this.subjectSummary.isEmpty() ? Component.translatable("kazumiplayer.gui.main.summary_none").getString() : this.subjectSummary));
+        setStatus(Component.translatable("kazumiplayer.gui.main.status_subject_selected", item.name()));
         // 切换番剧：清空上一部作品的选中状态与选集，避免残留误导
         this.selectedRule = "";
         this.selectedResultId = "";
         this.episodeNames = List.of();
         this.rebuildEpisodeList();
+    }
+
+    /** 双击番剧结果：在全部规则中搜索该名（对齐聊天 [查源]） */
+    private void searchSubject(GuiPayloads.BangumiResultItem item) {
+        this.subjectName = item.name();
         setStatus(Component.translatable("kazumiplayer.gui.main.status_search_all", item.name()));
         this.lastKeyword = item.name();
         this.sendAction(GuiProtocol.ACTION_SEARCH_RULE,
@@ -721,6 +794,15 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
     // ---- 操作 ----
 
+    /** 本地玩家是否在当前屏幕的观看者列表中（UUID 精确比对，与客户端起播条件同源） */
+    private boolean isSelfWatching() {
+        var mc = Minecraft.getInstance();
+        var screen = this.boundScreen();
+        if (mc.player == null || screen == null || screen.getWatchingPlayers().isEmpty()) return false;
+        return java.util.Arrays.asList(screen.getWatchingPlayers().split(","))
+            .contains(mc.player.getUUID().toString());
+    }
+
     private void playDirectUrl() {
         String url = this.urlEdit.getValue().trim();
         if (url.isEmpty()) return;
@@ -800,6 +882,10 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             : (this.searchSource.length() > 5
                 ? this.searchSource.substring(0, 4) + "…" : this.searchSource);
         this.sourceButton.setMessage(Component.literal(label));
+        // 截断显示时悬停展示完整来源名（同名前缀规则可区分）
+        boolean truncated = !this.searchSource.isEmpty() && this.searchSource.length() > 5;
+        this.sourceButton.setTooltip(truncated
+            ? net.minecraft.client.gui.components.Tooltip.create(Component.literal(this.searchSource)) : null);
     }
 
     private void playEpisode(int ep) {
@@ -886,6 +972,61 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
     private WaterMediaPlayer getPlayer() {
         return ScreenPlayerManager.getPlayer(this.screenPos);
+    }
+
+    /** 静音开关：翻状态并即时应用，同步滑块与按钮显示 */
+    private void toggleMute() {
+        var sp = ScreenPlayerManager.get(this.screenPos);
+        sp.muted = !sp.muted;
+        var p = this.getPlayer();
+        if (p != null) p.applyVolumeFromOptions(sp.muted ? 0f : sp.volumeScale);
+        this.refreshVolumeControls();
+    }
+
+    /** 音量控件回显当前状态（拖动中的滑块由其自身管理，不覆盖） */
+    private void refreshVolumeControls() {
+        if (this.volumeSlider == null || this.muteButton == null) return;
+        var sp = ScreenPlayerManager.get(this.screenPos);
+        this.volumeSlider.refresh(sp.muted ? 0f : sp.volumeScale);
+        this.muteButton.setMessage(Component.translatable(sp.muted
+            ? "kazumiplayer.gui.main.btn_unmute" : "kazumiplayer.gui.main.btn_mute"));
+    }
+
+    /**
+     * 本屏音量滑块：直接改 ScreenPlayer 状态并即时应用（无服务端交互）；
+     * 静音时有效值为 0，解除静音回到 volumeScale。
+     */
+    private class VolumeSlider extends AbstractSliderButton {
+
+        private VolumeSlider(int x, int y, int w, int h) {
+            // super 调用前不能触碰本类实例方法：直接经静态注册表读取初始值
+            super(x, y, w, h, Component.literal(""),
+                ScreenPlayerManager.get(screenPos).muted ? 0f
+                    : ScreenPlayerManager.get(screenPos).volumeScale);
+            updateMessage();
+        }
+
+        /** 外部状态变化后回显（如静音切换） */
+        void refresh(float newValue) {
+            this.value = newValue;
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.translatable("kazumiplayer.gui.main.volume_slider",
+                String.valueOf(Math.round(this.value * 100))));
+        }
+
+        @Override
+        protected void applyValue() {
+            var sp = ScreenPlayerManager.get(screenPos);
+            sp.muted = false;
+            sp.volumeScale = (float) this.value;
+            var p = getPlayer();
+            if (p != null) p.applyVolumeFromOptions(sp.volumeScale);
+            muteButton.setMessage(Component.translatable("kazumiplayer.gui.main.btn_mute"));
+        }
     }
 
     /**

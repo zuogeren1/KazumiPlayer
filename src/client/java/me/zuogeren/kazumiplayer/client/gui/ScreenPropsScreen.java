@@ -10,16 +10,23 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 屏幕设置独立界面：调整朝向/宽高/XYZ 偏移，即时生效。
+ * 屏幕设置独立界面：调整朝向/宽高/XYZ 偏移。
+ * 朝向与 ± 步进按钮即时生效；数值框文本在失焦或按 Enter 时提交，
+ * 避免逐键发包造成画面抖动（输入"12"不会先应用 1 再应用 12）。
  * 背景完全透明（世界清晰可见），便于对照世界里屏幕的实际位置与大小；
  * 「完成」或 Esc 返回播放器主界面（KazumiPlayerScreen）。
  */
@@ -34,12 +41,13 @@ public class ScreenPropsScreen extends Screen implements Listener {
     private GuiPayloads.ScreenPropsPayload props =
         new GuiPayloads.ScreenPropsPayload(0, 0, 0, "north", 3.0f, 2.0f);
 
-    private EditBox widthBox;
-    private EditBox heightBox;
-    private EditBox offXBox;
-    private EditBox offYBox;
-    private EditBox offZBox;
     private Button frameToggle;
+    /** 数值框提交绑定：setter 应用文本值，getter 取当前权威值用于回写显示 */
+    private record PropBinding(java.util.function.Consumer<Float> setter,
+                               java.util.function.Supplier<Float> getter) {}
+
+    /** 数值框 → 提交绑定：文本在 Enter/失焦时应用，init 重建（resize）后重填 */
+    private final Map<EditBox, PropBinding> propCommits = new LinkedHashMap<>();
 
     private static String frameLabel() {
         return frameLabel(me.zuogeren.kazumiplayer.screen.VideoScreenRenderer.isShowFrameWhilePlaying());
@@ -92,11 +100,12 @@ public class ScreenPropsScreen extends Screen implements Listener {
         addPropButton("◀", px + 66, py + 26, () -> cycleFacing(-1));
         addPropButton("▶", px + pw - 84, py + 26, () -> cycleFacing(1));
 
-        widthBox = propEdit(editX, py + 54, editW, v -> setWidth(v));
-        heightBox = propEdit(editX, py + 76, editW, v -> setHeight(v));
-        offXBox = propEdit(editX, py + 102, editW, v -> setOffsetAxis(0, v));
-        offYBox = propEdit(editX, py + 124, editW, v -> setOffsetAxis(1, v));
-        offZBox = propEdit(editX, py + 146, editW, v -> setOffsetAxis(2, v));
+        propCommits.clear();
+        propCommits.put(propEdit(editX, py + 54, editW), new PropBinding(this::setWidth, () -> props.width()));
+        propCommits.put(propEdit(editX, py + 76, editW), new PropBinding(this::setHeight, () -> props.height()));
+        propCommits.put(propEdit(editX, py + 102, editW), new PropBinding(v -> setOffsetAxis(0, v), () -> props.offsetX()));
+        propCommits.put(propEdit(editX, py + 124, editW), new PropBinding(v -> setOffsetAxis(1, v), () -> props.offsetY()));
+        propCommits.put(propEdit(editX, py + 146, editW), new PropBinding(v -> setOffsetAxis(2, v), () -> props.offsetZ()));
 
         addPropButton("-", minusX, py + 54, () -> setWidth(props.width() - 0.5f));
         addPropButton("+", plusX, py + 54, () -> setWidth(props.width() + 0.5f));
@@ -129,8 +138,30 @@ public class ScreenPropsScreen extends Screen implements Listener {
 
     @Override
     public void removed() {
+        // 关闭前提交未确认的编辑（Esc/按钮关闭等路径的兜底；等值输入在 setter 内早退）
+        commitEdits();
         GuiClientState.removeListenerIfOwner(this);
         super.removed();
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        // Enter 提交全部数值框的待定文本（不关闭界面）
+        if (event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) {
+            commitEdits();
+            return true;
+        }
+        return super.keyPressed(event);
+    }
+
+    /** 焦点离开数值框（点击别处/Tab/点按钮）即提交其文本，实现失焦提交 */
+    @Override
+    public void setFocused(GuiEventListener listener) {
+        if (this.getFocused() instanceof EditBox leaving && this.getFocused() != listener
+                && propCommits.containsKey(leaving)) {
+            commitBox(leaving);
+        }
+        super.setFocused(listener);
     }
 
     @Override
@@ -225,13 +256,12 @@ public class ScreenPropsScreen extends Screen implements Listener {
         }
     }
 
-    /** 用权威值刷新各输入框；框内已等价（含正在输入的中间态）时不动，避免打断手动输入 */
+    /** 用权威值刷新各输入框；焦点框是用户的待定输入不覆盖（其失焦/Enter 时才提交） */
     private void syncEditors() {
-        syncEdit(widthBox, props.width());
-        syncEdit(heightBox, props.height());
-        syncEdit(offXBox, props.offsetX());
-        syncEdit(offYBox, props.offsetY());
-        syncEdit(offZBox, props.offsetZ());
+        for (var entry : propCommits.entrySet()) {
+            if (entry.getKey() == this.getFocused()) continue;
+            syncEdit(entry.getKey(), entry.getValue().getter().get());
+        }
     }
 
     private static void syncEdit(EditBox box, float v) {
@@ -255,7 +285,12 @@ public class ScreenPropsScreen extends Screen implements Listener {
     }
 
     private void addPropButton(String label, int x, int y, Runnable action) {
-        var b = Button.builder(Component.literal(label), btn -> action.run()).bounds(x, y, 18, 16).build();
+        // 步进/朝向即时生效；若数值框有未提交文本先落账，避免基于过期值步进
+        //（原版事件顺序是按钮 onPress 先于焦点转移触发失焦提交，此处须显式前置）
+        var b = Button.builder(Component.literal(label), btn -> {
+            commitEdits();
+            action.run();
+        }).bounds(x, y, 18, 16).build();
         this.addRenderableWidget(b);
     }
 
@@ -264,18 +299,32 @@ public class ScreenPropsScreen extends Screen implements Listener {
         this.addRenderableWidget(b);
     }
 
-    /** 数值输入框：输入合法即提交（提交内部有等值早退，回显不会打断手动输入） */
-    private EditBox propEdit(int x, int y, int width, java.util.function.Consumer<Float> commit) {
+    /** 提交全部数值框的待定文本（等值输入由 setter 早退，非法文本静默跳过） */
+    private void commitEdits() {
+        for (var entry : propCommits.entrySet()) {
+            commitBox(entry.getKey());
+        }
+    }
+
+    /** 解析并应用单个数值框文本；解析失败静默跳过（保留用户文本便于继续修正），提交后回写 clamp 纠正值 */
+    private void commitBox(EditBox box) {
+        var binding = propCommits.get(box);
+        if (binding == null) return;
+        var t = box.getValue().trim();
+        if (t.isEmpty()) return;
+        try {
+            float v = Float.parseFloat(t);
+            if (!Float.isNaN(v) && !Float.isInfinite(v)) {
+                binding.setter().accept(v);
+                syncEdit(box, binding.getter().get());
+            }
+        } catch (NumberFormatException ignored) {}
+    }
+
+    /** 数值输入框：不逐键提交，文本在 Enter/失焦时经 commitBox 应用（±步进按钮保持即时） */
+    private EditBox propEdit(int x, int y, int width) {
         var e = new EditBox(this.font, x, y, width, 16, Component.literal(""));
         e.setMaxLength(9);
-        e.setResponder(text -> {
-            var t = text.trim();
-            if (t.isEmpty()) return;
-            try {
-                float v = Float.parseFloat(t);
-                if (!Float.isNaN(v) && !Float.isInfinite(v)) commit.accept(v);
-            } catch (NumberFormatException ignored) {}
-        });
         this.addRenderableWidget(e);
         return e;
     }

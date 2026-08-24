@@ -225,6 +225,29 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
             addVideoQuad(buffer, pose, fXMin, fXMax, fYMin, fYMax, z, uMin, uMax, vMin, vMax);
         });
 
+        // 重缓冲冻结指示：播放中但时间戳停滞——视频面右上角琥珀色呼吸方块
+        var bufferSp = me.zuogeren.kazumiplayer.client.ScreenPlayerManager.get(state.blockPos);
+        if (!bufferSp.bypassSync && bufferSp.isBufferingFrozen()) {
+            float pulse = 0.6f + 0.4f * (float) Math.sin(System.currentTimeMillis() / 170.0);
+            int c = (int) (0xD0 * pulse) << 24 | 0xFFB000;
+            float s = Math.max(0.06f, halfH * 0.14f);
+            float mgap = Math.max(0.02f, halfH * 0.04f);
+            collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(WHITE_TEX),
+                (pose, buffer) -> fillBar(buffer, pose,
+                    fXMax - s - mgap, fXMax - mgap, fYMax - s - mgap, fYMax - mgap, 0.48f, c));
+        }
+
+        // 起播等待指示：解析/加载尚未出画——视频面左上角蓝色慢呼吸方块（与缓冲角标对侧）
+        if (!bufferSp.bypassSync && bufferSp.player != null && !bufferSp.everPlayed) {
+            float pulse = 0.55f + 0.45f * (float) Math.sin(System.currentTimeMillis() / 320.0);
+            int c = (int) (0xC8 * pulse) << 24 | 0x66Aaff;
+            float s = Math.max(0.06f, halfH * 0.14f);
+            float mgap = Math.max(0.02f, halfH * 0.04f);
+            collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(WHITE_TEX),
+                (pose, buffer) -> fillBar(buffer, pose,
+                    fXMin + mgap, fXMin + mgap + s, fYMax - s - mgap, fYMax - mgap, 0.48f, c));
+        }
+
         // 播放中叠加显示屏幕面边框（屏幕设置内开关控制）：
         // 空心描边（四条窄条，紧贴视频面前缘 z=0.485），只框出设置范围、不遮挡画面内容
         if (showFrameWhilePlaying) {

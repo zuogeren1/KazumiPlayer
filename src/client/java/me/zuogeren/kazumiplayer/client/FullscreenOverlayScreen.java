@@ -66,13 +66,37 @@ public class FullscreenOverlayScreen extends Screen {
             ClientFullscreenState.exit();
             return true;
         }
+        // 观影快捷键：空格暂停/继续、←→ ±10s、↑↓ 本屏音量、M 静音（直播直连屏由各动作自行忽略）
+        switch (event.key()) {
+            case GLFW.GLFW_KEY_SPACE -> ClientFullscreenState.togglePause();
+            case GLFW.GLFW_KEY_LEFT -> ClientFullscreenState.seekBy(-10);
+            case GLFW.GLFW_KEY_RIGHT -> ClientFullscreenState.seekBy(10);
+            case GLFW.GLFW_KEY_UP -> ClientFullscreenState.adjustVolume(5);
+            case GLFW.GLFW_KEY_DOWN -> ClientFullscreenState.adjustVolume(-5);
+            case GLFW.GLFW_KEY_M -> ClientFullscreenState.toggleMute();
+            default -> { }
+        }
         return true; // 其余按键一律吞掉，保持纯观影锁定
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (ClientFullscreenState.handleControlClick(event.x(), event.y())) return true;
         if (ClientFullscreenState.tryExitAt(event.x(), event.y())) return true;
         return true; // 吞掉全部点击，不下发给世界
+    }
+
+    /** 按住拖动进度条：MouseHandler 在按键按住期间每次移动都会派发 mouseDragged */
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+        ClientFullscreenState.updateSeekDrag(event.x());
+        return true;
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        ClientFullscreenState.finishSeekDrag();
+        return true;
     }
 
     @Override

@@ -34,6 +34,15 @@ public final class VideoSourceResolver {
     private final VideoSourceResolverPool pool = new VideoSourceResolverPool();
     private volatile boolean poolSized;
 
+    /** 预解析结果缓存：每屏至多一条（下一集），切换到对应 URL 时直接消费免嗅探 */
+    private final java.util.Map<String, PrefetchEntry> prefetches = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 预解析结果有效期：嗅探产物常含 CDN 时效令牌，超期不再复用 */
+    private static final long PREFETCH_TTL_MS = 300_000L;
+
+    private record PrefetchEntry(String episodeUrl, long createdAt,
+                                 java.util.concurrent.CompletableFuture<VideoSource> future) {}
+
     private VideoSourceResolver() {}
 
     /**
@@ -71,14 +80,68 @@ public final class VideoSourceResolver {
         pool.cancelAll();
     }
 
-    /** 取消指定屏幕的在途解析并回收其租约（URL 切换停旧播放器时调用） */
+    /** 取消指定屏幕的在途解析并回收其租约（URL 切换停旧播放器时调用）。
+     * 预解析缓存条目保留：集间切换的主路径恰好在 URL 变更时消费它（在途租约由 pool.cancel 回收，
+     * 被取消的 future 留存于条目中，消费端按「已取消→回落常规解析」处理）。 */
     public void cancelResolve(net.minecraft.core.BlockPos pos) {
         pool.cancel(pos.toString());
+    }
+
+    /**
+     * 预解析下一集：当前集稳定播放时由调度器调用，借用空闲租约提前完成嗅探。
+     * 结果缓存于 {@link #prefetches}（每屏一条、按 URL 匹配消费）；租约不足时静默放弃。
+     * 直链与直播播放列表不预解析——前者无需嗅探，后者时间轴语义不同。
+     */
+    public void prefetchNext(net.minecraft.core.BlockPos pos, String episodeUrl) {
+        if (episodeUrl == null || episodeUrl.isBlank()
+                || looksLikeDirectVideo(episodeUrl) || isLivePlaylistUrl(episodeUrl)) {
+            return;
+        }
+        String key = pos.toString();
+        PrefetchEntry existing = prefetches.get(key);
+        if (existing != null && existing.episodeUrl().equals(episodeUrl)) return;
+        sizePoolOnce();
+        VideoSourceResolverPool.Lease lease = pool.tryAcquire(key);
+        if (lease == null) return; // 无空闲租约：静默放弃，切换时走常规解析
+        long startedAt = System.currentTimeMillis();
+        Duration timeout = Duration.ofSeconds(ClientConfig.CONFIG.sniffTimeoutSeconds.get());
+        var future = lease.resolve(episodeUrl, false, timeout)
+            .whenComplete((v, t) -> pool.release(lease));
+        prefetches.put(key, new PrefetchEntry(episodeUrl, startedAt, future));
+        future.whenComplete((v, t) -> {
+            if (t != null) {
+                KazumiLog.sniff.debug("[source] prefetch failed for {} ({}), will resolve on demand",
+                    key, unwrap(t).getMessage());
+            } else {
+                KazumiLog.sniff.info("[source] prefetched next episode for {} in {}ms",
+                    key, System.currentTimeMillis() - startedAt);
+            }
+        });
     }
 
     private void resolveWithRetry(VideoScreenBlockEntity screen, String episodeUrl,
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session, int attempt) {
         String key = screen.getBlockPos().toString();
+
+        // 命中预解析缓存：URL 匹配且未过期（嗅探产物常含 CDN 时效令牌）才复用；
+        // 不匹配/过期的陈旧条目已随 remove 丢弃，继续走常规解析。
+        // 消费的是「现在就要起播」的 URL，因此取消态同样回落常规解析（重新嗅探）而非放弃
+        PrefetchEntry pref = prefetches.remove(key);
+        if (pref != null && attempt == 0 && pref.episodeUrl().equals(episodeUrl)
+                && System.currentTimeMillis() - pref.createdAt() <= PREFETCH_TTL_MS) {
+            KazumiLog.sniff.info("[source] using prefetched resolution at {} for {}", key, episodeUrl);
+            pref.future()
+                .thenAccept(source -> startWhenValid(screen, session, player, source.url()))
+                .exceptionally(t -> {
+                    // 预解析结果不可用或已被取消：回落常规解析链路（含重试）
+                    KazumiLog.sniff.debug("[source] prefetch unusable ({}), resolving on demand",
+                        unwrap(t).getMessage());
+                    resolveWithRetry(screen, episodeUrl, player, session, 0);
+                    return null;
+                });
+            return;
+        }
+
         // 换集/重播场景：先取消该屏在途解析再取租约
         pool.cancel(key);
         VideoSourceResolverPool.Lease lease = pool.tryAcquire(key);

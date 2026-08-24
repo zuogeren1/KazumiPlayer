@@ -132,11 +132,16 @@ public class WaterMediaPlayer {
      * 乘以客户端配置的默认视频音量 videoVolume 作为总系数。
      */
     public void applyVolumeFromOptions() {
+        applyVolumeFromOptions(1f);
+    }
+
+    /** 同上并叠加每屏独立系数（volumeScale；静音时传 0） */
+    public void applyVolumeFromOptions(float extraScale) {
         if (player == null) return;
         float vol = Minecraft.getInstance().options.getSoundSourceVolume(
             net.minecraft.sounds.SoundSource.RECORDS);
         float configured = me.zuogeren.kazumiplayer.ClientConfig.CONFIG.videoVolume.get().floatValue();
-        player.volume((int) (vol * configured * 100));
+        player.volume((int) (vol * configured * extraScale * 100));
     }
 
     public boolean isPlaying() {

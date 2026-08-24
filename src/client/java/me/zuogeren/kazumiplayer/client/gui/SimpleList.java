@@ -54,6 +54,17 @@ public class SimpleList extends AbstractSelectionList<SimpleList.Row> {
             rowBgColor, List.copyOf(tailCells), tailCellWidth, true));
     }
 
+    /** 双击行：单击仅选中高亮并回调 onSelect，双击才回调 onActivate（重操作防误触） */
+    public void addDoubleClickableRow(Component text, int color, Runnable onSelect, Runnable onActivate) {
+        this.addEntry(new Row(List.of(new Cell(text.getString(), onSelect)), color,
+            0, List.of(), 0, false, onSelect, onActivate));
+    }
+
+    /** 清除所有行的选中高亮（切换选中项时由调用方在回调内先行调用） */
+    public void clearRowHighlights() {
+        for (Row r : this.children()) r.selectedCell = -1;
+    }
+
     @Override
     public int getRowWidth() {
         return this.width - 8;
@@ -81,6 +92,8 @@ public class SimpleList extends AbstractSelectionList<SimpleList.Row> {
 
     public static class Row extends AbstractSelectionList.Entry<Row> {
         private static final int PAD = 4;
+        /** 悬停 tooltip 的换行宽度（px） */
+        private static final int TOOLTIP_WRAP = 200;
 
         private final List<Cell> cells;
         private final int color;
@@ -88,6 +101,8 @@ public class SimpleList extends AbstractSelectionList<SimpleList.Row> {
         private final List<Cell> tailCells;   // 尾缀操作格，空列表表示普通行
         private final int tailCellWidth;
         private final boolean mainNeedsDoubleClick; // 主格双击才触发（队列切播防误触）
+        private final Runnable onSelect;      // 单击选中回调（与 onActivate 配对；可空）
+        private final Runnable onActivate;    // 双击激活回调（重操作，可空）
         private int selectedCell = -1;
 
         public Row(List<Cell> cells, int color) {
@@ -96,12 +111,19 @@ public class SimpleList extends AbstractSelectionList<SimpleList.Row> {
 
         public Row(List<Cell> cells, int color, int rowBgColor, List<Cell> tailCells,
                 int tailCellWidth, boolean mainNeedsDoubleClick) {
+            this(cells, color, rowBgColor, tailCells, tailCellWidth, mainNeedsDoubleClick, null, null);
+        }
+
+        public Row(List<Cell> cells, int color, int rowBgColor, List<Cell> tailCells,
+                int tailCellWidth, boolean mainNeedsDoubleClick, Runnable onSelect, Runnable onActivate) {
             this.cells = cells;
             this.color = color;
             this.rowBgColor = rowBgColor;
             this.tailCells = tailCells;
             this.tailCellWidth = tailCellWidth;
             this.mainNeedsDoubleClick = mainNeedsDoubleClick;
+            this.onSelect = onSelect;
+            this.onActivate = onActivate;
         }
 
         /** 主格宽度：行宽扣除左右 PAD 与尾缀格后均分 */
@@ -129,6 +151,14 @@ public class SimpleList extends AbstractSelectionList<SimpleList.Row> {
                 int cx = this.getX() + PAD + i * cellW;
                 String s = mc.font.plainSubstrByWidth(this.cells.get(i).text(), cellW - 6);
                 graphics.text(mc.font, Component.literal(s), cx, textY, this.color);
+                // 悬停且文本被截断时以 tooltip 显示全文
+                if (hovered && mouseX >= cx && mouseX < cx + cellW
+                        && mouseY >= this.getY() && mouseY < this.getY() + this.getHeight()
+                        && mc.font.width(this.cells.get(i).text()) > cellW - 6) {
+                    graphics.setTooltipForNextFrame(mc.font,
+                        mc.font.split(Component.literal(this.cells.get(i).text()), TOOLTIP_WRAP),
+                        mouseX, mouseY);
+                }
             }
             for (int i = 0; i < this.tailCells.size(); i++) {
                 Cell cell = this.tailCells.get(i);
@@ -172,6 +202,17 @@ public class SimpleList extends AbstractSelectionList<SimpleList.Row> {
             int cellW = this.cellWidth();
             if (mx < this.getX() + PAD || mx >= this.getX() + PAD + cellW * this.cells.size()) return false;
             int idx = (int) ((mx - this.getX() - PAD) / cellW);
+            // 双击行：双击触发重操作；单击仅选中高亮（回调内可刷新列表/显示详情）
+            if (doubleClick && this.onActivate != null) {
+                this.onActivate.run();
+                this.selectedCell = idx;
+                return true;
+            }
+            if (this.onSelect != null && !doubleClick) {
+                this.onSelect.run();
+                this.selectedCell = idx;
+                return true;
+            }
             Runnable onClick = this.cells.get(idx).onClick();
             if (onClick == null) return false;
             if (this.mainNeedsDoubleClick && !doubleClick) return true; // 单击吞掉不触发，防误触

@@ -2,6 +2,7 @@ package me.zuogeren.kazumiplayer.client;
 
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
 import me.zuogeren.kazumiplayer.network.packet.PositionReportPacket;
+import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import net.minecraft.client.Minecraft;
@@ -9,6 +10,8 @@ import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+
+import java.util.List;
 
 /**
  * 客户端播放调度核心（每秒一轮，从 ClientDisconnectHandler.onClientTick 拆出）：
@@ -142,6 +145,7 @@ public class ClientPlaybackScheduler {
             sp.endedNotified = true; // 防止新播放器初始化期间误触发 isEnded()
             sp.everPlayed = false;
             sp.anchorReported = false; // 新集重新做首帧锚定上报
+            sp.nextPrefetched = false; // 新集重新评估下一集预解析
             long seekMs = screen.getSyncPositionMs();
             if (sp.player != null && seekMs > 0) sp.player.seek(seekMs);
             // 启动快照：屏幕处于暂停时立即暂停（不再依赖每秒轮询）
@@ -156,9 +160,16 @@ public class ClientPlaybackScheduler {
         if (sp.player != null && sp.player.hasPendingSeek() && sp.player.isPlaying()) {
             sp.player.applyPendingSeek();
         }
-        // 音量（暂停/恢复状态由 SyncStatePacket 推送，不再每秒轮询 NBT）
+        // 音量：RECORDS×videoVolume 总量之上叠加每屏独立系数（静音为 0）
+        //（暂停/恢复状态由 SyncStatePacket 推送，不再每秒轮询 NBT）
         if (sp.player != null) {
-            sp.player.applyVolumeFromOptions();
+            sp.player.applyVolumeFromOptions(sp.muted ? 0f : sp.volumeScale);
+            // 缓冲冻结跟踪：位置推进即刷新时刻，供渲染层停滞判定（重缓冲指示）
+            long time = sp.player.getTimeMs();
+            if (time != sp.lastTimeMs) {
+                sp.lastTimeMs = time;
+                sp.lastTimeAdvancedAt = System.currentTimeMillis();
+            }
         }
         // 检测播放完毕 → 自动下一集
         if (sp.player != null) {
@@ -176,6 +187,15 @@ public class ClientPlaybackScheduler {
                         mc.getConnection().send(new ServerboundCustomPayloadPacket(
                             new PositionReportPacket(screen.getBlockPos(), screen.getScreenId(),
                                 sp.player.getTimeMs())));
+                    }
+                }
+                // 稳定播放中：借用空闲租约预解析下一集（每集一次），消除集间嗅探黑窗
+                if (!sp.bypassSync && !sp.nextPrefetched) {
+                    sp.nextPrefetched = true;
+                    String nextUrl = findNextEpisodeUrl(screen);
+                    if (nextUrl != null) {
+                        me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance()
+                            .prefetchNext(screen.getBlockPos(), nextUrl);
                     }
                 }
             }
@@ -218,6 +238,23 @@ public class ClientPlaybackScheduler {
 
     // ---- 队列容错：播放失败自动跳过 ----
 
+    /**
+     * 从 BE 剧集数据解析当前线路的下一集 URL（无数据/末集返回 null）。
+     * 供预解析触发：仅读 NBT 快照，不做任何服务端交互。
+     */
+    private static String findNextEpisodeUrl(VideoScreenBlockEntity screen) {
+        String data = screen.getEpisodeData();
+        if (data.isEmpty()) return null;
+        List<Road> roads = me.zuogeren.kazumiplayer.util.JsonUtil.GSON.fromJson(data,
+            new com.google.gson.reflect.TypeToken<List<Road>>() {}.getType());
+        if (roads == null || roads.isEmpty()) return null;
+        int ri = Math.max(0, Math.min(screen.getRoadIndex(), roads.size() - 1));
+        Road road = roads.get(ri);
+        int next = screen.getEpisodeIndex() + 1; // 1-based 当前项的下一项
+        if (next < 1 || next > road.data().size()) return null;
+        return road.data().get(next - 1);
+    }
+
     /** 同一屏幕跳过请求的最小重发间隔（服务端处理与 URL 变更同步均有延迟，防抖动重复发送） */
     private static final long SKIP_RESEND_COOLDOWN_MS = 3000;
     private static long lastSkipSentAt;
@@ -234,6 +271,9 @@ public class ClientPlaybackScheduler {
             var current = ScreenPlayerManager.get(screen.getBlockPos());
             if (current.player != player) return; // 该播放器已被替换/停止，失败属于旧集
             if (mc.getConnection() == null) return;
+            // 记录失败快照：GUI/全屏据此在窗口期内展示失败横幅与指引
+            current.lastFailedUrl = screen.getEpisodeUrl();
+            current.lastFailedAt = System.currentTimeMillis();
             long now = System.currentTimeMillis();
             if (now - lastSkipSentAt < SKIP_RESEND_COOLDOWN_MS) return;
             lastSkipSentAt = now;

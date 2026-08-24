@@ -13,6 +13,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class ScreenPlayerManager {
 
+    /** 播放位置停滞判定为重缓冲的阈值 */
+    public static final long BUFFER_FREEZE_MS = 1500L;
+
     /** 单个屏幕的客户端播放状态 */
     public static class ScreenPlayer {
         public WaterMediaPlayer player;
@@ -30,6 +33,27 @@ public final class ScreenPlayerManager {
          * 新起播前由调度器复位，直播直链起播时置位。
          */
         public boolean bypassSync;
+        /** 本屏独立音量系数（0..1），叠加在 RECORDS×videoVolume 总量之上 */
+        public float volumeScale = 1f;
+        /** 本屏静音（独立于全局音量；解除后回到 volumeScale） */
+        public boolean muted;
+        /** 缓冲冻结检测：播放位置最近一次推进的时刻（本地墙钟，纯客户端判定） */
+        public long lastTimeMs;
+        public long lastTimeAdvancedAt;
+        /** 最近一次播放失败记录（URL+时刻）：供 GUI/全屏失败横幅展示（20s 窗口） */
+        public String lastFailedUrl = "";
+        public long lastFailedAt;
+        /** 本集是否已触发下一集预解析（每次新起播复位） */
+        public boolean nextPrefetched;
+
+        /**
+         * 重缓冲冻结判定：已出画、播放中，但播放位置停滞超过阈值。
+         * 起播解析期（everPlayed 前）与暂停态天然不在列；直播直连屏时间轴无此语义，调用方另行排除。
+         */
+        public boolean isBufferingFrozen() {
+            return everPlayed && player != null && player.isPlaying()
+                && System.currentTimeMillis() - lastTimeAdvancedAt > BUFFER_FREEZE_MS;
+        }
     }
 
     private static final Map<BlockPos, ScreenPlayer> players = new ConcurrentHashMap<>();
@@ -43,6 +67,16 @@ public final class ScreenPlayerManager {
     public static WaterMediaPlayer getPlayer(BlockPos pos) {
         ScreenPlayer sp = players.get(pos);
         return sp == null ? null : sp.player;
+    }
+
+    /** 切换某屏静音并即时应用到其播放器（无播放器时仅翻状态）；@return 切换后是否静音 */
+    public static boolean toggleMuted(BlockPos pos) {
+        var sp = get(pos);
+        sp.muted = !sp.muted;
+        if (sp.player != null) {
+            sp.player.applyVolumeFromOptions(sp.muted ? 0f : sp.volumeScale);
+        }
+        return sp.muted;
     }
 
     /** 全部屏幕播放状态（兜底清理用） */

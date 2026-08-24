@@ -159,12 +159,12 @@ public final class QueueRequestHandlers {
             return null;
         }
         int cur = Math.max(1, Math.min(screen.getEpisodeIndex(), urls.size()));
-        String label = labelAt(urls, cur);
         if (urls.size() == 1) {
             stopLocalOnly(sp, screenPos, screen);
             KazumiLog.network.info("Queue skip-current (single item) at {}, stopped requester only", screenPos.toShortString());
             return null;
         }
+        String label = labelAt(urls, cur);
         List<String> remaining = new ArrayList<>(urls);
         remaining.remove(cur - 1);
         int next = Math.min(cur, remaining.size()); // 原 cur+1 删除后仍在原下标；末项取新末尾

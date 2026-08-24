@@ -90,7 +90,8 @@ public class GuiRequestHandlers {
     private static void searchBangumi(ServerPlayer sp, String payloadJson) {
         var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.SearchBangumiPayload.class);
         if (payload == null || payload.keyword().isBlank()) return;
-        bangumiApi.search(payload.keyword(), 50, 0)
+        // 聚合分页拉取完整结果（bgm 端点每页恒 20 条），客户端列表滚动浏览、不翻页
+        bangumiApi.searchAll(payload.keyword())
             .thenAccept(subjects -> {
                 List<GuiPayloads.BangumiResultItem> items = new ArrayList<>();
                 for (var s : subjects) {

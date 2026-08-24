@@ -48,6 +48,9 @@ public class KazumiPlayerClient {
         // 客户端渲染器注册
         modEventBus.register(ClientModEvents.class);
 
+        // 快捷键轮询（游戏事件总线：ClientTickEvent.Post 消费按键点击）
+        NeoForge.EVENT_BUS.register(ClientModEvents.class);
+
         // 客户端杂项事件处理（鼠标防御 / krule 命令）
         NeoForge.EVENT_BUS.register(ClientDisconnectHandler.class);
         // 播放调度核心（每秒 tick：对账 + 视频屏幕/音响分派 + 生命周期清理）
