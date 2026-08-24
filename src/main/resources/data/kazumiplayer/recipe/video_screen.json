@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aba",
+    "aca",
+    "ada"
+  ],
+  "key": {
+    "a": "minecraft:stone",
+    "b": "minecraft:glass_pane",
+    "c": "minecraft:glowstone",
+    "d": "minecraft:redstone_block"
+  },
+  "result": {
+    "count": 1,
+    "id": "kazumiplayer:video_screen"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "bab",
+    "bbb"
+  ],
+  "key": {
+    "a": "minecraft:writable_book",
+    "b": "minecraft:paper"
+  },
+  "result": {
+    "count": 1,
+    "id": "kazumiplayer:rule_manager"
+  }
+}

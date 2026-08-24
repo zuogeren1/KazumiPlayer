@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "cac",
+    "bdb",
+    "eee"
+  ],
+  "key": {
+    "a": "minecraft:lightning_rod",
+    "b": "minecraft:lapis_lazuli",
+    "c": "minecraft:lever",
+    "d": "kazumiplayer:remote_viewer",
+    "e": "minecraft:stone_button"
+  },
+  "result": {
+    "count": 1,
+    "id": "kazumiplayer:screen_remote"
+  }
+}

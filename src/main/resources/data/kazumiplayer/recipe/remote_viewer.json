@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "dbd",
+    "aca",
+    "aaa"
+  ],
+  "key": {
+    "a": "minecraft:glass_pane",
+    "b": "minecraft:lightning_rod",
+    "c": "kazumiplayer:video_screen",
+    "d": "minecraft:redstone_torch"
+  },
+  "result": {
+    "count": 1,
+    "id": "kazumiplayer:remote_viewer"
+  }
+}
