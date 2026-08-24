@@ -39,9 +39,18 @@ public class ScreenPropsScreen extends Screen implements Listener {
     private EditBox offXBox;
     private EditBox offYBox;
     private EditBox offZBox;
+    private Button frameToggle;
+
+    private static String frameLabel() {
+        return frameLabel(me.zuogeren.kazumiplayer.screen.VideoScreenRenderer.isShowFrameWhilePlaying());
+    }
+
+    private static String frameLabel(boolean on) {
+        return on ? Component.translatable("kazumiplayer.gui.props.frame_on").getString() : Component.translatable("kazumiplayer.gui.props.frame_off").getString();
+    }
 
     public ScreenPropsScreen(BlockPos screenPos) {
-        super(Component.literal("屏幕设置"));
+        super(Component.translatable("kazumiplayer.gui.props.title"));
         this.screenPos = screenPos;
         loadFromScreen();
     }
@@ -100,12 +109,19 @@ public class ScreenPropsScreen extends Screen implements Listener {
         addPropButton("-", minusX, py + 146, () -> setOffsetAxis(2, props.offsetZ() - 0.25f));
         addPropButton("+", plusX, py + 146, () -> setOffsetAxis(2, props.offsetZ() + 0.25f));
 
-        addWideButton("重置偏移", px + 12, py + PANEL_H - 26, () -> {
+        addWideButton(Component.translatable("kazumiplayer.gui.props.btn_reset").getString(), px + 12, py + PANEL_H - 26, () -> {
             setOffsetAxis(0, 0);
             setOffsetAxis(1, 0);
             setOffsetAxis(2, 0);
         });
-        addWideButton("完成", px + pw - 74, py + PANEL_H - 26, this::onClose);
+        addWideButton(Component.translatable("kazumiplayer.gui.main.btn_close").getString(), px + pw - 74, py + PANEL_H - 26, this::onClose);
+
+        // 播放中叠加屏幕面边框的开关（调整屏幕时标记设置范围，CONTAIN 缩放对照尤其实用）
+        this.frameToggle = Button.builder(Component.literal(frameLabel()), btn -> {
+                boolean on = me.zuogeren.kazumiplayer.screen.VideoScreenRenderer.toggleShowFrameWhilePlaying();
+                btn.setMessage(Component.literal(frameLabel(on)));
+            }).bounds(px + 12, py + 168, pw - 24, 16).build();
+        this.addRenderableWidget(this.frameToggle);
 
         syncEditors();
         GuiClientState.setListener(this);
@@ -137,16 +153,16 @@ public class ScreenPropsScreen extends Screen implements Listener {
 
         // 半透明面板底：世界透出，方便对照实际屏幕位置
         graphics.fill(px, py, px + pw, py + PANEL_H, 0xD0101018);
-        graphics.text(this.font, Component.literal("屏幕设置")
+        graphics.text(this.font, Component.translatable("kazumiplayer.gui.props.title")
             .withStyle(ChatFormatting.WHITE), px + 12, py + 8, -1);
 
         // 行标签（输入框/按钮之间的文字层）
-        propLabel(graphics, "朝向", px + 12, py + 31);
-        propLabel(graphics, "宽度", px + 12, py + 59);
-        propLabel(graphics, "高度", px + 12, py + 81);
-        propLabel(graphics, "偏移X", px + 12, py + 107);
-        propLabel(graphics, "偏移Y", px + 12, py + 129);
-        propLabel(graphics, "偏移Z", px + 12, py + 151);
+        propLabel(graphics, Component.translatable("kazumiplayer.gui.props.label_facing").getString(), px + 12, py + 31);
+        propLabel(graphics, Component.translatable("kazumiplayer.gui.props.label_width").getString(), px + 12, py + 59);
+        propLabel(graphics, Component.translatable("kazumiplayer.gui.props.label_height").getString(), px + 12, py + 81);
+        propLabel(graphics, Component.translatable("kazumiplayer.gui.props.label_off_x").getString(), px + 12, py + 107);
+        propLabel(graphics, Component.translatable("kazumiplayer.gui.props.label_off_y").getString(), px + 12, py + 129);
+        propLabel(graphics, Component.translatable("kazumiplayer.gui.props.label_off_z").getString(), px + 12, py + 151);
 
         // 朝向当前值（两个循环按钮之间）
         String f = facingCn(props.facing());
@@ -266,7 +282,10 @@ public class ScreenPropsScreen extends Screen implements Listener {
 
     private static String facingCn(String facing) {
         return switch (facing) {
-            case "north" -> "北"; case "east" -> "东"; case "south" -> "南"; case "west" -> "西";
+            case "north" -> Component.translatable("kazumiplayer.gui.props.dir_north").getString();
+            case "east" -> Component.translatable("kazumiplayer.gui.props.dir_east").getString();
+            case "south" -> Component.translatable("kazumiplayer.gui.props.dir_south").getString();
+            case "west" -> Component.translatable("kazumiplayer.gui.props.dir_west").getString();
             default -> facing;
         };
     }

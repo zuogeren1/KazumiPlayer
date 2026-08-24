@@ -38,19 +38,19 @@ public class RuleCommands {
                         String name = StringArgumentType.getString(ctx, "name");
                         CommandSourceStack src = ctx.getSource();
 
-                        KazumiMessages.sendInfo(src, "正在下载规则: " + name + " ...");
+                        KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.rule.downloading", name);
                         ruleManager.getDownloader().fetchRule(name)
                             .thenAccept(rule -> {
                                 ruleManager.install(rule);
-                                KazumiMessages.sendSuccess(src, "已安装规则: " + name);
+                                KazumiMessages.sendSuccessKey(src, "kazumiplayer.cmd.rule.installed", name);
                                 if (rule.isDeprecated()) {
-                                    KazumiMessages.sendWarn(src,
-                                        "警告: 规则 " + name + " 已被官方标记为已弃用 (deprecated)，可能已失效，建议改用其他规则");
+                                    src.sendSystemMessage(KazumiMessages.warnOf(
+                                        Component.translatable("kazumiplayer.cmd.rule_deprecated_warn", name)));
                                 }
                                 broadcastRuleSync(ruleManager);
                             })
                             .exceptionally(e -> {
-                                KazumiMessages.sendError(src, "下载规则失败: " + RuleDownloader.friendlyError(name, e));
+                                KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.rule.download_failed", RuleDownloader.friendlyError(name, e));
                                 return null;
                             });
 
@@ -80,10 +80,10 @@ public class RuleCommands {
                     .executes(ctx -> {
                         String name = StringArgumentType.getString(ctx, "name");
                         if (ruleManager.delete(name)) {
-                            KazumiMessages.sendSuccess(ctx.getSource(), "已删除规则: " + name);
+                            KazumiMessages.sendSuccessKey(ctx.getSource(), "kazumiplayer.cmd.rule.deleted", name);
                             broadcastRuleSync(ruleManager);
                         } else {
-                            ctx.getSource().sendFailure(KazumiMessages.error("规则不存在: " + name));
+                            ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule_not_found", name)));
                         }
                         return 1;
                     })))
@@ -95,10 +95,10 @@ public class RuleCommands {
                     CommandSourceStack src = ctx.getSource();
                     var names = ruleManager.listAll();
                     if (names.isEmpty()) {
-                        src.sendFailure(KazumiMessages.error("没有已安装的规则"));
+                        src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule.none_installed")));
                         return 0;
                     }
-                    KazumiMessages.sendInfo(src, "正在测试全部 " + names.size() + " 个规则...");
+                    KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.rule.testing_all", String.valueOf(names.size()));
                     for (String name : names) {
                         Rule rule = ruleManager.get(name);
                         if (rule == null) continue;
@@ -107,10 +107,10 @@ public class RuleCommands {
                         ruleManager.getEngine().search(rule, "test")
                             .thenAccept(r -> {
                                 long lat = System.currentTimeMillis() - start;
-                                KazumiMessages.sendSuccess(src, n + " 延迟: " + lat + "ms");
+                                KazumiMessages.sendSuccessKey(src, "kazumiplayer.cmd.rule.test_ok", n, String.valueOf(lat));
                             })
                             .exceptionally(e -> {
-                                KazumiMessages.sendError(src, n + " 失败");
+                                KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.rule.test_fail_short", n);
                                 return null;
                             });
                     }
@@ -127,23 +127,23 @@ public class RuleCommands {
                         Rule rule = ruleManager.get(name);
                         CommandSourceStack src = ctx.getSource();
                         if (rule == null) {
-                            src.sendFailure(KazumiMessages.error("规则不存在: " + name));
+                            src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule_not_found", name)));
                             return 0;
                         }
                         if (rule.isDeprecated()) {
-                            src.sendFailure(KazumiMessages.warn(
-                                "警告: 规则 " + name + " 已被官方标记为已弃用 (deprecated)，可能已失效"));
+                            src.sendFailure(KazumiMessages.warnOf(
+                                Component.translatable("kazumiplayer.cmd.rule_deprecated_short", name)));
                         }
-                        KazumiMessages.sendInfo(src, "正在测试 " + name + " ...");
+                        KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.rule.testing", name);
                         long start = System.currentTimeMillis();
                         ruleManager.getEngine().search(rule, "test")
                             .thenAccept(result -> {
                                 long latency = System.currentTimeMillis() - start;
                                 KazumiMessages.sendSuccess(src,
-                                    name + " 连通正常，延迟: " + latency + "ms");
+                                    Component.translatable("kazumiplayer.gui.rule.test_ok", name, latency).getString());
                             })
                             .exceptionally(e -> {
-                                KazumiMessages.sendError(src, name + " 连通失败");
+                                KazumiMessages.sendErrorKey(src, "kazumiplayer.gui.rule.test_fail", name);
                                 return null;
                             });
                         return 1;
@@ -153,11 +153,11 @@ public class RuleCommands {
             .then(Commands.literal("pull-all")
                 .executes(ctx -> {
                     CommandSourceStack src = ctx.getSource();
-                    KazumiMessages.sendInfo(src, "正在获取规则目录...");
+                    KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.rule.fetching_index");
 
-                    ruleManager.getDownloader().fetchIndex()
+                    ruleManager.getDownloader().fetchIndex(true)
                         .thenCompose(index -> {
-                            KazumiMessages.sendInfo(src, "开始下载 " + index.size() + " 个规则...");
+                            KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.rule.downloading_all", String.valueOf(index.size()));
                             var futures = index.stream()
                                 .map(ri -> ruleManager.getDownloader().fetchRule(ri.getName())
                                     .thenAccept(ruleManager::install)
@@ -168,11 +168,11 @@ public class RuleCommands {
                                 .thenApply(v -> ruleManager.count());
                         })
                         .thenAccept(count -> {
-                            KazumiMessages.sendSuccess(src, "下载完成，共安装了 " + count + " 个规则");
+                            KazumiMessages.sendSuccessKey(src, "kazumiplayer.cmd.rule.downloaded_all", String.valueOf(count));
                             broadcastRuleSync(ruleManager);
                         })
                         .exceptionally(e -> {
-                            KazumiMessages.sendError(src, "下载失败: " + RuleDownloader.friendlyError("规则目录", e));
+                            KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.rule.download_failed", RuleDownloader.friendlyError("index", e));
                             return null;
                         });
 
@@ -196,22 +196,22 @@ public class RuleCommands {
     private static int updateOne(CommandSourceStack src, RuleManager ruleManager, String name) {
         Rule existing = ruleManager.get(name);
         if (existing == null) {
-            src.sendFailure(KazumiMessages.error("规则未安装: " + name + "（请先使用 /kazumi rule pull " + name + " 安装）"));
+            src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule.not_installed", name, name)));
             return 0;
         }
-        KazumiMessages.sendInfo(src, "正在更新规则: " + name + " ...");
+        KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.rule.updating", name);
         ruleManager.getDownloader().fetchRule(name)
             .thenAccept(rule -> {
                 ruleManager.install(rule);
-                KazumiMessages.sendSuccess(src, "规则已更新: " + name + " v" + rule.getVersion());
+                KazumiMessages.sendSuccessKey(src, "kazumiplayer.cmd.rule.updated", name, rule.getVersion());
                 if (rule.isDeprecated()) {
-                    KazumiMessages.sendWarn(src,
-                        "警告: 规则 " + name + " 已被官方标记为已弃用 (deprecated)，可能已失效");
+                    src.sendSystemMessage(KazumiMessages.warnOf(
+                        Component.translatable("kazumiplayer.cmd.rule_deprecated_short", name)));
                 }
                 broadcastRuleSync(ruleManager);
             })
             .exceptionally(e -> {
-                KazumiMessages.sendError(src, "更新规则失败: " + RuleDownloader.friendlyError(name, e));
+                KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.rule.update_failed", RuleDownloader.friendlyError(name, e));
                 return null;
             });
         return 1;
@@ -221,10 +221,10 @@ public class RuleCommands {
     private static int updateAll(CommandSourceStack src, RuleManager ruleManager) {
         List<String> installed = ruleManager.listAll();
         if (installed.isEmpty()) {
-            src.sendFailure(KazumiMessages.error("没有已安装的规则，请先使用 /kazumi rule pull-all 安装"));
+            src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule.none_installed_pullall")));
             return 0;
         }
-        KazumiMessages.sendInfo(src, "正在更新 " + installed.size() + " 个已安装规则...");
+        KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.rule.updating_all", String.valueOf(installed.size()));
         var futures = installed.stream()
             .map(name -> ruleManager.getDownloader().fetchRule(name)
                 .thenAccept(ruleManager::install)
@@ -236,7 +236,7 @@ public class RuleCommands {
         java.util.concurrent.CompletableFuture.allOf(
                 futures.toArray(new java.util.concurrent.CompletableFuture[0]))
             .thenAccept(v -> {
-                KazumiMessages.sendSuccess(src, "规则更新完成，当前共 " + ruleManager.count() + " 个规则");
+                KazumiMessages.sendSuccessKey(src, "kazumiplayer.cmd.rule.updated_all", String.valueOf(ruleManager.count()));
                 // 提示是否有弃用规则
                 List<String> deprecated = ruleManager.listAll().stream()
                     .filter(n -> {
@@ -246,7 +246,7 @@ public class RuleCommands {
                     .toList();
                 if (!deprecated.isEmpty()) {
                     KazumiMessages.sendWarn(src,
-                        "以下规则已被官方标记为已弃用，建议删除: " + String.join(", ", deprecated));
+                        Component.translatable("kazumiplayer.cmd.rule.deprecated_list", String.join(", ", deprecated)).getString());
                 }
                 broadcastRuleSync(ruleManager);
             });
@@ -273,7 +273,7 @@ public class RuleCommands {
      * 发送分页的规则列表: 本地 + 远程，已安装标记并排最前，每页8个
      */
     private static void sendRuleList(CommandSourceStack src, RuleManager ruleManager, int page) {
-        KazumiMessages.sendInfo(src, "正在获取规则列表...");
+        KazumiMessages.sendInfoKey(src, "kazumiplayer.gui.rule.status_fetching");
 
         ruleManager.getDownloader().fetchIndex()
             .thenAccept(index -> {
@@ -295,7 +295,7 @@ public class RuleCommands {
                 }
 
                 if (entries.isEmpty()) {
-                    KazumiMessages.sendWarn(src, "规则列表为空");
+                    KazumiMessages.sendWarnKey(src, "kazumiplayer.cmd.rule.list_empty_short");
                     return;
                 }
 
@@ -303,22 +303,24 @@ public class RuleCommands {
                 final int currentPage = page > totalPages ? totalPages : page;
 
                 src.sendSystemMessage(KazumiMessages.separator());
-                src.sendSystemMessage(Component.literal(
-                    "=== 规则列表 (" + currentPage + "/" + totalPages + " 页, 共 " + entries.size() + " 个) ==="));
+                src.sendSystemMessage(Component.translatable("kazumiplayer.cmd.rule.list_header", currentPage, totalPages, entries.size())
+                    .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
 
                 int start = (currentPage - 1) * PAGE_SIZE;
                 int end = Math.min(start + PAGE_SIZE, entries.size());
 
                 for (int i = start; i < end; i++) {
                     DisplayEntry e = entries.get(i);
-                    String depMark = e.deprecated ? " §c[已弃用]" : "";
+                    var depMark = e.deprecated ? Component.translatable("kazumiplayer.cmd.rule.dep_mark") : Component.empty();
                     if (e.installed) {
                         src.sendSystemMessage(ChatComponentUtil.suggestable(
-                            "  [已安装] " + e.name + " v" + e.version + depMark,
+                            Component.translatable("kazumiplayer.cmd.rule.entry_installed", e.name, e.version).append(depMark),
                             "/kazumi rule test " + e.name));
                     } else {
+                        var line = Component.literal("  " + e.name + " v" + e.version);
+                        if (e.deprecated) line.append(depMark);
                         src.sendSystemMessage(ChatComponentUtil.suggestable(
-                            "  " + e.name + " v" + e.version + depMark,
+                            line,
                             "/kazumi rule pull " + e.name));
                     }
                 }
@@ -326,21 +328,21 @@ public class RuleCommands {
                 if (currentPage < totalPages) {
                     int nextPage = currentPage + 1;
                     src.sendSystemMessage(ChatComponentUtil.clickable(
-                        ">>> 下一页 (第 " + nextPage + " 页)",
+                        Component.translatable("kazumiplayer.cmd.nav.next_page", nextPage),
                         "/kazumi rule list " + nextPage,
-                        "切换到第 " + nextPage + " 页"));
+                        Component.translatable("kazumiplayer.cmd.nav.goto_page", nextPage)));
                 }
             })
             .exceptionally(e -> {
                 // 如果无法获取远程列表，回退到仅显示本地
                 var names = ruleManager.listAll();
                 if (names.isEmpty()) {
-                    KazumiMessages.sendWarn(src, "无法获取规则列表且没有本地规则");
+                    KazumiMessages.sendWarnKey(src, "kazumiplayer.cmd.rule.unavailable_no_local");
                 } else {
-                    KazumiMessages.sendWarn(src, "无法获取远程列表，仅显示本地已安装:");
+                    KazumiMessages.sendWarnKey(src, "kazumiplayer.cmd.rule.remote_unavailable_local_only");
                     for (String name : names) {
                         src.sendSystemMessage(ChatComponentUtil.suggestable(
-                            "  [已安装] " + name,
+                            Component.translatable("kazumiplayer.cmd.rule.entry_installed_noname", name),
                             "/kazumi rule test " + name));
                     }
                 }

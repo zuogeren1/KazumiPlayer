@@ -23,6 +23,18 @@ public class ClientConfig {
     public final ModConfigSpec.IntValue fullscreenCoverage;
     // 全屏观影画面不透明度百分比 (10-100)
     public final ModConfigSpec.IntValue fullscreenOpacity;
+    // 屏幕比例与视频不一致时的播放画面适配方式
+    public final ModConfigSpec.EnumValue<VideoFit> videoFit;
+    // 未播放时在世界中显示屏幕面位置预览框（便于调整屏幕）
+    public final ModConfigSpec.BooleanValue showIdleScreenFrame;
+
+    /** 屏幕为非常规比例时视频画面的适配方式 */
+    public enum VideoFit {
+        /** 拉伸：画面填满整个屏幕面（可能变形） */
+        STRETCH,
+        /** 等比缩放后居中：保持视频原始宽高比，屏幕面内居中显示（两侧或上下留边） */
+        CONTAIN
+    }
 
     public enum McefLifecycle {
         ON_DEMAND,
@@ -68,6 +80,16 @@ public class ClientConfig {
         fullscreenOpacity = builder
                 .comment("全屏观影画面不透明度百分比 (10-100)")
                 .defineInRange("fullscreenOpacity", 100, 10, 100);
+
+        videoFit = builder
+                .comment("屏幕比例与视频不一致时的播放行为",
+                        "STRETCH - 拉伸填满整个屏幕面（可能变形）",
+                        "CONTAIN - 等比缩放后居中（保持视频宽高比，留边）")
+                .defineEnum("videoFit", VideoFit.STRETCH);
+
+        showIdleScreenFrame = builder
+                .comment("未播放时在世界中显示屏幕面位置预览框（便于调整屏幕的位置与大小）")
+                .define("showIdleScreenFrame", true);
 
         builder.pop();
     }

@@ -3,13 +3,16 @@ package me.zuogeren.kazumiplayer.sync;
 import com.google.gson.reflect.TypeToken;
 import me.zuogeren.kazumiplayer.rule.dto.Road;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
+import me.zuogeren.kazumiplayer.util.DirectLinkQueue;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
+import net.minecraft.network.chat.Component;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,10 +27,11 @@ import java.util.UUID;
  */
 public final class PlaybackController {
 
-    /** 操作结果：success=true 时 detail 为成功描述（集名/时间），false 时为失败原因 */
-    public record OpResult(boolean success, String detail) {
-        public static OpResult ok(String detail) { return new OpResult(true, detail); }
-        public static OpResult fail(String detail) { return new OpResult(false, detail); }
+    /** 操作结果：success=true 时 detail 为成功描述（集名/时间），false 时为失败原因；文本可本地化 */
+    public record OpResult(boolean success, net.minecraft.network.chat.Component detail) {
+        public static OpResult ok(net.minecraft.network.chat.Component detail) { return new OpResult(true, detail); }
+        public static OpResult fail(net.minecraft.network.chat.Component detail) { return new OpResult(false, detail); }
+        public static OpResult okLiteral(String detail) { return ok(net.minecraft.network.chat.Component.literal(detail)); }
     }
 
     private static final TypeToken<List<Road>> ROAD_LIST = new TypeToken<>() {};
@@ -51,27 +55,41 @@ public final class PlaybackController {
     public static OpResult switchEpisode(ServerPlayer actor, BlockPos screenPos,
             VideoScreenBlockEntity screen, boolean next) {
         String data = screen.getEpisodeData();
-        if (data.isEmpty()) return OpResult.fail("该屏幕无可切换的集数");
+        if (data.isEmpty()) return OpResult.fail(Component.translatable("kazumiplayer.err.no_episodes"));
         List<Road> roads = JsonUtil.GSON.fromJson(data, ROAD_LIST);
-        if (roads == null || roads.isEmpty()) return OpResult.fail("该屏幕无可切换的集数");
+        if (roads == null || roads.isEmpty()) return OpResult.fail(Component.translatable("kazumiplayer.err.no_episodes"));
         Road road = roads.get(Math.max(0, Math.min(screen.getRoadIndex(), roads.size() - 1)));
         int idx = screen.getEpisodeIndex() + (next ? 1 : -1);
-        if (idx < 1) return OpResult.fail("已是第一集");
-        if (idx > road.data().size()) return OpResult.fail("已是最后一集");
+        if (idx < 1) return OpResult.fail(Component.translatable("kazumiplayer.err.already_first"));
+        if (idx > road.data().size()) return OpResult.fail(Component.translatable("kazumiplayer.err.already_last"));
 
         String url = road.data().get(idx - 1);
-        String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
+        String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1)
+                : Component.translatable("kazumiplayer.gui.main.episode_n", idx).getString();
         applyEpisodeSwitch(actor, screenPos, screen, url, screen.getRoadIndex(), idx, JsonUtil.GSON.toJson(roads));
-        SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, screen.getScreenId(), "切换到 " + name);
-        return OpResult.ok(name);
+        SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, screen.getScreenId(),
+                Component.translatable("kazumiplayer.msg.notify.switched", name));
+        return OpResult.ok(Component.literal(name));
     }
 
     /**
      * 「切集四件套」唯一权威实现：写 NBT → 重置同步组（videoUrl 刷新/位置归零/paused=false）
      * → 同步 WatchingPlayers → 立即广播。自动连播与手动切换都必须走这里。
+     *
+     * <p>直链队列语义：目标序号之前的项目视为已播完，随切换一并移出队列——
+     * 列表从新当前项起重写、episodeIndex 重置为 1（自动下一集/手动下一集/GUI 推进路径一致生效）；
+     * 规则剧集数据不受影响，保留完整列表供 prev/选集回跳。
      */
     public static void applyEpisodeSwitch(ServerPlayer actor, BlockPos screenPos,
             VideoScreenBlockEntity screen, String url, int roadIdx, int episodeIdx, String roadJson) {
+        if (episodeIdx > 1 && DirectLinkQueue.isQueueData(roadJson)) {
+            List<String> urls = DirectLinkQueue.parseUrls(roadJson);
+            if (urls != null && episodeIdx <= urls.size()) {
+                urls = new ArrayList<>(urls.subList(episodeIdx - 1, urls.size()));
+                roadJson = DirectLinkQueue.buildRoadJson(urls);
+                episodeIdx = 1;
+            }
+        }
         screen.setPlaybackFull(url, 0, roadIdx, episodeIdx, roadJson);
         UUID sid = screen.getScreenId();
         // 组重置不可省略：缺失时周期广播携带旧集 URL，客户端换片保护会吞掉后续所有暂停/seek
@@ -86,15 +104,17 @@ public final class PlaybackController {
             VideoScreenBlockEntity screen, boolean paused) {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
-        if (g == null) return OpResult.fail("该屏幕未在播放");
+        if (g == null) return OpResult.fail(Component.translatable("kazumiplayer.err.not_playing"));
         long cur = g.livePositionMillis();
         SyncGroupManager.get().updateState(sid, cur, paused);
         screen.updateSyncPosition(cur);
         screen.setPlaybackPaused(paused);
         // 立即广播暂停/恢复状态（客户端无每秒 NBT 轮询暂停逻辑）
         SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
-        SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid, paused ? "暂停了播放" : "恢复了播放");
-        return OpResult.ok(paused ? "已暂停" : "已恢复");
+        SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid, Component.translatable(
+                paused ? "kazumiplayer.msg.notify.paused" : "kazumiplayer.msg.notify.resumed"));
+        return OpResult.ok(Component.translatable(paused
+                ? "kazumiplayer.msg.ok.paused" : "kazumiplayer.msg.ok.resumed"));
     }
 
     // ---- 时间调整 ----
@@ -104,14 +124,14 @@ public final class PlaybackController {
             VideoScreenBlockEntity screen, long targetMs) {
         UUID sid = screen.getScreenId();
         var g = SyncGroupManager.get().getGroup(sid);
-        if (g == null) return OpResult.fail("该屏幕未在播放");
+        if (g == null) return OpResult.fail(Component.translatable("kazumiplayer.err.not_playing"));
         long newPos = Math.max(0, targetMs);
         screen.updateSyncPosition(newPos);
         SyncGroupManager.get().updateState(sid, newPos, g.paused);
         SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid,
-            "跳转到 " + KazumiMessages.formatMs(newPos));
-        return OpResult.ok(KazumiMessages.formatMs(newPos));
+            Component.translatable("kazumiplayer.msg.notify.seeked", KazumiMessages.formatMs(newPos)));
+        return OpResult.ok(Component.literal(KazumiMessages.formatMs(newPos)));
     }
 
     /** 相对调整（快进/快退秒数），成功 detail 为 "+10s → 0:05" 形式 */
@@ -121,7 +141,7 @@ public final class PlaybackController {
         OpResult r = seekTo(actor, screenPos, screen, target);
         if (!r.success()) return r;
         String sign = deltaSec >= 0 ? "+" : "";
-        return OpResult.ok(sign + deltaSec + "s → " + r.detail());
+        return OpResult.ok(Component.literal(sign + deltaSec + "s → " + r.detail().getString()));
     }
 
     // ---- 加入/离开 ----
@@ -139,8 +159,9 @@ public final class PlaybackController {
         if (url.isEmpty()) {
             // 待机组（computeIfAbsent：已存在的待机组不会重复创建，等开始播放自动生效）
             SyncGroupManager.get().joinStandby(actor, sid, screenPos);
-            SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid, "加入了同步播放");
-            return OpResult.ok("已加入同步播放（等待播放开始）");
+            SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid,
+                Component.translatable("kazumiplayer.msg.notify.joined"));
+            return OpResult.ok(Component.translatable("kazumiplayer.msg.ok.joined_wait"));
         }
         if (group != null) {
             long currentPos = group.livePositionMillis();
@@ -148,16 +169,18 @@ public final class PlaybackController {
             screen.setPlayback(url, currentPos);
             screen.setWatchingPlayers(group.watchingPlayersString());
             SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
-            SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid, "加入了同步播放");
-            return OpResult.ok("已加入同步播放 (位置: " + currentPos / 1000 + "s)");
+            SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid,
+                Component.translatable("kazumiplayer.msg.notify.joined"));
+            return OpResult.ok(Component.translatable("kazumiplayer.msg.ok.joined_pos", String.valueOf(currentPos / 1000)));
         }
         // 有 URL 但无组（异常恢复）：重建组
         SyncGroupManager.get().onPlayStart(actor, sid, screenPos, url);
         screen.setPlayback(url, 0);
         syncWatchingPlayers(screen);
         SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
-        SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid, "加入了同步播放");
-        return OpResult.ok("已加入同步播放 (位置: 0s)");
+        SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid,
+                Component.translatable("kazumiplayer.msg.notify.joined"));
+        return OpResult.ok(Component.translatable("kazumiplayer.msg.ok.joined_pos", "0"));
     }
 
     /**

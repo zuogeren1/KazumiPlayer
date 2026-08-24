@@ -28,7 +28,8 @@ public class RuleManager {
     }
 
     /**
-     * 从 rules 目录加载已安装的规则
+     * 从 rules 目录加载已安装的规则。
+     * 损坏的 plugins.json 不阻断启动：备份为 plugins.json.corrupted 后以空表继续。
      */
     public void loadAll() {
         Path pluginsFile = rulesDir.resolve("plugins.json");
@@ -40,23 +41,64 @@ public class RuleManager {
                     new TypeToken<List<Rule>>() {}.getType());
             if (loaded != null) {
                 for (Rule rule : loaded) {
+                    // 规则名缺失的条目无法寻址，跳过而非让 ConcurrentHashMap 拒绝 null 键
+                    if (rule == null || rule.getName() == null) continue;
                     rules.put(rule.getName(), rule);
                 }
                 KazumiLog.rule.info("Loaded {} rules", loaded.size());
             }
+        } catch (Exception e) {
+            // 解析异常若外抛会沿 @Mod 构造器中断 mod 加载（服务器无法启动）
+            Path backup = backupCorruptedFile(pluginsFile);
+            KazumiLog.rule.error("""
+                    规则缓存文件已损坏，本次启动将以空规则表继续。
+                    损坏文件: {}
+                    解析详情: {}
+                    已备份至: {}（原文件已移走，避免下次启动重复报错）
+                    处理方式: 修正 JSON 后将备份改回 plugins.json 即可恢复；或删除备份文件，用 /kazumi rule pull 重新安装规则。
+                    """,
+                    pluginsFile.toAbsolutePath(), rootMessage(e),
+                    backup == null ? "<备份失败，请手动处理>" : backup.toAbsolutePath(), e);
+        }
+    }
+
+    /** 解包 CompletionException 包装链，取最内层异常的消息（Gson 的语法错误含行号/列号/JSON 路径） */
+    private static String rootMessage(Throwable e) {
+        Throwable t = e;
+        while (t.getCause() != null && t.getCause() != t) t = t.getCause();
+        String msg = t.getMessage();
+        return msg == null || msg.isEmpty() ? t.getClass().getSimpleName() : msg;
+    }
+
+    /** 损坏文件改名留档，便于用户取回手工修复；返回备份路径（失败返回 null） */
+    private Path backupCorruptedFile(Path pluginsFile) {
+        try {
+            Path backup = rulesDir.resolve("plugins.json.corrupted");
+            Files.move(pluginsFile, backup,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return backup;
         } catch (IOException e) {
-            KazumiLog.rule.error("Failed to load rules", e);
+            KazumiLog.rule.error("Failed to back up corrupted plugins.json", e);
+            return null;
         }
     }
 
     /**
-     * 保存所有规则到 plugins.json
+     * 保存所有规则到 plugins.json（临时文件 + 原子替换，避免断电截断产生损坏文件）
      */
     public void saveAll() {
         try {
             Files.createDirectories(rulesDir);
             String json = JsonUtil.GSON_PRETTY.toJson(new ArrayList<>(rules.values()));
-            Files.writeString(rulesDir.resolve("plugins.json"), json);
+            Path target = rulesDir.resolve("plugins.json");
+            Path tmp = rulesDir.resolve("plugins.json.tmp");
+            Files.writeString(tmp, json);
+            try {
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             KazumiLog.rule.error("Failed to save rules", e);
         }

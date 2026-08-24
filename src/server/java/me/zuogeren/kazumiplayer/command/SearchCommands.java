@@ -35,7 +35,7 @@ public class SearchCommands {
                     CommandSourceStack src = ctx.getSource();
                     String sessionId = sessionCache.createSession(keyword);
 
-                    KazumiMessages.sendInfo(src, "正在搜索: " + keyword + " ...");
+                    KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.search.searching", keyword);
                     // 首次拉取 20 条，后续翻页从缓存读取
                     bangumiApi.search(keyword, 20, 0).thenAccept(subjects -> {
                         sessionCache.addResults(sessionId, subjects);
@@ -43,7 +43,7 @@ public class SearchCommands {
                         if (page == null) return;
                         showBangumiPage(src, page, ruleManager);
                     }).exceptionally(e -> {
-                        KazumiMessages.sendError(src, "搜索失败: " + e.getMessage());
+                        KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.search.failed", String.valueOf(e.getMessage()));
                         return null;
                     });
                     return 1;
@@ -62,7 +62,7 @@ public class SearchCommands {
                         CommandSourceStack src = ctx.getSource();
                         var result = sessionCache.getPage(sessionId, page, PAGE_SIZE);
                         if (result == null) {
-                            src.sendFailure(KazumiMessages.error("会话已过期，请重新搜索"));
+                            src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.search.session_expired")));
                             return 0;
                         }
                         showBangumiPage(src, result, ruleManager);
@@ -73,12 +73,12 @@ public class SearchCommands {
     private static void showBangumiPage(CommandSourceStack src,
                                          SearchSessionCache.PageResult page, RuleManager ruleManager) {
         if (!page.hasResults() || page.items().isEmpty()) {
-            KazumiMessages.sendWarn(src, "未找到 '" + page.keyword() + "' 的结果");
+            KazumiMessages.sendWarnKey(src, "kazumiplayer.cmd.page.no_results", page.keyword());
             return;
         }
         src.sendSystemMessage(KazumiMessages.separator());
-        src.sendSystemMessage(Component.literal(
-            "=== 搜索: " + page.keyword() + " (第 " + page.page() + "/" + page.totalPages() + " 页, 共 " + page.total() + " 个) ==="));
+        src.sendSystemMessage(Component.translatable(
+            "kazumiplayer.cmd.search.header", page.keyword(), page.page(), page.totalPages(), page.total()));
         int base = (page.page() - 1) * PAGE_SIZE;
         for (int i = 0; i < page.items().size(); i++) {
             var s = page.items().get(i);
@@ -87,24 +87,24 @@ public class SearchCommands {
             src.sendSystemMessage(Component.literal((base + i + 1) + ". " + name + date));
             if (!ruleManager.getRules().isEmpty()) {
                 src.sendSystemMessage(ChatComponentUtil.clickable(
-                    "   [查源]", "/kazumi search-rule all " + name,
-                    "在所有规则中搜索: " + name));
+                    Component.translatable("kazumiplayer.cmd.search.check_sources"), "/kazumi search-rule all " + name,
+                    Component.translatable("kazumiplayer.cmd.search.search_all", name).append(Component.literal("   [查源]"))));
             }
         }
         var nav = Component.literal("").withStyle(net.minecraft.ChatFormatting.GRAY);
         if (page.page() > 1) {
             int prev = page.page() - 1;
             nav.append(ChatComponentUtil.clickable(
-                "<<< 上一页  ",
+                Component.translatable("kazumiplayer.cmd.nav.prev"),
                 "/kazumi page " + page.sessionId() + " " + prev,
-                "切换到第 " + prev + " 页"));
+                Component.translatable("kazumiplayer.cmd.nav.goto_page", prev)));
         }
         if (page.hasNext()) {
             int next = page.page() + 1;
             nav.append(ChatComponentUtil.clickable(
-                ">>> 下一页",
+                Component.translatable("kazumiplayer.cmd.nav.next"),
                 "/kazumi page " + page.sessionId() + " " + next,
-                "切换到第 " + next + " 页"));
+                Component.translatable("kazumiplayer.cmd.nav.goto_page", next)));
         }
         if (page.page() > 1 || page.hasNext()) {
             src.sendSystemMessage(nav);
@@ -149,7 +149,7 @@ public class SearchCommands {
                         int p = IntegerArgumentType.getInteger(ctx, "page");
                         var session = ruleSessionCache.getSession(sessionId);
                         if (session == null) {
-                            src.sendFailure(KazumiMessages.error("搜索会话已过期，请重新搜索"));
+                            src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.search.session_expired")));
                             return 0;
                         }
                         showRulePage(src, sessionId, session, p);
@@ -165,19 +165,19 @@ public class SearchCommands {
         Map<String, Rule> rules;
         if (ruleName == null) {
             rules = ruleManager.getRules();
-            KazumiMessages.sendInfo(src, "正在所有规则中搜索: " + keyword + " ...");
+            KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.search_rule.searching_all", keyword);
         } else {
             Rule rule = ruleManager.get(ruleName);
             if (rule == null) {
-                src.sendFailure(KazumiMessages.error("规则不存在: " + ruleName));
+                src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule_not_found", ruleName)));
                 return 0;
             }
             rules = Map.of(ruleName, rule);
             if (rule.isDeprecated()) {
                 KazumiMessages.sendWarn(src,
-                    "警告: 规则 " + ruleName + " 已被官方标记为已弃用 (deprecated)，可能已失效，建议改用其他规则");
+                    Component.translatable("kazumiplayer.cmd.rule_deprecated_warn", ruleName).getString());
             }
-            KazumiMessages.sendInfo(src, "正在 " + ruleName + " 中搜索: " + keyword + " ...");
+            KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.search_rule.searching_in", ruleName, keyword);
         }
         int p = Math.max(1, page);
         searchManager.searchAll(rules, keyword)
@@ -187,7 +187,7 @@ public class SearchCommands {
                 var session = ruleSessionCache.getSession(sessionId);
                 showRulePage(src, sessionId, session, p);
             })
-            .exceptionally(e -> { KazumiMessages.sendError(src, "搜索出错"); return null; });
+            .exceptionally(e -> { KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.search.error_generic"); return null; });
         return 1;
     }
 
@@ -199,32 +199,32 @@ public class SearchCommands {
                 all.add(new ResultEntry(entry.getKey(), item));
             }
         }
-        if (all.isEmpty()) { KazumiMessages.sendWarn(src, "未找到结果"); return; }
+        if (all.isEmpty()) { KazumiMessages.sendWarnKey(src, "kazumiplayer.cmd.search.no_results_short"); return; }
         int totalPages = (all.size() + PAGE_SIZE - 1) / PAGE_SIZE;
         final int cp = page > totalPages ? totalPages : page;
         src.sendSystemMessage(KazumiMessages.separator());
         src.sendSystemMessage(ChatComponentUtil.header(
-            "=== 搜索结果 第 " + cp + "/" + totalPages + " 页 (共 " + all.size() + " 个) ==="));
+            Component.translatable("kazumiplayer.cmd.search.results_header", cp, totalPages, all.size())));
         int start = (cp - 1) * PAGE_SIZE;
         int end = Math.min(start + PAGE_SIZE, all.size());
         for (int i = start; i < end; i++) {
             var e = all.get(i);
             src.sendSystemMessage(ChatComponentUtil.clickable(
                 (i + 1) + ". [" + e.ruleName + "] " + e.entry.item().name(),
-                "/kazumi episodes " + e.ruleName + " " + e.entry.id(), "点击查看集数"));
+                "/kazumi episodes " + e.ruleName + " " + e.entry.id(), Component.translatable("kazumiplayer.cmd.search.click_episodes")));
         }
         var nav = Component.literal("").withStyle(net.minecraft.ChatFormatting.GRAY);
         if (cp > 1) {
             int prev = cp - 1;
-            nav.append(ChatComponentUtil.clickable("<<< 上一页  ",
+            nav.append(ChatComponentUtil.clickable(Component.translatable("kazumiplayer.cmd.nav.prev"),
                 "/kazumi search-rule page " + sessionId + " " + prev,
-                "切换到第 " + prev + " 页"));
+                Component.translatable("kazumiplayer.cmd.nav.goto_page", prev)));
         }
         if (cp < totalPages) {
             int next = cp + 1;
-            nav.append(ChatComponentUtil.clickable(">>> 下一页",
+            nav.append(ChatComponentUtil.clickable(Component.translatable("kazumiplayer.cmd.nav.next"),
                 "/kazumi search-rule page " + sessionId + " " + next,
-                "切换到第 " + next + " 页"));
+                Component.translatable("kazumiplayer.cmd.nav.goto_page", next)));
         }
         if (cp > 1 || cp < totalPages) {
             src.sendSystemMessage(nav);

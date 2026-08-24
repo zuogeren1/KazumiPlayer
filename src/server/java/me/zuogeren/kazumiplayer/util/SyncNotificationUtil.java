@@ -17,11 +17,16 @@ public class SyncNotificationUtil {
 
     /** 通知其他观看者（不包括操作者本人） */
     public static void notifyOtherWatchers(ServerPlayer actor, BlockPos pos, UUID screenId, String action) {
+        notifyOtherWatchers(actor, pos, screenId, Component.literal(action));
+    }
+
+    /** 通知其他观看者（不包括操作者本人），可本地化组件 */
+    public static void notifyOtherWatchers(ServerPlayer actor, BlockPos pos, UUID screenId, Component action) {
         var g = SyncGroupManager.get().getGroup(screenId);
         if (g == null) return;
         String actorName = actor.getName().getString();
-        Component msg = KazumiMessages.warn(actorName + " " + action + " §7("
-            + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+        Component msg = KazumiMessages.warnKey("kazumiplayer.msg.notify_other",
+                actorName, action.getString(), String.valueOf(pos.getX()), String.valueOf(pos.getY()), String.valueOf(pos.getZ()));
         var server = ((ServerLevel) actor.level()).getServer();
         UUID actorId = actor.getUUID();
         for (UUID pid : g.players) {
@@ -33,10 +38,15 @@ public class SyncNotificationUtil {
 
     /** 通知组内所有玩家 */
     public static void broadcastToGroup(ServerPlayer contextPlayer, BlockPos pos, UUID screenId, String action) {
+        broadcastToGroup(contextPlayer, pos, screenId, Component.literal(action));
+    }
+
+    /** 通知组内所有玩家，可本地化组件 */
+    public static void broadcastToGroup(ServerPlayer contextPlayer, BlockPos pos, UUID screenId, Component action) {
         var g = SyncGroupManager.get().getGroup(screenId);
         if (g == null) return;
-        Component msg = KazumiMessages.info(action + " §7("
-            + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")");
+        Component msg = KazumiMessages.infoKey("kazumiplayer.msg.broadcast_to_group",
+                action.getString(), String.valueOf(pos.getX()), String.valueOf(pos.getY()), String.valueOf(pos.getZ()));
         var server = ((ServerLevel) contextPlayer.level()).getServer();
         for (UUID pid : g.players) {
             ServerPlayer p = server.getPlayerList().getPlayer(pid);

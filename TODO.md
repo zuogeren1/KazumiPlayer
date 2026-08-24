@@ -38,6 +38,8 @@
 - [ ] **渲染性能优化**: 多屏幕同时播放时帧率优化
 - [x] **GUI 搜源流式化**: 逐规则搜索、每完成一个源立即推送增量（DATA_RULE_RESULTS_PARTIAL + searchId 代次防串轮），慢源/超时源不再阻塞快源结果的展示；状态栏渐进显示「搜源中 X/Y 个源…（已得 N 条）」；单源失败计为一次完成（空增量）保证计数收敛，超时仍由 searchTimeoutMs 兜底。关闭界面/清空搜索发 ACTION_CANCEL_SEARCH、发起新搜索自动作废旧代次（服务端 per-player 活跃代次登记），迟到增量双重过滤（服务端拦截 + 客户端仅接受更大 searchId）
 - [x] **直链队列**: 队列复用 EpisodeData 存合成 Road（name="直链队列"，util/DirectLinkQueue），自动下一集/上一集/下一集零改动在队列内推进、无新增 NBT 字段与 S→C 包（BE markDirty 自动同步）。顶栏单按钮：空闲"播放"、播放中"排队"追加；队列面板行=[名称点击切播][插=移到下一个][删]；与规则剧集互斥（剧集中提交拒绝，点选集播放覆盖队列）；queue_add/jump/move/remove 经 GuiProtocol 通用通道，GUI 与 /kazumi play-url 共用 QueueRequestHandlers。顺带修复：旧 handlePlayUrl 不写 episodeData 导致直链播完误切到残留剧集下一集
+- [x] **命令同步 GUI 能力**: 新增 /kazumi queue 一级子树（list 分页展示▶当前项+行可点击切播 / add / jump / move / remove）与 /kazumi screen viewers 观看玩家列表（组优先 NBT 兜底，在线显名离线短UUID）；命令层纯参数解析全部委托 QueueRequestHandlers，与 GUI 共用服务端唯一实现
+- [x] **队列已播项自动出队**: 切集推进（自动/手动/GUI next）经 PlaybackController.applyEpisodeSwitch、队列内切换（jump/playNow/失败跳过）经 QueueRequestHandlers.playItemAt，两落点均把目标项之前的已播前缀移出队列（列表自新当前项起重写、episodeIndex 归 1）；规则剧集数据不受影响，保留完整列表供 prev/选集回跳
 
 ## BUG
 

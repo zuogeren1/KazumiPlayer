@@ -108,7 +108,7 @@ public class ClientFullscreenState {
             drawProgress(g, mc, px, py, pw, ph, player);
         } else {
             g.fill(ax, ay, ax + areaW, ay + areaH, 0xC8101010);
-            g.centeredText(mc.font, Component.literal("无视频信号"), ax + areaW / 2, ay + areaH / 2 - 4, 0xFF888888);
+            g.centeredText(mc.font, Component.translatable("kazumiplayer.gui.full.no_signal"), ax + areaW / 2, ay + areaH / 2 - 4, 0xFF888888);
         }
 
         drawExitButton(g, mc);
@@ -158,7 +158,7 @@ public class ClientFullscreenState {
         double[] m = mouseGuiPos(mc);
         boolean hover = m[0] >= r[0] && m[0] < r[2] && m[1] >= r[1] && m[1] < r[3];
         g.fill(r[0], r[1], r[2], r[3], hover ? 0xE03C3C52 : 0x90000000);
-        String label = "✕ 退出";
+        String label = Component.translatable("kazumiplayer.gui.full.btn_exit").getString();
         g.text(mc.font, Component.literal(label),
             r[0] + (EXIT_BTN_W - mc.font.width(label)) / 2, r[1] + 4, 0xFFFFFFFF);
     }

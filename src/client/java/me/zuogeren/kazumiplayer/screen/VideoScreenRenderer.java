@@ -31,6 +31,25 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
 
     // LOADING 状态占位色 (ABGR packed int)
     private static final int COLOR_LOADING = 0xFF333388;
+    // 未播放时的屏幕面预览框颜色（深蓝灰实心）
+    private static final int COLOR_IDLE_FRAME = 0xFF26264A;
+    // 播放中叠加的屏幕面边框线颜色（亮青，空心描边不遮挡画面）
+    private static final int COLOR_PLAYING_FRAME = 0xFF66D9E8;
+    /** 播放中边框描边的线条厚度（格） */
+    private static final float PLAYING_FRAME_EDGE = 0.08f;
+
+    /** 播放中是否叠加显示屏幕面边框（屏幕设置界面内开关控制）；未播放时预览框由客户端配置 showIdleScreenFrame 控制 */
+    private static volatile boolean showFrameWhilePlaying;
+
+    public static boolean isShowFrameWhilePlaying() {
+        return showFrameWhilePlaying;
+    }
+
+    /** 切换播放中边框叠加，返回切换后的状态 */
+    public static boolean toggleShowFrameWhilePlaying() {
+        showFrameWhilePlaying = !showFrameWhilePlaying;
+        return showFrameWhilePlaying;
+    }
 
     private static final Identifier WHITE_TEX = Identifier.fromNamespaceAndPath("kazumiplayer", "progress_bar_white");
     private static boolean whiteTexRegistered;
@@ -124,8 +143,27 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         float halfW = state.screenWidth / 2.0f;
         float halfH = state.screenHeight / 2.0f;
 
-        // IDLE 状态（无播放器）不渲染视频面——避免读到其他屏幕写入的共享纹理
-        if (state.player == null) return;
+        poseStack.pushPose();
+
+        // 屏幕显示在方块上方（+0.5格避开方块遮挡进度条），叠加用户设置的 XYZ 偏移
+        poseStack.translate(0.5 + state.offsetX, 1.5 + state.offsetY + halfH, 0.5 + state.offsetZ);
+
+        // 根据朝向绕 Y 轴旋转
+        rotateToFacing(poseStack, state.facing);
+
+        // IDLE 状态（无播放器，加入同步但未开始播放）不渲染视频面——避免读到其他屏幕写入的共享纹理；
+        // 按客户端配置绘制实心方框预览屏幕面的位置与设置大小，使未播放时也能在设置界面所见即所得地调整屏幕。
+        // 框始终为设置的完整尺寸（不受 videoFit 等比缩放影响）
+        if (state.player == null) {
+            if (me.zuogeren.kazumiplayer.ClientConfig.CONFIG.showIdleScreenFrame.get()) {
+                final float fw = halfW;
+                final float fh = halfH;
+                collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(WHITE_TEX),
+                    (pose, buffer) -> fillBar(buffer, pose, -fw, fw, -fh, fh, 0.49f, COLOR_IDLE_FRAME));
+            }
+            poseStack.popPose();
+            return;
+        }
 
         // 决定显示视频帧还是占位色
         VideoScreenTexture tex = state.videoTexture;
@@ -142,19 +180,35 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
 
         RenderType renderType = RenderTypes.entityCutout(tex.getTextureId());
 
-        poseStack.pushPose();
-
-        // 屏幕显示在方块上方（+0.5格避开方块遮挡进度条），叠加用户设置的 XYZ 偏移
-        poseStack.translate(0.5 + state.offsetX, 1.5 + state.offsetY + halfH, 0.5 + state.offsetZ);
-
-        // 根据朝向绕 Y 轴旋转
-        rotateToFacing(poseStack, state.facing);
-
         float z = 0.49f;
         float xMin = -halfW;
         float xMax =  halfW;
         float yMin = -halfH;
         float yMax =  halfH;
+
+        // 屏幕为非常规比例时的播放行为（客户端配置）：
+        // STRETCH=拉伸填满屏幕面（默认，历史行为）；CONTAIN=按视频宽高比在屏幕面内等比缩放居中留边
+        if (me.zuogeren.kazumiplayer.ClientConfig.CONFIG.videoFit.get()
+                == me.zuogeren.kazumiplayer.ClientConfig.VideoFit.CONTAIN
+                && state.screenHeight > 0) {
+            int vw = state.player.getWidth();
+            int vh = state.player.getHeight();
+            if (vw > 0 && vh > 0 && state.screenWidth > 0) {
+                float videoAR = (float) vw / vh;
+                float screenAR = state.screenWidth / (float) state.screenHeight;
+                if (videoAR > screenAR) {
+                    // 视频更宽：宽度撑满屏幕面，高度等比缩小后垂直居中
+                    float drawHalfH = halfW / videoAR;
+                    yMin = -drawHalfH;
+                    yMax =  drawHalfH;
+                } else if (videoAR < screenAR) {
+                    // 视频更窄：高度撑满屏幕面，宽度等比缩小后水平居中
+                    float drawHalfW = halfH * videoAR;
+                    xMin = -drawHalfW;
+                    xMax =  drawHalfW;
+                }
+            }
+        }
 
         // UV: 上下翻转(V)+左右镜像(U)
         float uMin = 1.0f;
@@ -162,9 +216,33 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         float vMin = 1.0f;
         float vMax = 0.0f;
 
+        final float fXMin = xMin;
+        final float fXMax = xMax;
+        final float fYMin = yMin;
+        final float fYMax = yMax;
+
         collector.submitCustomGeometry(poseStack, renderType, (pose, buffer) -> {
-            addVideoQuad(buffer, pose, xMin, xMax, yMin, yMax, z, uMin, uMax, vMin, vMax);
+            addVideoQuad(buffer, pose, fXMin, fXMax, fYMin, fYMax, z, uMin, uMax, vMin, vMax);
         });
+
+        // 播放中叠加显示屏幕面边框（屏幕设置内开关控制）：
+        // 空心描边（四条窄条，紧贴视频面前缘 z=0.485），只框出设置范围、不遮挡画面内容
+        if (showFrameWhilePlaying) {
+            final float fw = halfW;
+            final float fh = halfH;
+            final float e = PLAYING_FRAME_EDGE;
+            final int c = COLOR_PLAYING_FRAME;
+            RenderType frameType = RenderTypes.entityCutout(WHITE_TEX);
+            // 上边 / 下边 / 左边 / 右边
+            collector.submitCustomGeometry(poseStack, frameType,
+                (pose, buffer) -> fillBar(buffer, pose, -fw, fw, fh - e, fh, 0.485f, c));
+            collector.submitCustomGeometry(poseStack, frameType,
+                (pose, buffer) -> fillBar(buffer, pose, -fw, fw, -fh, -fh + e, 0.485f, c));
+            collector.submitCustomGeometry(poseStack, frameType,
+                (pose, buffer) -> fillBar(buffer, pose, -fw, -fw + e, -fh + e, fh - e, 0.485f, c));
+            collector.submitCustomGeometry(poseStack, frameType,
+                (pose, buffer) -> fillBar(buffer, pose, fw - e, fw, -fh + e, fh - e, 0.485f, c));
+        }
 
         // 进度条（画面下方）
         drawProgressBar(collector, poseStack, state, halfW, halfH);

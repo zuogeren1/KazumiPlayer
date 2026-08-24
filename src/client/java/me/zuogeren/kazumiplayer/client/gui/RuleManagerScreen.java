@@ -37,13 +37,13 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
     private final Map<String, Long> latencies = new HashMap<>();
     private final Set<String> failed = new HashSet<>();
     private final Set<String> testing = new HashSet<>();
-    private String statusTitle = "";
+    private net.minecraft.network.chat.Component statusTitle = Component.empty();
     private long statusTitleAt;
 
     private SimpleList ruleList;
 
     public RuleManagerScreen() {
-        super(Component.literal("规则管理器"));
+        super(Component.translatable("kazumiplayer.gui.rule.title"));
     }
 
     @Override
@@ -56,11 +56,11 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
         int w = this.width, h = this.height;
         int listBottom = h - 36;
 
-        this.addRenderableWidget(Button.builder(Component.literal("刷新列表"), b -> refreshList())
+        this.addRenderableWidget(Button.builder(Component.translatable("kazumiplayer.gui.rule.btn_refresh"), b -> refreshList())
             .bounds(6, 6, 60, 18).build());
-        this.addRenderableWidget(Button.builder(Component.literal("测试全部"), b -> testAll())
+        this.addRenderableWidget(Button.builder(Component.translatable("kazumiplayer.gui.rule.btn_test_all"), b -> testAll())
             .bounds(70, 6, 60, 18).build());
-        this.addRenderableWidget(Button.builder(Component.literal("关闭"), b -> this.onClose())
+        this.addRenderableWidget(Button.builder(Component.translatable("kazumiplayer.gui.main.btn_close"), b -> this.onClose())
             .bounds(w - 52, 6, 46, 18).build());
 
         this.ruleList = new SimpleList(this.minecraft, w - 12, listBottom - 42, 42, ROW_HEIGHT);
@@ -68,7 +68,8 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
         this.addRenderableWidget(this.ruleList);
 
         GuiClientState.setListener(this);
-        refreshList();
+        // 打开界面只读服务端缓存目录（不拉云端）；「刷新列表」按钮才强制获取
+        loadCachedList();
     }
 
     @Override
@@ -83,19 +84,20 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
         int w = this.width, h = this.height;
-        graphics.text(this.font, Component.literal("规则管理器")
+        graphics.text(this.font, Component.translatable("kazumiplayer.gui.rule.title")
             .withStyle(ChatFormatting.BOLD), 8, 28, -1);
 
         long installed = entries.stream().filter(GuiPayloads.RuleListEntryPayload::installed).count();
         long deprecated = entries.stream().filter(GuiPayloads.RuleListEntryPayload::installed)
             .filter(GuiPayloads.RuleListEntryPayload::deprecated).count();
-        String stats = "共 " + entries.size() + " 条 · 已安装 " + installed
-            + (deprecated > 0 ? " · 已弃用 " + deprecated : "");
+        String stats = Component.translatable("kazumiplayer.gui.rule.stats",
+                entries.size(), installed).getString()
+            + (deprecated > 0 ? Component.translatable("kazumiplayer.gui.rule.stats_deprecated", deprecated).getString() : "");
         graphics.text(this.font, Component.literal(stats).withStyle(ChatFormatting.GRAY),
-            8 + this.font.width("规则管理器") + 12, 28, -1);
+            8 + this.font.width(Component.translatable("kazumiplayer.gui.rule.title").getString()) + 12, 28, -1);
 
-        if (!statusTitle.isEmpty() && System.currentTimeMillis() - statusTitleAt < STATUS_TOAST_MS) {
-            String t = "» " + statusTitle;
+        if (!statusTitle.getString().isEmpty() && System.currentTimeMillis() - statusTitleAt < STATUS_TOAST_MS) {
+            String t = "» " + statusTitle.getString();
             int tw = this.font.width(t);
             int y = h - 26;
             graphics.fill(5, y, 12 + tw + 6, y + 14, 0xE0101008);
@@ -106,8 +108,8 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
         }
     }
 
-    private void setStatus(String text) {
-        this.statusTitle = text == null ? "" : text;
+    private void setStatus(net.minecraft.network.chat.Component text) {
+        this.statusTitle = text == null ? Component.empty() : text;
         this.statusTitleAt = System.currentTimeMillis();
     }
 
@@ -137,16 +139,18 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
                     failed.add(r.name());
                 }
                 rebuildList();
-                setStatus(r.ok() ? r.name() + " 连通正常，延迟 " + r.latency() + "ms" : r.name() + " 连通失败");
+                setStatus(r.ok()
+                ? Component.translatable("kazumiplayer.gui.rule.test_ok", r.name(), r.latency())
+                : Component.translatable("kazumiplayer.gui.rule.test_fail", r.name()));
             }
             case GuiProtocol.DATA_PLAY_OK -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.PlayOkPayload.class);
-                setStatus(p != null ? p.title() : "操作完成");
+                setStatus(p != null ? Component.literal(p.title()) : Component.translatable("kazumiplayer.gui.main.status_done"));
             }
             case GuiProtocol.DATA_ERROR -> {
                 var p = GuiPayloads.fromJson(json, GuiPayloads.ErrorPayload.class);
                 if (p != null) {
-                    setStatus(p.message());
+                    setStatus(p.toComponent());
                     KazumiLog.network.warn("Rule manager action failed: {}", p.message());
                 }
             }
@@ -163,17 +167,17 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
             List<SimpleList.Cell> tail = new ArrayList<>();
             if (e.installed()) {
                 boolean busy = testing.contains(e.name());
-                tail.add(new SimpleList.Cell(busy ? "…" : "测", () -> testRule(e.name())));
-                tail.add(new SimpleList.Cell("删", () -> deleteRule(e.name())));
+                tail.add(new SimpleList.Cell(busy ? "…" : Component.translatable("kazumiplayer.gui.rule.cell_test").getString(), () -> testRule(e.name())));
+                tail.add(new SimpleList.Cell(Component.translatable("kazumiplayer.gui.main.cell_remove").getString(), () -> deleteRule(e.name())));
                 this.ruleList.addRowWithTail(text, -1, 0, null,
                     List.copyOf(tail), TAIL_W * 2);
             } else {
-                tail.add(new SimpleList.Cell("装", () -> pullRule(e.name())));
+                tail.add(new SimpleList.Cell(Component.translatable("kazumiplayer.gui.rule.cell_install").getString(), () -> pullRule(e.name())));
                 this.ruleList.addRowWithTail(text, -1, 0, null, List.copyOf(tail), TAIL_W);
             }
         }
         if (entries.isEmpty()) {
-            this.ruleList.addRow(Component.literal("（列表为空，点击「刷新列表」获取）")
+            this.ruleList.addRow(Component.translatable("kazumiplayer.gui.rule.list_empty").withStyle(ChatFormatting.DARK_GRAY)
                 .withStyle(ChatFormatting.DARK_GRAY), -1, null);
         }
     }
@@ -183,12 +187,12 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
             + (e.installed() ? e.installedVersion() : e.remoteVersion());
         if (e.installed()) {
             Long lat = latencies.get(e.name());
-            if (testing.contains(e.name())) s += " · 测试中…";
-            else if (failed.contains(e.name())) s += " · 连通失败";
+            if (testing.contains(e.name())) s += Component.translatable("kazumiplayer.gui.rule.testing_suffix").getString();
+            else if (failed.contains(e.name())) s += Component.translatable("kazumiplayer.gui.rule.failed_suffix").getString();
             else if (lat != null) s += " · " + lat + "ms";
         }
         if (!e.author().isEmpty()) s += " · " + e.author();
-        if (e.deprecated()) s += " [已弃用]";
+        if (e.deprecated()) s += Component.translatable("kazumiplayer.gui.rule.deprecated_tag").getString();
         return e.deprecated()
             ? Component.literal(s).withStyle(ChatFormatting.RED)
             : Component.literal(s);
@@ -196,18 +200,25 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
 
     // ---- 操作 ----
 
+    /** 「刷新列表」按钮：强制拉取云端目录并更新服务端缓存 */
     private void refreshList() {
-        setStatus("正在获取规则列表...");
-        sendAction(GuiProtocol.ACTION_RULE_LIST, "{}");
+        setStatus(Component.translatable("kazumiplayer.gui.rule.status_fetching"));
+        sendAction(GuiProtocol.ACTION_RULE_LIST, new GuiPayloads.RuleListPayload(true));
+    }
+
+    /** 打开界面：读服务端缓存目录（无缓存时服务端自动拉取一次） */
+    private void loadCachedList() {
+        setStatus(Component.translatable("kazumiplayer.gui.rule.status_loading"));
+        sendAction(GuiProtocol.ACTION_RULE_LIST, new GuiPayloads.RuleListPayload(false));
     }
 
     private void pullRule(String name) {
-        setStatus("正在拉取 " + name + " ...");
+        setStatus(Component.translatable("kazumiplayer.gui.rule.status_pulling", name));
         sendAction(GuiProtocol.ACTION_RULE_PULL, new GuiPayloads.RuleNamePayload(name));
     }
 
     private void deleteRule(String name) {
-        setStatus("正在删除 " + name + " ...");
+        setStatus(Component.translatable("kazumiplayer.gui.rule.status_deleting", name));
         sendAction(GuiProtocol.ACTION_RULE_DELETE, new GuiPayloads.RuleNamePayload(name));
     }
 
@@ -228,7 +239,9 @@ public class RuleManagerScreen extends Screen implements GuiClientState.Listener
             }
         }
         rebuildList();
-        setStatus(any ? "正在测试全部已安装规则..." : "没有已安装的规则");
+        setStatus(any
+                ? Component.translatable("kazumiplayer.gui.rule.status_testing_all")
+                : Component.translatable("kazumiplayer.gui.rule.status_no_rules"));
     }
 
     private void sendAction(String action, Object payloadJson) {

@@ -43,7 +43,7 @@ public final class GuiProtocol {
     public static final String ACTION_QUEUE_SKIP_CURRENT = "queue_skip_current";
 
     // ---- 规则管理器（RuleManagerScreen）----
-    /** {} 获取远程仓库规则列表 + 本地安装状态合并 */
+    /** {refresh} 获取远程仓库规则列表 + 本地安装状态合并；refresh=false 读服务端缓存，true 强制拉取云端 */
     public static final String ACTION_RULE_LIST = "rule_list";
     /** {name} 从远程拉取并安装规则 */
     public static final String ACTION_RULE_PULL = "rule_pull";

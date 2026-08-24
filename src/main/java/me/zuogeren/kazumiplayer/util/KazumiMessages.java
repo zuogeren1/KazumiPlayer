@@ -48,6 +48,47 @@ public final class KazumiMessages {
         return Component.literal(PFX + "§c" + msg);
     }
 
+    // ---- Component 构建（i18n）：key 由客户端语言文件翻译 ----
+
+    /** 统一前缀 + 指定颜色的可本地化消息组件 */
+    private static MutableComponent prefixed(net.minecraft.ChatFormatting color, String key, String... args) {
+        var body = Component.translatable(key, java.util.Arrays.stream(args)
+                .map(Component::literal).toArray(Component[]::new)).withStyle(color);
+        return Component.literal("[KazumiPlayer]").withStyle(net.minecraft.ChatFormatting.GREEN)
+                .append(Component.literal(" "))
+                .append(body);
+    }
+
+    /** 成功消息组件（i18n）：绿色 */
+    public static MutableComponent successKey(String key, String... args) {
+        return prefixed(net.minecraft.ChatFormatting.GREEN, key, args);
+    }
+
+    /** 普通信息组件（i18n）：白色 */
+    public static MutableComponent infoKey(String key, String... args) {
+        return prefixed(net.minecraft.ChatFormatting.WHITE, key, args);
+    }
+
+    /** 警告消息组件（i18n）：黄色 */
+    public static MutableComponent warnKey(String key, String... args) {
+        return prefixed(net.minecraft.ChatFormatting.YELLOW, key, args);
+    }
+
+    /** 错误消息组件（i18n）：红色 */
+    public static MutableComponent errorKey(String key, String... args) {
+        return prefixed(net.minecraft.ChatFormatting.RED, key, args);
+    }
+
+    /** 把任意消息体包装为带统一前缀与黄色的警告反馈 */
+    public static MutableComponent warnOf(net.minecraft.network.chat.Component body) {
+        return Component.literal(PFX + "§e").append(body);
+    }
+
+    /** 把任意消息体包装为带统一前缀与红色的错误反馈 */
+    public static MutableComponent errorOf(net.minecraft.network.chat.Component body) {
+        return Component.literal(PFX + "§c").append(body);
+    }
+
     // ---- 发送到 Player（ServerPlayer 与 LocalPlayer 通用） ----
 
     public static void sendSuccess(Player player, String msg) {
@@ -64,6 +105,24 @@ public final class KazumiMessages {
 
     public static void sendError(Player player, String msg) {
         player.sendSystemMessage(error(msg));
+    }
+
+    // ---- 发送到 Player（i18n） ----
+
+    public static void sendSuccessKey(Player player, String key, String... args) {
+        player.sendSystemMessage(successKey(key, args));
+    }
+
+    public static void sendInfoKey(Player player, String key, String... args) {
+        player.sendSystemMessage(infoKey(key, args));
+    }
+
+    public static void sendWarnKey(Player player, String key, String... args) {
+        player.sendSystemMessage(warnKey(key, args));
+    }
+
+    public static void sendErrorKey(Player player, String key, String... args) {
+        player.sendSystemMessage(errorKey(key, args));
     }
 
     // ---- 发送到 CommandSourceStack（命令反馈） ----
@@ -84,6 +143,24 @@ public final class KazumiMessages {
         src.sendSystemMessage(error(msg));
     }
 
+    // ---- 发送到 CommandSourceStack（i18n） ----
+
+    public static void sendSuccessKey(CommandSourceStack src, String key, String... args) {
+        src.sendSystemMessage(successKey(key, args));
+    }
+
+    public static void sendInfoKey(CommandSourceStack src, String key, String... args) {
+        src.sendSystemMessage(infoKey(key, args));
+    }
+
+    public static void sendWarnKey(CommandSourceStack src, String key, String... args) {
+        src.sendSystemMessage(warnKey(key, args));
+    }
+
+    public static void sendErrorKey(CommandSourceStack src, String key, String... args) {
+        src.sendSystemMessage(errorKey(key, args));
+    }
+
     // ---- 发送到客户端聊天框（无 Player 引用时，如异步回调/静态上下文） ----
 
     public static void chatSuccess(String msg) {
@@ -100,6 +177,24 @@ public final class KazumiMessages {
 
     public static void chatError(String msg) {
         net.minecraft.client.Minecraft.getInstance().gui.getChat().addClientSystemMessage(error(msg));
+    }
+
+    // ---- 发送到客户端聊天框（i18n） ----
+
+    public static void chatSuccessKey(String key, String... args) {
+        net.minecraft.client.Minecraft.getInstance().gui.getChat().addClientSystemMessage(successKey(key, args));
+    }
+
+    public static void chatInfoKey(String key, String... args) {
+        net.minecraft.client.Minecraft.getInstance().gui.getChat().addClientSystemMessage(infoKey(key, args));
+    }
+
+    public static void chatWarnKey(String key, String... args) {
+        net.minecraft.client.Minecraft.getInstance().gui.getChat().addClientSystemMessage(warnKey(key, args));
+    }
+
+    public static void chatErrorKey(String key, String... args) {
+        net.minecraft.client.Minecraft.getInstance().gui.getChat().addClientSystemMessage(errorKey(key, args));
     }
 
     // ---- 展示区块标识（搜索结果/列表排版内容，不加前缀，用分隔线标识来源） ----

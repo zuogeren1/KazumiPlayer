@@ -47,11 +47,11 @@ public class PlayCommands {
         ServerPlayer player = src.getPlayerOrException();
         BlockPos pos = getTargetScreen(player);
         if (pos == null) {
-            src.sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
+            src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.screen.aim")));
             return null;
         }
         if (!(player.level().getBlockEntity(pos) instanceof VideoScreenBlockEntity screen)) {
-            src.sendFailure(KazumiMessages.error("目标方块不是屏幕"));
+            src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.err.not_screen")));
             return null;
         }
         return new Target(player, pos, screen);
@@ -68,8 +68,9 @@ public class PlayCommands {
             Target t = target(src);
             if (t == null) return 0;
             var r = op.run(t.player(), t.pos(), t.screen());
-            if (r.success()) KazumiMessages.sendSuccess(src, successPrefix + r.detail());
-            else src.sendFailure(KazumiMessages.error(r.detail()));
+            if (r.success()) src.sendSuccess(() -> KazumiMessages.successKey("kazumiplayer.msg.ok.generic",
+                    r.detail().getString()), false);
+            else src.sendFailure(KazumiMessages.errorOf(r.detail()));
             return r.success() ? 1 : 0;
         } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
             return 0;
@@ -103,14 +104,14 @@ public class PlayCommands {
         // /kazumi play stop
         var stop = Commands.literal("stop")
             .executes(ctx -> execute(ctx.getSource(), "",
-                (p, pos, s) -> { PlaybackController.leaveOwn(p, pos, s, "停止了播放");
-                    return PlaybackController.OpResult.ok("已停止当前客户端播放"); }));
+                (p, pos, s) -> { PlaybackController.leaveOwn(p, pos, s, Component.translatable("kazumiplayer.msg.notify.stop_playing").getString());
+                    return PlaybackController.OpResult.ok(Component.translatable("kazumiplayer.msg.ok.stopped_client")); }));
 
         // /kazumi play leave
         var leave = Commands.literal("leave")
             .executes(ctx -> execute(ctx.getSource(), "",
-                (p, pos, s) -> { PlaybackController.leaveOwn(p, pos, s, "离开了同步播放");
-                    return PlaybackController.OpResult.ok("已离开同步播放"); }));
+                (p, pos, s) -> { PlaybackController.leaveOwn(p, pos, s, Component.translatable("kazumiplayer.msg.notify.left_sync").getString());
+                    return PlaybackController.OpResult.ok(Component.translatable("kazumiplayer.msg.ok.left")); }));
 
         return play.then(playUrl).then(join).then(stop).then(leave);
     }
@@ -120,9 +121,9 @@ public class PlayCommands {
     public static LiteralArgumentBuilder<CommandSourceStack> buildControl() {
         return Commands.literal("control")
             .then(Commands.literal("next")
-                .executes(ctx -> execute(ctx.getSource(), "已切换到: ", (p, pos, s) -> PlaybackController.switchEpisode(p, pos, s, true))))
+                .executes(ctx -> execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.switched_to").getString(), (p, pos, s) -> PlaybackController.switchEpisode(p, pos, s, true))))
             .then(Commands.literal("prev")
-                .executes(ctx -> execute(ctx.getSource(), "已切换到: ", (p, pos, s) -> PlaybackController.switchEpisode(p, pos, s, false))))
+                .executes(ctx -> execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.switched_to").getString(), (p, pos, s) -> PlaybackController.switchEpisode(p, pos, s, false))))
             .then(Commands.literal("pause")
                 .executes(ctx -> execute(ctx.getSource(), "", (p, pos, s) -> PlaybackController.setPaused(p, pos, s, true))))
             .then(Commands.literal("resume")
@@ -130,12 +131,12 @@ public class PlayCommands {
             .then(Commands.literal("time")
                 .then(Commands.literal("forward")
                     .then(Commands.argument("seconds", IntegerArgumentType.integer(1))
-                        .executes(ctx -> execute(ctx.getSource(), "时间调整: ",
+                        .executes(ctx -> execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.time_adjusted").getString(),
                             (p, pos, s) -> PlaybackController.adjustTime(p, pos, s,
                                 IntegerArgumentType.getInteger(ctx, "seconds"))))))
                 .then(Commands.literal("back")
                     .then(Commands.argument("seconds", IntegerArgumentType.integer(1))
-                        .executes(ctx -> execute(ctx.getSource(), "时间调整: ",
+                        .executes(ctx -> execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.time_adjusted").getString(),
                             (p, pos, s) -> PlaybackController.adjustTime(p, pos, s,
                                 -IntegerArgumentType.getInteger(ctx, "seconds"))))))
                 .then(Commands.literal("goto")
@@ -143,10 +144,10 @@ public class PlayCommands {
                         .executes(ctx -> {
                             long ms = parseTime(StringArgumentType.getString(ctx, "time"));
                             if (ms < 0) {
-                                ctx.getSource().sendFailure(KazumiMessages.error("格式错误, 例: 2:30 或 1:05:00"));
+                                ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.play.bad_time_format")));
                                 return 0;
                             }
-                            return execute(ctx.getSource(), "跳转到: ",
+                            return execute(ctx.getSource(), Component.translatable("kazumiplayer.cmd.play.goto").getString(),
                                 (p, pos, s) -> PlaybackController.seekTo(p, pos, s, ms));
                         }))));
     }
@@ -168,13 +169,13 @@ public class PlayCommands {
             String url = StringArgumentType.getString(ctx, "url");
             BlockPos screenPos = getTargetScreen(player);
             if (screenPos == null) {
-                ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
+                ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.screen.aim")));
                 return 0;
             }
-            String err = me.zuogeren.kazumiplayer.network.QueueRequestHandlers.submit(
+            var err = me.zuogeren.kazumiplayer.network.QueueRequestHandlers.submit(
                 player, screenPos, List.of(url));
             if (err != null) {
-                ctx.getSource().sendFailure(KazumiMessages.error(err));
+                ctx.getSource().sendFailure(KazumiMessages.errorOf(err.toComponent()));
                 return 0;
             }
             return 1;
@@ -213,7 +214,7 @@ public class PlayCommands {
         try {
             player = ctx.getSource().getPlayerOrException();
         } catch (Exception e) {
-            ctx.getSource().sendFailure(KazumiMessages.error("该命令只能由玩家执行"));
+            ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.player_only")));
             return 0;
         }
         String ruleName = StringArgumentType.getString(ctx, "rule");
@@ -222,33 +223,33 @@ public class PlayCommands {
 
         BlockPos screenPos = getTargetScreen(player);
         if (screenPos == null) {
-            ctx.getSource().sendFailure(KazumiMessages.error("请瞄准一个屏幕!"));
+            ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.screen.aim")));
             return 0;
         }
 
         Rule rule = ruleManager.get(ruleName);
         if (rule == null) {
-            ctx.getSource().sendFailure(KazumiMessages.error("规则不存在: " + ruleName));
+            ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule_not_found", ruleName)));
             return 0;
         }
         if (rule.isDeprecated()) {
             KazumiMessages.sendWarn(ctx.getSource(),
-                "警告: 规则 " + ruleName + " 已被官方标记为已弃用 (deprecated)，可能已失效，建议改用其他规则");
+                Component.translatable("kazumiplayer.cmd.rule_deprecated_warn", ruleName).getString());
         }
 
         var entry = searchManager.getCache().lookup(resultId);
         if (entry == null) {
-            ctx.getSource().sendFailure(KazumiMessages.error("搜索结果已过期，请重新搜索"));
+            ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.results_expired")));
             return 0;
         }
 
         String source = entry.item().src();
-        KazumiMessages.sendInfo(ctx.getSource(), "正在获取剧集列表...");
+        KazumiMessages.sendInfoKey(ctx.getSource(), "kazumiplayer.cmd.episodes.fetching");
 
         ruleManager.getEngine().queryChapters(rule, source)
             .thenAccept(result -> {
                 if (result.roads().isEmpty()) {
-                    ctx.getSource().sendFailure(KazumiMessages.error("未找到剧集列表"));
+                    ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.episodes.not_found_list")));
                     return;
                 }
                 int roadIdx = Math.max(0, Math.min(roadNumber - 1, result.roads().size() - 1));
@@ -266,9 +267,9 @@ public class PlayCommands {
                         screen.setPlayingTitle(entry.item().name());
                     }
                 });
-                String epName = road.identifier().size() > idx ? road.identifier().get(idx) : ("第" + episode + "集");
+                String epName = road.identifier().size() > idx ? road.identifier().get(idx) : Component.translatable("kazumiplayer.gui.main.episode_n", episode).getString();
                 KazumiMessages.sendSuccess(ctx.getSource(),
-                    "正在播放: " + epName + " (第" + episode + "集，" + road.name() + ")");
+                    Component.translatable("kazumiplayer.cmd.play.now_playing_road", epName, episode, road.name()).getString());
             })
             .exceptionally(e -> {
                 ctx.getSource().sendFailure(KazumiMessages.error(
@@ -284,14 +285,14 @@ public class PlayCommands {
     private static int showEpisodes(CommandSourceStack src, String ruleName, String resultId,
                                      int page, RuleManager ruleManager, SearchManager searchManager) {
         Rule rule = ruleManager.get(ruleName);
-        if (rule == null) { src.sendFailure(KazumiMessages.error("规则不存在: " + ruleName)); return 0; }
+        if (rule == null) { src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule_not_found", ruleName))); return 0; }
         var entry = searchManager.getCache().lookup(resultId);
-        if (entry == null) { src.sendFailure(KazumiMessages.error("搜索结果已过期")); return 0; }
+        if (entry == null) { src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.results_expired_short"))); return 0; }
 
-        KazumiMessages.sendInfo(src, "正在获取集数列表...");
+        KazumiMessages.sendInfoKey(src, "kazumiplayer.cmd.episodes.fetching");
         ruleManager.getEngine().queryChapters(rule, entry.item().src())
             .thenAccept(result -> {
-                if (result.roads().isEmpty()) { src.sendFailure(KazumiMessages.error("未找到集数")); return; }
+                if (result.roads().isEmpty()) { src.sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.episodes.not_found"))); return; }
                 Road road = result.roads().get(0);
                 int total = road.data().size();
                 int perPage = 36; // 每页36集 (6列×6行)
@@ -302,14 +303,14 @@ public class PlayCommands {
 
                 src.sendSystemMessage(KazumiMessages.separator());
                 src.sendSystemMessage(Component.literal("=== " + entry.item().name()
-                    + " 共" + total + "集 (第" + cp + "/" + totalPages + "页) ==="));
+                    + Component.translatable("kazumiplayer.cmd.episodes.header", total, cp, totalPages).getString() + " ==="));;
 
                 var line = Component.literal("");
                 int count = 0;
                 for (int i = start; i < end; i++) {
-                    String label = road.identifier().size() > i ? road.identifier().get(i) : ("第" + (i+1) + "集");
+                    String label = road.identifier().size() > i ? road.identifier().get(i) : Component.translatable("kazumiplayer.gui.main.episode_n", i+1).getString();
                     String cmd = "/kazumi play " + ruleName + " " + resultId + " " + (i + 1);
-                    line.append(ChatComponentUtil.clickable("[" + label + "] ", cmd, "点击播放 " + label));
+                    line.append(ChatComponentUtil.clickable("[" + label + "] ", cmd, Component.translatable("kazumiplayer.cmd.play.click_play", label).getString()));
                     count++;
                     if (count % 6 == 0) {
                         src.sendSystemMessage(line);
@@ -323,17 +324,17 @@ public class PlayCommands {
                     if (cp > 1) {
                         int prev = cp - 1;
                         nav.append(ChatComponentUtil.clickable("<<< 上一页  ",
-                            "/kazumi episodes " + ruleName + " " + resultId + " " + prev, "第" + prev + "页"));
+                            "/kazumi episodes " + ruleName + " " + resultId + " " + prev, Component.translatable("kazumiplayer.cmd.page.n", prev).getString()));
                     }
                     if (cp < totalPages) {
                         int next = cp + 1;
                         nav.append(ChatComponentUtil.clickable(">>> 下一页",
-                            "/kazumi episodes " + ruleName + " " + resultId + " " + next, "第" + next + "页"));
+                            "/kazumi episodes " + ruleName + " " + resultId + " " + next, Component.translatable("kazumiplayer.cmd.page.n", next).getString()));
                     }
                     src.sendSystemMessage(nav);
                 }
             })
-            .exceptionally(e -> { src.sendFailure(KazumiMessages.error("获取失败: " + e.getMessage())); return null; });
+            .exceptionally(e -> { KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.episodes.failed", String.valueOf(e.getMessage())); return null; });
         return 1;
     }
 

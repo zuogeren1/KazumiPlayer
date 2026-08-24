@@ -34,6 +34,7 @@ public class KazumiCommand {
                 .then(PlayCommands.build(ruleManager, searchManager))
                 .then(PlayCommands.buildControl())
                 .then(PlayCommands.buildEpisodes(ruleManager, searchManager))
+                .then(QueueCommands.build())
         );
 
         // 旧一级写法的透明转发别名（play-url / join）

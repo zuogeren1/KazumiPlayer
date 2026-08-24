@@ -16,7 +16,12 @@ public class ChatComponentUtil {
      * 创建可点击填充到聊天输入框的文本
      */
     public static MutableComponent suggestable(String text, String command) {
-        return Component.literal(text)
+        return suggestable(Component.literal(text), command);
+    }
+
+    /** 可本地化组件版本 */
+    public static MutableComponent suggestable(Component text, String command) {
+        return text.copy()
                 .withStyle(style -> style
                         .withClickEvent(new ClickEvent.SuggestCommand(command))
                         .withHoverEvent(new HoverEvent.ShowText(Component.literal("点击填充到聊天栏")))
@@ -27,10 +32,15 @@ public class ChatComponentUtil {
      * 创建可执行命令的文本
      */
     public static MutableComponent clickable(String text, String command, String hoverText) {
-        return Component.literal(text)
+        return clickable(Component.literal(text), command, Component.literal(hoverText));
+    }
+
+    /** 可本地化组件版本 */
+    public static MutableComponent clickable(Component text, String command, Component hoverText) {
+        return text.copy()
                 .withStyle(style -> style
                         .withClickEvent(new ClickEvent.RunCommand(command))
-                        .withHoverEvent(new HoverEvent.ShowText(Component.literal(hoverText)))
+                        .withHoverEvent(new HoverEvent.ShowText(hoverText))
                         .withColor(ChatFormatting.GREEN));
     }
 
@@ -48,11 +58,19 @@ public class ChatComponentUtil {
         return Component.literal(text).withStyle(ChatFormatting.RED);
     }
 
+    /** 可本地化悬停文本版本 */
+    public static MutableComponent clickable(String text, String command, Component hoverText) {
+        return clickable(Component.literal(text), command, hoverText);
+    }
+
     /**
      * 标题信息
      */
     public static MutableComponent header(String text) {
-        return Component.literal(text)
-                .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD);
+        return header(Component.literal(text));
+    }
+
+    public static MutableComponent header(Component text) {
+        return text.copy().withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD);
     }
 }

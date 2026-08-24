@@ -40,6 +40,9 @@ public final class GuiPayloads {
     /** 规则按名称操作（pull/delete/test 共用） */
     public record RuleNamePayload(String name) {}
 
+    /** 规则列表请求：refresh=true 强制拉取云端目录（「刷新列表」按钮），false 读缓存（打开界面） */
+    public record RuleListPayload(boolean refresh) {}
+
     // ---- S→C 响应 ----
 
     public record BangumiResultItem(String name, String date, String summary) {}
@@ -56,9 +59,58 @@ public final class GuiPayloads {
      */
     public record ChaptersPayload(List<String> roads, int road, List<String> names, int total) {}
 
-    public record PlayOkPayload(String title) {}
+    /**
+     * 成功回包：key 为翻译键，title 为纯文本兜底；两者互斥使用。
+     */
+    public record PlayOkPayload(String title, String key, java.util.List<String> args) {
+        public static PlayOkPayload literal(String title) {
+            return new PlayOkPayload(title, null, java.util.List.of());
+        }
 
-    public record ErrorPayload(String message) {}
+        public static PlayOkPayload of(String key, String... args) {
+            return new PlayOkPayload(null, key, java.util.List.of(args));
+        }
+
+        /** 渲染为可本地化组件 */
+        public net.minecraft.network.chat.Component toComponent() {
+            if (key != null && !key.isEmpty()) {
+                var components = new net.minecraft.network.chat.Component[args == null ? 0 : args.size()];
+                for (int i = 0; i < components.length; i++) {
+                    components[i] = net.minecraft.network.chat.Component.literal(args.get(i));
+                }
+                return net.minecraft.network.chat.Component.translatable(key, components);
+            }
+            return net.minecraft.network.chat.Component.literal(title == null ? "" : title);
+        }
+    }
+
+    /**
+     * 错误回包：key 为翻译键（args 为填充参数），message 为纯文本兜底；
+     * 两者互斥使用，反序列化旧格式时仅 message 有值。
+     */
+    public record ErrorPayload(String message, String key, List<String> args) {
+        /** 纯文本错误（不经 i18n） */
+        public static ErrorPayload literal(String message) {
+            return new ErrorPayload(message, null, List.of());
+        }
+
+        /** 翻译键 + 填充参数 */
+        public static ErrorPayload of(String key, String... args) {
+            return new ErrorPayload(null, key, List.of(args));
+        }
+
+        /** 渲染为可本地化组件；旧格式仅 message 时按字面量显示 */
+        public net.minecraft.network.chat.Component toComponent() {
+            if (key != null && !key.isEmpty()) {
+                var components = new net.minecraft.network.chat.Component[args == null ? 0 : args.size()];
+                for (int i = 0; i < components.length; i++) {
+                    components[i] = net.minecraft.network.chat.Component.literal(args.get(i));
+                }
+                return net.minecraft.network.chat.Component.translatable(key, components);
+            }
+            return net.minecraft.network.chat.Component.literal(message == null ? "" : message);
+        }
+    }
 
     // ---- 规则管理器 ----
 

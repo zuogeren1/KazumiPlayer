@@ -22,6 +22,7 @@ import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -69,17 +70,17 @@ public class GuiRequestHandlers {
                 case GuiProtocol.ACTION_QUEUE_ADD -> queueAdd(sp, packet.screenPos(), packet.payloadJson());
                 case GuiProtocol.ACTION_QUEUE_PLAY_NOW -> queuePlayNow(sp, packet.screenPos(), packet.payloadJson());
                 case GuiProtocol.ACTION_QUEUE_SKIP_CURRENT -> {
-                    String err = QueueRequestHandlers.skipCurrent(sp, packet.screenPos());
+                    var err = QueueRequestHandlers.skipCurrent(sp, packet.screenPos());
                     if (err != null) sendError(sp, err); // 成功反馈经队列面板 NBT 同步与通知体现
                 }
                 case GuiProtocol.ACTION_QUEUE_JUMP -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.JUMP);
                 case GuiProtocol.ACTION_QUEUE_MOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.MOVE);
                 case GuiProtocol.ACTION_QUEUE_REMOVE -> queueIndexOp(sp, packet.screenPos(), packet.payloadJson(), QueueOp.REMOVE);
-                case GuiProtocol.ACTION_RULE_LIST -> ruleList(sp);
+                case GuiProtocol.ACTION_RULE_LIST -> ruleList(sp, packet.payloadJson());
                 case GuiProtocol.ACTION_RULE_PULL -> ruleNameOp(sp, packet.payloadJson(), RuleOp.PULL);
                 case GuiProtocol.ACTION_RULE_DELETE -> ruleNameOp(sp, packet.payloadJson(), RuleOp.DELETE);
                 case GuiProtocol.ACTION_RULE_TEST -> ruleNameOp(sp, packet.payloadJson(), RuleOp.TEST);
-                default -> sendError(sp, "未知操作: " + packet.action());
+                default -> sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.err.unknown_action", packet.action()));
             }
         });
     }
@@ -103,7 +104,7 @@ public class GuiRequestHandlers {
             })
             .exceptionally(e -> {
                 KazumiLog.network.warn("GUI bangumi search '{}' failed: {}", payload.keyword(), e.getMessage());
-                return sendError(sp, "bgm 搜索失败: " + e.getMessage());
+                return sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.err.bgm_failed", String.valueOf(e.getMessage())));
             });
     }
 
@@ -129,7 +130,7 @@ public class GuiRequestHandlers {
         } else {
             Rule rule = ruleManager.get(payload.rule());
             if (rule == null) {
-                sendError(sp, "规则不存在: " + payload.rule());
+                sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.rule_not_found", payload.rule()));
                 return;
             }
             rules = Map.of(payload.rule(), rule);
@@ -184,18 +185,18 @@ public class GuiRequestHandlers {
         if (payload == null) return;
         var entry = searchManager.getCache().lookup(payload.id());
         if (entry == null) {
-            sendError(sp, "搜索结果已过期，请重新搜索");
+            sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.results_expired"));
             return;
         }
         Rule rule = ruleManager.get(payload.rule());
         if (rule == null) {
-            sendError(sp, "规则不存在: " + payload.rule());
+            sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.rule_not_found", payload.rule()));
             return;
         }
         ruleManager.getEngine().queryChapters(rule, entry.item().src())
             .thenAccept(result -> {
                 if (result.roads().isEmpty()) {
-                    sendError(sp, "未找到剧集列表");
+                    sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.episodes.not_found_list"));
                     return;
                 }
                 // 线路选择：road 为 0-based 下标，越界钳制到有效范围（对齐 Kazumi 保持集数序号换线）
@@ -205,12 +206,13 @@ public class GuiRequestHandlers {
                 int total = road.data().size();
                 List<String> names = new ArrayList<>();
                 for (int i = 0; i < total; i++) {
-                    names.add(road.identifier().size() > i ? road.identifier().get(i) : ("第" + (i + 1) + "集"));
+                    names.add(road.identifier().size() > i ? road.identifier().get(i)
+                    : Component.translatable("kazumiplayer.gui.main.episode_n", i + 1).getString());
                 }
                 send(sp, GuiProtocol.DATA_CHAPTERS,
                     GuiPayloads.toJson(new GuiPayloads.ChaptersPayload(roadNames, roadIdx, names, total)));
             })
-            .exceptionally(e -> sendError(sp, "获取剧集失败: " + e.getMessage()));
+            .exceptionally(e -> sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.episodes.failed", String.valueOf(e.getMessage()))));
     }
 
     // ---- 播放 ----
@@ -224,18 +226,18 @@ public class GuiRequestHandlers {
 
         var entry = searchManager.getCache().lookup(payload.id());
         if (entry == null) {
-            sendError(sp, "搜索结果已过期，请重新搜索");
+            sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.results_expired"));
             return;
         }
         Rule rule = ruleManager.get(payload.rule());
         if (rule == null) {
-            sendError(sp, "规则不存在: " + payload.rule());
+            sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.rule_not_found", payload.rule()));
             return;
         }
         ruleManager.getEngine().queryChapters(rule, entry.item().src())
             .thenAccept(result -> {
                 if (result.roads().isEmpty()) {
-                    sendError(sp, "未找到剧集列表");
+                    sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.episodes.not_found_list"));
                     return;
                 }
                 // 对齐 Kazumi 切线语义：保持集数序号，取目标线路的同序号集
@@ -245,7 +247,8 @@ public class GuiRequestHandlers {
                 String epUrl = road.data().get(idx - 1);
                 String roadJson = JsonUtil.GSON.toJson(result.roads());
 
-                String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
+                String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1)
+                    : Component.translatable("kazumiplayer.gui.main.episode_n", idx).getString();
 
                 MinecraftServer server = sp.level().getServer();
                 server.execute(() -> {
@@ -259,13 +262,14 @@ public class GuiRequestHandlers {
                     if (g != null) screen.setWatchingPlayers(g.watchingPlayersString());
                     SyncGroupManager.get().broadcastSyncState(sid, server);
                     SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid,
-                        "播放了 " + entry.item().name() + " " + name + "（" + road.name() + "）");
+                        Component.translatable("kazumiplayer.msg.notify.played_episode",
+                            entry.item().name(), name, road.name()));
                 });
                 send(sp, GuiProtocol.DATA_PLAY_OK,
-                    GuiPayloads.toJson(new GuiPayloads.PlayOkPayload(
-                        entry.item().name() + " " + name + "（" + road.name() + "）")));
+                    GuiPayloads.toJson(GuiPayloads.PlayOkPayload.of("kazumiplayer.msg.ok.played_episode",
+                        entry.item().name(), name, road.name())));
             })
-            .exceptionally(e -> sendError(sp, "播放失败: " + e.getMessage()));
+            .exceptionally(e -> sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.err.play_failed", String.valueOf(e.getMessage()))));
     }
 
     // ---- 加入 / 离开（与 /kazumi join、/kazumi play stop 同逻辑）----
@@ -274,7 +278,7 @@ public class GuiRequestHandlers {
         var be = sp.level().getBlockEntity(screenPos);
         if (!(be instanceof VideoScreenBlockEntity screen)) return;
         // 业务委托 PlaybackController（与命令层同一实现）
-        sendOk(sp, PlaybackController.joinScreen(sp, screenPos, screen).detail());
+        sendOk(sp, PlaybackController.joinScreen(sp, screenPos, screen).detail().getString());
     }
 
     private static void leave(ServerPlayer sp, BlockPos screenPos) {
@@ -325,7 +329,7 @@ public class GuiRequestHandlers {
 
         Direction facing = Direction.byName(p.facing());
         if (facing == null || facing.getAxis() == Direction.Axis.Y) {
-            sendError(sp, "无效方向: " + p.facing());
+            sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.screen.invalid_facing", p.facing()));
             return;
         }
         float width = clamp(p.width(), 0.5f, 128.0f);
@@ -360,7 +364,7 @@ public class GuiRequestHandlers {
     private static void queueAdd(ServerPlayer sp, BlockPos screenPos, String payloadJson) {
         var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.QueueAddPayload.class);
         if (payload == null || payload.urls() == null || payload.urls().isEmpty()) return;
-        String err = QueueRequestHandlers.submit(sp, screenPos, payload.urls());
+        var err = QueueRequestHandlers.submit(sp, screenPos, payload.urls());
         if (err != null) sendError(sp, err);
     }
 
@@ -368,7 +372,7 @@ public class GuiRequestHandlers {
     private static void queuePlayNow(ServerPlayer sp, BlockPos screenPos, String payloadJson) {
         var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.QueueAddPayload.class);
         if (payload == null || payload.urls() == null || payload.urls().isEmpty()) return;
-        String err = QueueRequestHandlers.playNow(sp, screenPos, payload.urls().get(0));
+        var err = QueueRequestHandlers.playNow(sp, screenPos, payload.urls().get(0));
         if (err != null) sendError(sp, err);
     }
 
@@ -376,7 +380,7 @@ public class GuiRequestHandlers {
     private static void queueIndexOp(ServerPlayer sp, BlockPos screenPos, String payloadJson, QueueOp op) {
         var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.QueueIndexPayload.class);
         if (payload == null) return;
-        String err = switch (op) {
+        GuiPayloads.ErrorPayload err = switch (op) {
             case JUMP -> QueueRequestHandlers.jump(sp, screenPos, payload.index());
             case MOVE -> QueueRequestHandlers.moveAfterCurrent(sp, screenPos, payload.index());
             case REMOVE -> QueueRequestHandlers.remove(sp, screenPos, payload.index());
@@ -388,9 +392,15 @@ public class GuiRequestHandlers {
 
     private enum RuleOp { PULL, DELETE, TEST }
 
-    /** 远程目录 + 本地安装状态合并为列表回推 */
-    private static void ruleList(ServerPlayer sp) {
-        ruleManager.getDownloader().fetchIndex()
+    /**
+     * 远程目录 + 本地安装状态合并为列表回推。
+     * refresh=false（打开界面）读服务端目录缓存；refresh=true（「刷新列表」按钮）强制拉取云端。
+     */
+    private static void ruleList(ServerPlayer sp, String payloadJson) {
+        boolean force = false;
+        var payload = GuiPayloads.fromJson(payloadJson, GuiPayloads.RuleListPayload.class);
+        if (payload != null) force = payload.refresh();
+        ruleManager.getDownloader().fetchIndex(force)
             .thenAccept(index -> {
                 List<GuiPayloads.RuleListEntryPayload> entries = new ArrayList<>();
                 // 已安装排最前（本地版本/弃用状态以本地为准，作者取远程目录补充）
@@ -410,7 +420,7 @@ public class GuiRequestHandlers {
                 }
                 send(sp, GuiProtocol.DATA_RULE_LIST, GuiPayloads.toJson(entries));
             })
-            .exceptionally(e -> sendError(sp, "获取规则目录失败: " + friendly(e)));
+            .exceptionally(e -> sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.rule.catalog_failed", friendly(e))));
     }
 
     private static void ruleNameOp(ServerPlayer sp, String payloadJson, RuleOp op) {
@@ -423,25 +433,28 @@ public class GuiRequestHandlers {
                     .thenAccept(rule -> {
                         ruleManager.install(rule);
                         broadcastRuleSync();
-                        sendOk(sp, "已安装规则: " + name);
+                        sendOkKey(sp, "kazumiplayer.cmd.rule.installed", name);
                         refreshListFor(sp);
                     })
-                    .exceptionally(e -> sendError(sp,
-                        "拉取规则失败: " + ruleManager.getDownloader().friendlyError(name, e)));
+                    .exceptionally(e -> {
+                        sendErrorKey(sp, "kazumiplayer.cmd.rule.download_failed",
+                            ruleManager.getDownloader().friendlyError(name, e));
+                        return null;
+                    });
             }
             case DELETE -> {
                 if (ruleManager.delete(name)) {
                     broadcastRuleSync();
-                    sendOk(sp, "已删除规则: " + name);
+                    sendOkKey(sp, "kazumiplayer.cmd.rule.deleted", name);
                     refreshListFor(sp);
                 } else {
-                    sendError(sp, "规则未安装: " + name);
+                    sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.rule_not_found", name));
                 }
             }
             case TEST -> {
                 Rule rule = ruleManager.get(name);
                 if (rule == null) {
-                    sendError(sp, "规则未安装: " + name);
+                    sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.cmd.rule_not_found", name));
                     return;
                 }
                 long start = System.currentTimeMillis();
@@ -458,9 +471,9 @@ public class GuiRequestHandlers {
         }
     }
 
-    /** 安装/删除后把合并列表重新推送给请求者，GUI 无需手动刷新 */
+    /** 安装/删除后把合并列表重新推送给请求者，GUI 无需手动刷新（读缓存目录，本地状态实时合并） */
     private static void refreshListFor(ServerPlayer sp) {
-        ruleList(sp);
+        ruleList(sp, "{}"); // refresh 缺省 = false，读缓存
     }
 
     private static String findRemoteMeta(List<me.zuogeren.kazumiplayer.rule.RuleIndex> index,
@@ -498,12 +511,29 @@ public class GuiRequestHandlers {
     }
 
     private static void sendOk(ServerPlayer sp, String message) {
-        send(sp, GuiProtocol.DATA_PLAY_OK, GuiPayloads.toJson(new GuiPayloads.PlayOkPayload(message)));
+        send(sp, GuiProtocol.DATA_PLAY_OK, GuiPayloads.toJson(GuiPayloads.PlayOkPayload.literal(message)));
+    }
+
+    private static void sendOkKey(ServerPlayer sp, String key, String... args) {
+        send(sp, GuiProtocol.DATA_PLAY_OK, GuiPayloads.toJson(GuiPayloads.PlayOkPayload.of(key, args)));
     }
 
     private static Void sendError(ServerPlayer sp, String message) {
-        send(sp, GuiProtocol.DATA_ERROR, GuiPayloads.toJson(new GuiPayloads.ErrorPayload(message)));
+        send(sp, GuiProtocol.DATA_ERROR, GuiPayloads.toJson(GuiPayloads.ErrorPayload.literal(message)));
         KazumiLog.network.debug("GUI request error for {}: {}", sp.getName().getString(), message);
+        return null;
+    }
+
+    private static Void sendError(ServerPlayer sp, GuiPayloads.ErrorPayload payload) {
+        send(sp, GuiProtocol.DATA_ERROR, GuiPayloads.toJson(payload));
+        KazumiLog.network.debug("GUI request error (localized) for {}", sp.getName().getString());
+        return null;
+    }
+
+    /** 回推可本地化的错误（key 由客户端语言文件渲染） */
+    private static Void sendErrorKey(ServerPlayer sp, String key, String... args) {
+        send(sp, GuiProtocol.DATA_ERROR, GuiPayloads.toJson(GuiPayloads.ErrorPayload.of(key, args)));
+        KazumiLog.network.debug("GUI request error for {}: {} ({})", sp.getName().getString(), key, String.join(",", args));
         return null;
     }
 }

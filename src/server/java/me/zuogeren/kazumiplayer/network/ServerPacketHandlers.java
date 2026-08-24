@@ -26,6 +26,7 @@ import me.zuogeren.kazumiplayer.util.MonoClock;
 import me.zuogeren.kazumiplayer.util.SyncNotificationUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -101,7 +102,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         var level = sp.level();
         level.getChunk(pos.getX() >> 4, pos.getZ() >> 4);
         if (!(level.getBlockEntity(pos) instanceof VideoScreenBlockEntity)) {
-            KazumiMessages.sendError(sp, "未找到屏幕方块（可能已被破坏）");
+            KazumiMessages.sendErrorKey(sp, "kazumiplayer.err.screen_missing");
             return false;
         }
         KazumiLog.network.info("Remote open at {} for {}", pos.toShortString(), sp.getName().getString());
@@ -140,8 +141,10 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             PlaybackController.applyEpisodeSwitch(sp, packet.screenPos(), screen, nextUrl, ri, idx,
                 JsonUtil.GSON.toJson(roads));
             // 通知所有观看者（包括触发者，因为自动切集没有单独提示）
-            String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1) : ("第" + idx + "集");
-            SyncNotificationUtil.broadcastToGroup(sp, packet.screenPos(), screen.getScreenId(), "自动切换到 " + name);
+            String name = road.identifier().size() > idx - 1 ? road.identifier().get(idx - 1)
+                    : Component.translatable("kazumiplayer.gui.main.episode_n", idx).getString();
+            SyncNotificationUtil.broadcastToGroup(sp, packet.screenPos(), screen.getScreenId(),
+                Component.translatable("kazumiplayer.msg.notify.auto_switched", name));
             KazumiLog.network.info("Auto next episode {}: {}", idx, nextUrl);
         });
     }
@@ -169,7 +172,8 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             if (p != null) PacketDistributor.sendToPlayer(p, new PlayStopPacket(pos));
         }
         // 通知所有观看者
-        SyncNotificationUtil.broadcastToGroup(triggerPlayer, pos, sid, "播放已结束");
+        SyncNotificationUtil.broadcastToGroup(triggerPlayer, pos, sid,
+                Component.translatable("kazumiplayer.msg.notify.playback_ended"));
         KazumiLog.network.info("Playback ended at {} ({} watchers notified)", pos, watchers.size());
     }
 

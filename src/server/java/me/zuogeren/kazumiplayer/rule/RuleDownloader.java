@@ -15,17 +15,36 @@ import java.util.concurrent.CompletableFuture;
  */
 public class RuleDownloader {
 
+    /** 远程目录内存缓存：GUI 打开/命令列表读缓存，仅显式刷新时重新拉取 */
+    private volatile List<RuleIndex> cachedIndex;
+
     /**
-     * 获取规则目录 (index.json)
+     * 获取规则目录 (index.json)：
+     * force=true 强制网络拉取并更新缓存（GUI「刷新列表」、命令 update/pull-all）；
+     * 否则缓存命中直接返回，未命中（服务端启动后首次）拉取一次并缓存。
      */
-    public CompletableFuture<List<RuleIndex>> fetchIndex() {
+    public CompletableFuture<List<RuleIndex>> fetchIndex(boolean forceRefresh) {
+        if (!forceRefresh) {
+            List<RuleIndex> cached = this.cachedIndex;
+            if (cached != null) {
+                return CompletableFuture.completedFuture(cached);
+            }
+        }
         String url = Config.CONFIG.githubRulesRepoUrl.get() + "index.json";
         return HttpUtil.fetch(url)
                 .thenApply(raw -> {
                     List<RuleIndex> index = JsonUtil.GSON.fromJson(raw,
                             new TypeToken<List<RuleIndex>>() {}.getType());
-                    return index != null ? index : Collections.emptyList();
+                    List<RuleIndex> result = index != null ? index : Collections.emptyList();
+                    this.cachedIndex = result;
+                    KazumiLog.rule.info("Rule index fetched (force={}), {} entries", forceRefresh, result.size());
+                    return result;
                 });
+    }
+
+    /** 获取规则目录（读缓存优先，无缓存时拉取一次） */
+    public CompletableFuture<List<RuleIndex>> fetchIndex() {
+        return fetchIndex(false);
     }
 
     /**

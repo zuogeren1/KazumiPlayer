@@ -26,31 +26,32 @@ public final class KazumiConfigScreen {
             "speaker", "audio", "network", "sync", "command", "search", "rule", "http");
 
     private static final java.util.Map<String, String> LOG_LABELS = java.util.Map.ofEntries(
-            java.util.Map.entry("general", "生命周期/通用"),
-            java.util.Map.entry("playback", "播放引擎"),
-            java.util.Map.entry("sniff", "视频嗅探"),
-            java.util.Map.entry("render", "渲染"),
-            java.util.Map.entry("screen", "屏幕方块"),
-            java.util.Map.entry("speaker", "音响"),
-            java.util.Map.entry("audio", "音频播放"),
-            java.util.Map.entry("network", "网络包"),
-            java.util.Map.entry("sync", "同步组"),
-            java.util.Map.entry("command", "命令"),
-            java.util.Map.entry("search", "搜索"),
-            java.util.Map.entry("rule", "规则引擎"),
-            java.util.Map.entry("http", "HTTP 请求"));
+            java.util.Map.entry("general", "kazumiplayer.config.log.general"),
+            java.util.Map.entry("playback", "kazumiplayer.config.log.playback"),
+            java.util.Map.entry("sniff", "kazumiplayer.config.log.sniff"),
+            java.util.Map.entry("render", "kazumiplayer.config.log.render"),
+            java.util.Map.entry("screen", "kazumiplayer.config.log.screen"),
+            java.util.Map.entry("speaker", "kazumiplayer.config.log.speaker"),
+            java.util.Map.entry("audio", "kazumiplayer.config.log.audio"),
+            java.util.Map.entry("network", "kazumiplayer.config.log.network"),
+            java.util.Map.entry("sync", "kazumiplayer.config.log.sync"),
+            java.util.Map.entry("command", "kazumiplayer.config.log.command"),
+            java.util.Map.entry("search", "kazumiplayer.config.log.search"),
+            java.util.Map.entry("rule", "kazumiplayer.config.log.rule"),
+            java.util.Map.entry("http", "kazumiplayer.config.log.http"));
 
     public static Screen create(Screen parent) {
         ConfigBuilder builder = ConfigBuilder.create()
                 .setParentScreen(parent)
-                .setTitle(Component.literal("KazumiPlayer 配置"));
+                .setTitle(Component.translatable("kazumiplayer.config.title"));
         ConfigEntryBuilder entry = builder.entryBuilder();
 
         // ---- 日志分类 DEBUG 开关（写入 COMMON 配置，保存即应用） ----
-        ConfigCategory logCategory = builder.getOrCreateCategory(Component.literal("日志"));
+        ConfigCategory logCategory = builder.getOrCreateCategory(Component.translatable("kazumiplayer.config.category_log"));
         for (String category : LOG_CATEGORIES) {
             logCategory.addEntry(entry.startBooleanToggle(
-                            Component.literal("DEBUG · " + LOG_LABELS.getOrDefault(category, category)),
+                            Component.translatable(
+                    LOG_LABELS.getOrDefault(category, "kazumiplayer.config.log." + category)),
                             LogConfig.isDebugEnabled(category))
                     .setDefaultValue(false)
                     .setSaveConsumer(enabled -> LogConfig.setDebugEnabled(category, enabled))
@@ -60,7 +61,7 @@ public final class KazumiConfigScreen {
         // ---- MCEF 浏览器 ----
         ConfigCategory mcefCategory = builder.getOrCreateCategory(Component.literal("MCEF"));
         mcefCategory.addEntry(entry.startEnumSelector(
-                        Component.literal("浏览器生命周期"),
+                        Component.translatable("kazumiplayer.config.mcef_lifecycle"),
                         ClientConfig.McefLifecycle.class,
                         ClientConfig.CONFIG.mcefLifecycle.get())
                 .setDefaultValue(ClientConfig.McefLifecycle.ON_DEMAND)
@@ -68,50 +69,65 @@ public final class KazumiConfigScreen {
                 .build());
 
         // ---- 播放 ----
-        ConfigCategory playbackCategory = builder.getOrCreateCategory(Component.literal("播放"));
+        ConfigCategory playbackCategory = builder.getOrCreateCategory(Component.translatable("kazumiplayer.config.category_playback"));
         playbackCategory.addEntry(entry.startDoubleField(
-                        Component.literal("默认音量"),
+                        Component.translatable("kazumiplayer.config.video_volume"),
                         ClientConfig.CONFIG.videoVolume.get())
                 .setDefaultValue(1.0)
                 .setMin(0.0).setMax(1.0)
                 .setSaveConsumer(value -> ClientConfig.CONFIG.videoVolume.set(value))
                 .build());
         playbackCategory.addEntry(entry.startIntField(
-                        Component.literal("最大同时嗅探数"),
+                        Component.translatable("kazumiplayer.config.max_sniffs"),
                         ClientConfig.CONFIG.maxConcurrentSniffs.get())
                 .setDefaultValue(3).setMin(1).setMax(10)
                 .setSaveConsumer(value -> ClientConfig.CONFIG.maxConcurrentSniffs.set(value))
                 .build());
         playbackCategory.addEntry(entry.startIntField(
-                        Component.literal("最大同时播放屏幕数"),
+                        Component.translatable("kazumiplayer.config.max_plays"),
                         ClientConfig.CONFIG.maxConcurrentPlays.get())
                 .setDefaultValue(3).setMin(1).setMax(10)
                 .setSaveConsumer(value -> ClientConfig.CONFIG.maxConcurrentPlays.set(value))
                 .build());
         playbackCategory.addEntry(entry.startIntField(
-                        Component.literal("嗅探超时 (秒)"),
+                        Component.translatable("kazumiplayer.config.sniff_timeout"),
                         ClientConfig.CONFIG.sniffTimeoutSeconds.get())
                 .setDefaultValue(30).setMin(5).setMax(120)
                 .setSaveConsumer(value -> ClientConfig.CONFIG.sniffTimeoutSeconds.set(value))
                 .build());
         playbackCategory.addEntry(entry.startBooleanToggle(
-                        Component.literal("瞄准屏幕时自动加入同步播放"),
+                        Component.translatable("kazumiplayer.config.auto_join"),
                         ClientConfig.CONFIG.autoJoinSync.get())
                 .setDefaultValue(true)
                 .setSaveConsumer(value -> ClientConfig.CONFIG.autoJoinSync.set(value))
                 .build());
+        playbackCategory.addEntry(entry.startEnumSelector(
+                        Component.translatable("kazumiplayer.config.video_fit"),
+                        ClientConfig.VideoFit.class,
+                        ClientConfig.CONFIG.videoFit.get())
+                .setDefaultValue(ClientConfig.VideoFit.STRETCH)
+                .setTooltip(Component.translatable("kazumiplayer.config.video_fit_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.videoFit.set(value))
+                .build());
+        playbackCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.idle_frame"),
+                        ClientConfig.CONFIG.showIdleScreenFrame.get())
+                .setDefaultValue(true)
+                .setTooltip(Component.translatable("kazumiplayer.config.idle_frame_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.showIdleScreenFrame.set(value))
+                .build());
         playbackCategory.addEntry(entry.startIntField(
-                        Component.literal("全屏观影画面覆盖程度 (%)"),
+                        Component.translatable("kazumiplayer.config.fullscreen_coverage_pct"),
                         ClientConfig.CONFIG.fullscreenCoverage.get())
                 .setDefaultValue(100).setMin(1).setMax(100)
-                .setTooltip(Component.literal("全屏观影画面占窗口的百分比，居中显示，小于 100 时四周透出游戏世界"))
+                .setTooltip(Component.translatable("kazumiplayer.config.fullscreen_coverage_tooltip"))
                 .setSaveConsumer(value -> ClientConfig.CONFIG.fullscreenCoverage.set(value))
                 .build());
         playbackCategory.addEntry(entry.startIntField(
-                        Component.literal("全屏观影画面不透明度 (%)"),
+                        Component.translatable("kazumiplayer.config.fullscreen_opacity_pct"),
                         ClientConfig.CONFIG.fullscreenOpacity.get())
                 .setDefaultValue(100).setMin(10).setMax(100)
-                .setTooltip(Component.literal("全屏观影画面的不透明度，越低越透出背后的游戏世界"))
+                .setTooltip(Component.translatable("kazumiplayer.config.fullscreen_opacity_tooltip"))
                 .setSaveConsumer(value -> ClientConfig.CONFIG.fullscreenOpacity.set(value))
                 .build());
 
