@@ -209,14 +209,18 @@ public final class PlaybackController {
                 Component.translatable("kazumiplayer.msg.notify.joined"));
             return OpResult.ok(Component.translatable("kazumiplayer.msg.ok.joined_pos", String.valueOf(currentPos / 1000)));
         }
-        // 有 URL 但无组（异常恢复）：重建组
+        // 有 URL 但无组（异常恢复）：重建组，起点沿用离线落盘的 SyncPositionMs 断点续播
+        // （最后一人离组即删组并清 WatchingPlayers，重进必落此分支；离线时 onPlayerLeave 已把
+        // 实时位置写回 NBT。客户端起播路径按 NBT 位置预置 seek，首帧上报再以此校准权威时钟）
+        long resumePos = Math.max(0, screen.getSyncPositionMs());
         SyncGroupManager.get().onPlayStart(actor, sid, screenPos, url);
-        screen.setPlayback(url, 0);
+        screen.setPlayback(url, resumePos);
         syncWatchingPlayers(screen);
         SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid,
                 Component.translatable("kazumiplayer.msg.notify.joined"));
-        return OpResult.ok(Component.translatable("kazumiplayer.msg.ok.joined_pos", "0"));
+        return OpResult.ok(Component.translatable("kazumiplayer.msg.ok.joined_pos",
+            String.valueOf(resumePos / 1000)));
     }
 
     /**
