@@ -34,7 +34,8 @@
 - [ ] **F2 倍速播放**: 单机直链先行（WaterMedia speed 待验证）；联机需 SyncGroup 加 speed 字段防循环硬 seek【M-L】
 - [ ] **F4 每周放送时间表**: bgm calendar 免鉴权 API+TimedCache；新增"放送时刻表"物品右键打开星期分栏 GUI【S-M】
 - [x] **F5 规则热重载**: /kazumi rule reload + RuleWatcher 目录监视（WatchService 防抖 800ms+内部写回声抑制 1.5s，ruleHotReload 配置默认开）；三路广播统一 RuleSyncBroadcast（空列表也广播清客户端缓存）；reloadLive 解析失败保留内存现状不动盘
-- [ ] **F10 房间弹幕互发**: 按 ScreenId 弹幕池随 SyncStatePacket 分发（前置弹幕渲染线：dandanplay 三步对接+权威锚点时间轴）【L】
+- [x] **F10 房间弹幕互发（已实现）**: 聊天栏监听发送（ServerChatEvent 查组广播，无命令/无输入框/不依赖画面时间同步，连发不丢弃——冷却已废止 v3.3）+ DanmakuBroadcastPacket 单包 + ClientDanmakuStore 统一入口 + 世界/HUD 双层渲染（Z180 坐标系补偿）+ 双删组点清池；DebugVerifyItem 含快速校验套件。规划/协议文档见 reference/plans/f10-*
+- [ ] **F10-R2 dandanplay 片内弹幕（搁置 backlog）**: 三步对接设计完毕（room-protocol v3.3 §10 + render-design v1.7），TIMELINE 时间轴通道留接口可复用现成 Store/渲染管线；阻塞项=dandanplay 开放平台凭据申请（实测匿名裸调三端点全 403，见 plans/f10-dandanplay-auth-check.md），凭据到位后解冻
 
 ### 其他
 - [ ] **合成配方添加**: 已完成 4 个——视频屏幕 / 远程观影器 / 屏幕遥控器 / 规则管理器（`data/kazumiplayer/recipe/*.json`，配方表见看板卡片）；剩余：**音响**、**连接工具**（音响配方与挂起区条目合并处理）
