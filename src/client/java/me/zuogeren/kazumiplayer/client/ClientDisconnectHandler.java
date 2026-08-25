@@ -8,6 +8,7 @@ import me.zuogeren.kazumiplayer.rule.Rule;
 import me.zuogeren.kazumiplayer.rule.RuleEngine;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
@@ -66,6 +67,16 @@ public class ClientDisconnectHandler {
             }
         } else {
             mouseStuckTicks = 0;
+        }
+
+        // 全局快捷键：静音准心指向的视频屏幕（GUI 打开时让位于界面自身的 M 键语义）
+        while (ClientKeyMappings.MUTE_SCREEN_MAPPING.consumeClick()) {
+            if (mc.screen != null) continue;
+            var be = CrosshairTargetHelper.getTargetScreen();
+            if (be == null) continue;
+            boolean muted = ScreenPlayerManager.toggleMuted(be.getBlockPos());
+            KazumiClientMessages.chatInfo(Component.translatable(
+                    muted ? "kazumiplayer.msg.mute.on" : "kazumiplayer.msg.mute.off").getString());
         }
     }
 

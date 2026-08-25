@@ -1,7 +1,9 @@
 package me.zuogeren.kazumiplayer.command;
 
 import com.mojang.brigadier.CommandDispatcher;
+import me.zuogeren.kazumiplayer.Config;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
+import me.zuogeren.kazumiplayer.rule.RuleWatcher;
 import me.zuogeren.kazumiplayer.search.SearchManager;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -22,6 +24,12 @@ public class KazumiCommand {
 
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
+        // 规则目录热重载：挂在此处因配置此时必已加载（mod 构造器阶段读取配置值会抛异常），
+        // 且集成服每次开档都会触发本事件——ensureStarted 幂等，异常退出后也能补启
+        if (Config.CONFIG.ruleHotReload.get()) {
+            RuleWatcher.ensureStarted(ruleManager);
+        }
+
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
 
         dispatcher.register(

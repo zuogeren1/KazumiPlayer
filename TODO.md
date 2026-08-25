@@ -33,7 +33,7 @@
 ### 功能新增
 - [ ] **F2 倍速播放**: 单机直链先行（WaterMedia speed 待验证）；联机需 SyncGroup 加 speed 字段防循环硬 seek【M-L】
 - [ ] **F4 每周放送时间表**: bgm calendar 免鉴权 API+TimedCache；新增"放送时刻表"物品右键打开星期分栏 GUI【S-M】
-- [ ] **F5 规则热重载**: /kazumi rule reload + WatchService 目录监视自动重载（空列表也广播）【S/M】
+- [x] **F5 规则热重载**: /kazumi rule reload + RuleWatcher 目录监视（WatchService 防抖 800ms+内部写回声抑制 1.5s，ruleHotReload 配置默认开）；三路广播统一 RuleSyncBroadcast（空列表也广播清客户端缓存）；reloadLive 解析失败保留内存现状不动盘
 - [ ] **F10 房间弹幕互发**: 按 ScreenId 弹幕池随 SyncStatePacket 分发（前置弹幕渲染线：dandanplay 三步对接+权威锚点时间轴）【L】
 
 ### 其他
@@ -85,7 +85,7 @@ B6 多人误触观感风险｜B9 规则/线路数量通常不多｜B11 失败有
 
 ## BUG
 
-- [ ] **命令路径删除最后一个规则不清客户端缓存**: `RuleCommands.broadcastRuleSync` 对空规则列表早退，而 `GuiRequestHandlers` 版本行为正确（空列表也广播以清空客户端 RuleSync 缓存）——命令路径 `/kazumi rule delete` 删掉最后一个规则后，已进服客户端仍持有失效规则（GUI 路径不受影响）。修复：去掉早退或对齐 GUI 版广播逻辑（wiki 研究中由 gui-researcher2 发现）
+- [x] **命令路径删除最后一个规则不清客户端缓存**: `RuleCommands.broadcastRuleSync` 对空规则列表早退，而 `GuiRequestHandlers` 版本行为正确（空列表也广播以清空客户端 RuleSync 缓存）——已随 F5 修复：三路广播统一收敛到 `RuleSyncBroadcast.broadcast()`（命令/GUI/热重载共用，空列表也广播）
 - [ ] **多屏幕同时播放**: 未充分测试多屏幕同时播放的稳定性
 - [ ] **音响重复连接**: 同一音响重复连接同一屏幕——目前无去重提示
 - [ ] **多人同时开 GUI 的状态陈旧**: 多人共享一块屏幕时，GUI 底部状态栏文字只反映本客户端触发过的操作，他人换集/暂停不会更新文字（预览画面/时间/暂停状态实时，数据层无冲突，最后操作者赢为预期语义）——可改进：播放标题写入 BE NBT 随同步广播，或从 Road JSON+EpisodeIndex 推断当前集名；如需防陌生人乱控可加"观看者/OP 可控"权限

@@ -9,8 +9,7 @@ import me.zuogeren.kazumiplayer.rule.RuleIndex;
 import me.zuogeren.kazumiplayer.rule.RuleManager;
 import me.zuogeren.kazumiplayer.search.SearchManager;
 import me.zuogeren.kazumiplayer.util.ChatComponentUtil;
-import me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket;
-import me.zuogeren.kazumiplayer.util.JsonUtil;
+import me.zuogeren.kazumiplayer.network.RuleSyncBroadcast;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 import net.minecraft.ChatFormatting;
@@ -18,8 +17,6 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.neoforge.network.PacketDistributor;
-import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,7 +44,7 @@ public class RuleCommands {
                                     src.sendSystemMessage(KazumiMessages.warnOf(
                                         Component.translatable("kazumiplayer.cmd.rule_deprecated_warn", name)));
                                 }
-                                broadcastRuleSync(ruleManager);
+                                RuleSyncBroadcast.broadcast(ruleManager);
                             })
                             .exceptionally(e -> {
                                 KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.rule.download_failed", RuleDownloader.friendlyError(name, e));
@@ -81,7 +78,7 @@ public class RuleCommands {
                         String name = StringArgumentType.getString(ctx, "name");
                         if (ruleManager.delete(name)) {
                             KazumiMessages.sendSuccessKey(ctx.getSource(), "kazumiplayer.cmd.rule.deleted", name);
-                            broadcastRuleSync(ruleManager);
+                            RuleSyncBroadcast.broadcast(ruleManager);
                         } else {
                             ctx.getSource().sendFailure(KazumiMessages.errorOf(Component.translatable("kazumiplayer.cmd.rule_not_found", name)));
                         }
@@ -168,7 +165,7 @@ public class RuleCommands {
                         })
                         .thenAccept(count -> {
                             KazumiMessages.sendSuccessKey(src, "kazumiplayer.cmd.rule.downloaded_all", String.valueOf(count));
-                            broadcastRuleSync(ruleManager);
+                            RuleSyncBroadcast.broadcast(ruleManager);
                         })
                         .exceptionally(e -> {
                             KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.rule.download_failed", RuleDownloader.friendlyError("index", e));
@@ -188,7 +185,24 @@ public class RuleCommands {
                         return builder.buildFuture();
                     })
                     .executes(ctx -> updateOne(ctx.getSource(), ruleManager,
-                        StringArgumentType.getString(ctx, "name")))));
+                        StringArgumentType.getString(ctx, "name")))))
+
+            // --- reload ---
+            // 从磁盘热重载 plugins.json（外部手改规则文件后无需重启；解析失败保留内存现状）
+            .then(Commands.literal("reload")
+                .executes(ctx -> {
+                    CommandSourceStack src = ctx.getSource();
+                    int count = ruleManager.reloadLive();
+                    if (count >= 0) {
+                        KazumiMessages.sendSuccessKey(src, "kazumiplayer.cmd.rule.reloaded",
+                            String.valueOf(count));
+                        RuleSyncBroadcast.broadcast(ruleManager);
+                    } else {
+                        KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.rule.reload_failed",
+                            String.valueOf(ruleManager.count()));
+                    }
+                    return count >= 0 ? 1 : 0;
+                }));
     }
 
     /** 更新单个已安装规则 */
@@ -207,7 +221,7 @@ public class RuleCommands {
                     src.sendSystemMessage(KazumiMessages.warnOf(
                         Component.translatable("kazumiplayer.cmd.rule_deprecated_short", name)));
                 }
-                broadcastRuleSync(ruleManager);
+                RuleSyncBroadcast.broadcast(ruleManager);
             })
             .exceptionally(e -> {
                 KazumiMessages.sendErrorKey(src, "kazumiplayer.cmd.rule.update_failed", RuleDownloader.friendlyError(name, e));
@@ -246,25 +260,9 @@ public class RuleCommands {
                 if (!deprecated.isEmpty()) {
                     KazumiMessages.sendWarnKey(src, "kazumiplayer.cmd.rule.deprecated_list", String.join(", ", deprecated));
                 }
-                broadcastRuleSync(ruleManager);
+                RuleSyncBroadcast.broadcast(ruleManager);
             });
         return 1;
-    }
-
-    /**
-     * 向所有在线玩家广播已安装规则列表（进服时由 SyncGroupManager 同步，
-     * 这里在安装/删除后推送，保证客户端 /krule test 与缓存始终是最新的）
-     */
-    private static void broadcastRuleSync(RuleManager ruleManager) {
-        var rules = ruleManager.listAll();
-        if (rules.isEmpty()) return;
-        String json = JsonUtil.GSON.toJson(
-            rules.stream().map(ruleManager::get).filter(r -> r != null).toList());
-        var server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) return;
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            PacketDistributor.sendToPlayer(player, new RuleSyncPacket(json));
-        }
     }
 
     /**

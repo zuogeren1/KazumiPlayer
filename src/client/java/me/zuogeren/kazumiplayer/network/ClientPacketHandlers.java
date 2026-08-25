@@ -148,8 +148,14 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                     applyForcedSeek(player, targetPos, screen.getBlockPos());
                 }
                 if (!switchingEpisode) {
-                    if (packet.paused()) player.pause();
-                    else player.resume();
+                    // 暂停态变化才应用：周期广播携带相同状态时反复 resume/pause，
+                    // 会在 FFmpeg 缓冲饥饿期反复戳播放器内部状态机（日志可见 Pause -> false 刷屏）
+                    if (!sp.hasPausedState || sp.lastAppliedPaused != packet.paused()) {
+                        sp.hasPausedState = true;
+                        sp.lastAppliedPaused = packet.paused();
+                        if (packet.paused()) player.pause();
+                        else player.resume();
+                    }
                 }
             }
         });

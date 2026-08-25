@@ -153,6 +153,7 @@
   "kazumiplayer.msg.notify.switched": "切换到 %s",
 
   "kazumiplayer.err.empty_url": "链接为空",
+  "kazumiplayer.err.no_rules_installed": "尚未安装任何规则：请用规则管理器拉取云端规则，或执行 /kazumi rule pull-all",
   "kazumiplayer.err.not_screen": "目标方块不是屏幕",
   "kazumiplayer.err.series_blocking_queue": "当前屏幕正在播放剧集，直链无法加入队列",
   "kazumiplayer.err.already_queued": "该链接已在队列中",
@@ -257,6 +258,8 @@
   "kazumiplayer.cmd.rule.unavailable_no_local": "无法获取规则列表且没有本地规则",
   "kazumiplayer.cmd.rule.remote_unavailable_local_only": "无法获取远程列表，仅显示本地已安装:",
   "kazumiplayer.cmd.rule.list_empty_short": "规则列表为空",
+  "kazumiplayer.cmd.rule.reloaded": "已从磁盘重新加载 %s 条规则，并同步在线玩家",
+  "kazumiplayer.cmd.rule.reload_failed": "规则文件解析失败，已保留当前 %s 条规则",
   "kazumiplayer.msg.notify.stop_playing": "停止了播放",
   "kazumiplayer.msg.notify.stop_screen": "停止了屏幕播放",
   "kazumiplayer.msg.ok.screen_stopped": "已停止屏幕播放",

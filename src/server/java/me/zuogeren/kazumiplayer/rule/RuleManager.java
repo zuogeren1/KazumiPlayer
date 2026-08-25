@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.rule;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.util.MonoClock;
 
 import com.google.gson.reflect.TypeToken;
 import me.zuogeren.kazumiplayer.util.JsonUtil;
@@ -18,13 +19,26 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class RuleManager {
 
-    private final Map<String, Rule> rules = new ConcurrentHashMap<>();
+    /** 整表可原子替换（热重载时构建新 Map 整体切换引用，避免并发搜索看到中间态） */
+    private volatile Map<String, Rule> rules = new ConcurrentHashMap<>();
     private final Path rulesDir;
     private final RuleDownloader downloader = new RuleDownloader();
     private final RuleEngine engine = new RuleEngine();
+    /** 最近一次内部写入 plugins.json 的单调时间戳（MonoClock ms）：供目录监视抑制自写回环 */
+    private volatile long lastInternalWriteMs;
 
     public RuleManager(Path configDir) {
         this.rulesDir = configDir.resolve("kazumiplayer").resolve("rules");
+    }
+
+    /** 规则目录路径（目录监视器注册用） */
+    public Path rulesDirectory() {
+        return rulesDir;
+    }
+
+    /** 最近一次内部写入时间戳，从未写过返回 0 */
+    public long lastInternalWriteAt() {
+        return lastInternalWriteMs;
     }
 
     /**
@@ -99,8 +113,45 @@ public class RuleManager {
             } catch (java.nio.file.AtomicMoveNotSupportedException e) {
                 Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
+            lastInternalWriteMs = MonoClock.millis();
         } catch (IOException e) {
             KazumiLog.rule.error("Failed to save rules", e);
+        }
+    }
+
+    /**
+     * 运行期从磁盘热重载规则表（plugins.json），供 /kazumi rule reload 与目录监视调用。
+     * 与启动路径 {@link #loadAll} 的差异：文件不存在视为清空；解析失败保留内存现状且不动盘
+     * （自动重载不搬运用户文件，半写文件不会丢运行中的规则）。
+     *
+     * @return 成功返回重载后的规则数，解析失败返回 -1
+     */
+    public int reloadLive() {
+        Path pluginsFile = rulesDir.resolve("plugins.json");
+        if (!Files.exists(pluginsFile)) {
+            this.rules = new ConcurrentHashMap<>();
+            KazumiLog.rule.info("Rules hot-reloaded: plugins.json absent, table cleared");
+            return 0;
+        }
+        try {
+            String json = Files.readString(pluginsFile);
+            List<Rule> loaded = JsonUtil.GSON.fromJson(json,
+                    new TypeToken<List<Rule>>() {}.getType());
+            Map<String, Rule> fresh = new ConcurrentHashMap<>();
+            if (loaded != null) {
+                for (Rule rule : loaded) {
+                    // 规则名缺失的条目无法寻址，跳过（与 loadAll 一致）
+                    if (rule == null || rule.getName() == null) continue;
+                    fresh.put(rule.getName(), rule);
+                }
+            }
+            this.rules = fresh;
+            KazumiLog.rule.info("Rules hot-reloaded from disk: {} entries", fresh.size());
+            return fresh.size();
+        } catch (Exception e) {
+            KazumiLog.rule.error("Failed to hot-reload rules, keeping {} in-memory entries: {}",
+                    this.rules.size(), rootMessage(e));
+            return -1;
         }
     }
 

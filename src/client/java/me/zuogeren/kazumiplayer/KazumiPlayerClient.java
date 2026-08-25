@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer;
 
 import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
+import me.zuogeren.kazumiplayer.client.ClientKeyMappings;
 import me.zuogeren.kazumiplayer.client.ClientPlaybackScheduler;
 import me.zuogeren.kazumiplayer.client.ClientClockSync;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
@@ -45,11 +46,11 @@ public class KazumiPlayerClient {
             KazumiLog.general.info("Cloth Config detected, config screen enabled");
         }
 
-        // 客户端渲染器注册
+        // 客户端渲染器注册（mod 总线）
         modEventBus.register(ClientModEvents.class);
 
-        // 快捷键轮询（游戏事件总线：ClientTickEvent.Post 消费按键点击）
-        NeoForge.EVENT_BUS.register(ClientModEvents.class);
+        // 快捷键注册（mod 总线事件 RegisterKeyMappingsEvent；消费轮询在游戏总线的杂项处理器）
+        modEventBus.register(ClientKeyMappings.class);
 
         // 客户端杂项事件处理（鼠标防御 / krule 命令）
         NeoForge.EVENT_BUS.register(ClientDisconnectHandler.class);

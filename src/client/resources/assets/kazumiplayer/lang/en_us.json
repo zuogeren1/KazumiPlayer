@@ -153,6 +153,7 @@
   "kazumiplayer.msg.notify.switched": "Switched to %s",
 
   "kazumiplayer.err.empty_url": "URL is empty",
+  "kazumiplayer.err.no_rules_installed": "No rules installed — pull rules via the Rule Manager or run /kazumi rule pull-all",
   "kazumiplayer.err.not_screen": "Target block is not a screen",
   "kazumiplayer.err.series_blocking_queue": "A series is playing; direct links cannot be queued",
   "kazumiplayer.err.already_queued": "This link is already in the queue",
@@ -257,6 +258,8 @@
   "kazumiplayer.cmd.rule.unavailable_no_local": "Could not fetch the rule list and no local rules exist",
   "kazumiplayer.cmd.rule.remote_unavailable_local_only": "Remote list unavailable, showing local only:",
   "kazumiplayer.cmd.rule.list_empty_short": "Rule list is empty",
+  "kazumiplayer.cmd.rule.reloaded": "Reloaded %s rules from disk and synced online players",
+  "kazumiplayer.cmd.rule.reload_failed": "Failed to parse rule file, kept the current %s rules",
   "kazumiplayer.msg.notify.stop_playing": "stopped playback",
   "kazumiplayer.msg.notify.stop_screen": "stopped screen playback",
   "kazumiplayer.msg.ok.screen_stopped": "Screen playback stopped",

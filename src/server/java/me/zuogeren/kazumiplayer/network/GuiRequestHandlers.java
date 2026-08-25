@@ -136,6 +136,11 @@ public class GuiRequestHandlers {
             }
             rules = Map.of(payload.rule(), rule);
         }
+        if (rules.isEmpty()) {
+            // 空规则表：循环零次时收敛包永不触发，客户端只会看到无声无息——显式提示
+            sendError(sp, GuiPayloads.ErrorPayload.of("kazumiplayer.err.no_rules_installed"));
+            return;
+        }
 
         long searchId = SEARCH_ID_SEQ.incrementAndGet();
         ACTIVE_SEARCHES.put(sp.getUUID(), searchId);
@@ -482,15 +487,7 @@ public class GuiRequestHandlers {
 
     /** 规则变更后向所有在线玩家广播（客户端 /krule 与缓存依赖此同步）；空列表也广播以清空客户端缓存 */
     private static void broadcastRuleSync() {
-        var rules = ruleManager.listAll();
-        String json = JsonUtil.GSON.toJson(
-            rules.stream().map(ruleManager::get).filter(r -> r != null).toList());
-        MinecraftServer server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
-        if (server == null) return;
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            PacketDistributor.sendToPlayer(player,
-                new me.zuogeren.kazumiplayer.network.packet.RuleSyncPacket(json));
-        }
+        RuleSyncBroadcast.broadcast(ruleManager);
     }
 
     // ---- 辅助 ----

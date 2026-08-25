@@ -43,6 +43,9 @@ public final class ScreenPlayerManager {
         /** 最近一次播放失败记录（URL+时刻）：供 GUI/全屏失败横幅展示（20s 窗口） */
         public String lastFailedUrl = "";
         public long lastFailedAt;
+        /** 暂停态应用去重基线：hasPausedState=false 表示尚未应用过任何暂停态 */
+        public boolean hasPausedState;
+        public boolean lastAppliedPaused;
         /** 本集是否已触发下一集预解析（每次新起播复位） */
         public boolean nextPrefetched;
 

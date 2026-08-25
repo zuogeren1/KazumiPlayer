@@ -146,6 +146,7 @@ public class ClientPlaybackScheduler {
             sp.everPlayed = false;
             sp.anchorReported = false; // 新集重新做首帧锚定上报
             sp.nextPrefetched = false; // 新集重新评估下一集预解析
+            sp.hasPausedState = false; // 新播放器重新建立暂停态基线（首广播必应用）
             long seekMs = screen.getSyncPositionMs();
             if (sp.player != null && seekMs > 0) sp.player.seek(seekMs);
             // 启动快照：屏幕处于暂停时立即暂停（不再依赖每秒轮询）
@@ -210,7 +211,10 @@ public class ClientPlaybackScheduler {
                         || (sp.player.getDurationMs() > 0
                         && sp.player.getTimeMs() >= sp.player.getDurationMs() - END_DETECT_MARGIN_MS);
             }
-            if (ended && !sp.endedNotified) {
+            if (ended && !sp.endedNotified && url.equals(sp.lastEpisodeUrl)) {
+                // url 守卫：服务端已切到下一集而旧播放器尚存活的 1~2 个 tick 里，
+                // EOF 处 isPlaying 仍为 true 会把 endedNotified 重新解除并再次上报——连续切两集跳集。
+                // 仅对本端自己起播的那一集上报播完；换集后的旧播放器随 URL 变更段停止，不参与判定。
                 sp.endedNotified = true;
                 KazumiLog.playback.info("Auto-next: ended detected at screen {}", screen.getBlockPos());
                 var pkt = new NextEpisodePacket(screen.getBlockPos());

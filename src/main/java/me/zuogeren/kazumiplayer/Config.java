@@ -11,6 +11,8 @@ public class Config {
 
     // GitHub KazumiRules 仓库地址
     public final ModConfigSpec.ConfigValue<String> githubRulesRepoUrl;
+    // 是否启用规则目录热重载（监视 rules 目录，外部修改 plugins.json 自动生效）
+    public final ModConfigSpec.BooleanValue ruleHotReload;
     // 最大同时搜索的规则数
     public final ModConfigSpec.IntValue maxConcurrentSearches;
     // 单个规则搜索超时 (ms)
@@ -33,6 +35,11 @@ public class Config {
                 .comment("KazumiRules 仓库 raw URL")
                 .define("githubRulesRepoUrl",
                         "https://raw.githubusercontent.com/Predidit/KazumiRules/main/");
+
+        ruleHotReload = builder
+                .comment("规则目录热重载：监视 rules 目录，外部修改 plugins.json 后自动重载并同步在线玩家",
+                         "关闭后仍可手动执行 /kazumi rule reload")
+                .define("ruleHotReload", true);
 
         builder.pop();
         builder.push("limits");
