@@ -245,6 +245,8 @@ public class ClientFullscreenState {
                 px, py, 0.0F, 0.0F, pw, ph,
                 player.getWidth(), player.getHeight(),
                 player.getWidth(), player.getHeight(), color);
+            // 弹幕层：全屏期由 HUD 独占 Store 出队（防双消费），GUI 按钮与观影器两条进入路径同此绘制
+            me.zuogeren.kazumiplayer.client.danmaku.DanmakuHudLayer.draw(g, mc, screenPos, px, py, pw, ph);
         } else {
             g.fill(ax, ay, ax + areaW, ay + areaH, 0xC8101010);
             g.centeredText(mc.font, Component.translatable("kazumiplayer.gui.full.no_signal"), ax + areaW / 2, ay + areaH / 2 - 4, 0xFF888888);

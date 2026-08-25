@@ -1,5 +1,7 @@
 package me.zuogeren.kazumiplayer.item;
 
+import me.zuogeren.kazumiplayer.network.packet.DanmakuBroadcastPacket;
+import me.zuogeren.kazumiplayer.network.packet.DanmakuMode;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.util.DirectLinkQueue;
 import net.minecraft.ChatFormatting;
@@ -13,6 +15,9 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+
+import java.util.List;
+import java.util.UUID;
 
 /**
  * 审计/修复的游戏内验证工具（物品外壳永久保留）。
@@ -63,6 +68,15 @@ public class DebugVerifyItem extends Item {
 
         line(player, "======== KazumiPlayer DBG ========");
         // ===== 验证区（提交前清空本区域调用，保留外壳）=====
+
+        section("F10 弹幕包结构");
+        checkDanmakuPacketShape(player);
+        section("F10 Store 契约（模拟调用）");
+        checkDanmakuStoreContract(player);
+        section("F10 服务端结构存在性");
+        checkDanmakuServerShapes(player);
+        section("F10 MANUAL 双端/实机项");
+        manualDanmakuItems();
 
         if (clickedPos != null) {
             appendScreenSnapshot(player, clickedPos);
@@ -127,6 +141,124 @@ public class DebugVerifyItem extends Item {
     }
 
     // ===== 验证实现区（提交前随验证区一并清空）=====
+
+    /** F10：广播包 wire 形状与模式枚举 */
+    private static void checkDanmakuPacketShape(Player player) {
+        var comps = DanmakuBroadcastPacket.class.getRecordComponents();
+        report(player, "广播包 record 组件数=9", comps != null && comps.length == 9);
+        report(player, "组件含 screenPos/screenId/senderUuid/senderName/text/colorRgb/mode",
+            comps != null && comps.length == 9
+                && "screenPos".equals(comps[0].getName()) && "screenId".equals(comps[1].getName())
+                && "positionMs".equals(comps[2].getName()) && "serverTimestamp".equals(comps[3].getName())
+                && "senderUuid".equals(comps[4].getName()) && "senderName".equals(comps[5].getName())
+                && "text".equals(comps[6].getName()) && "colorRgb".equals(comps[7].getName())
+                && "mode".equals(comps[8].getName()));
+        try {
+            Object type = DanmakuBroadcastPacket.class.getField("TYPE").get(null);
+            Object id = type.getClass().getMethod("id").invoke(type);
+            report(player, "TYPE id=danmaku_broadcast",
+                id != null && id.toString().contains("danmaku_broadcast"));
+        } catch (ReflectiveOperationException e) {
+            report(player, "TYPE id=danmaku_broadcast", false);
+        }
+        report(player, "DanmakuMode 三模式且 SCROLL 序 0",
+            DanmakuMode.values().length == 3 && DanmakuMode.SCROLL.ordinal() == 0);
+    }
+
+    /** F10：Store 契约模拟调用（即时项出队/片内 ε 判定/seek 自检压缩/clear 幂等），反射跨层 */
+    private static void checkDanmakuStoreContract(Player player) {
+        try {
+            Class<?> store = fqn("me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore");
+            Class<?> entryCls = fqn("me.zuogeren.kazumiplayer.client.danmaku.DanmakuEntry");
+            report(player, "EPSILON_MS=250", store.getField("EPSILON_MS").getLong(null) == 250L);
+            report(player, "INSTANT_DISPLAY_MS=5000", store.getField("INSTANT_DISPLAY_MS").getLong(null) == 5000L);
+            report(player, "SEEK_DETECT_MS=1500", store.getField("SEEK_DETECT_MS").getLong(null) == 1500L);
+
+            BlockPos pos = new BlockPos(1, 2, 3);
+            var ctor = entryCls.getConstructor(String.class, int.class, DanmakuMode.class,
+                long.class, String.class, UUID.class, long.class);
+            var enqueue = store.getMethod("enqueue", BlockPos.class, entryCls);
+            var pollDue = store.getMethod("pollDue", BlockPos.class, long.class);
+
+            clearQuietly(store, pos);
+            enqueue.invoke(null, pos, ctor.newInstance(
+                "instant", 0xFFFFFF, DanmakuMode.SCROLL, 0L, null, UUID.randomUUID(), 0L));
+            var due = asList(pollDue.invoke(null, pos, 100L));
+            report(player, "即时项下一帧出队",
+                due.size() == 1 && "instant".equals(entryText(entryCls, due.get(0))));
+
+            enqueue.invoke(null, pos, ctor.newInstance(
+                "later", 0xFFFFFF, DanmakuMode.SCROLL, 50000L, null, UUID.randomUUID(), 0L));
+            var notDue = asList(pollDue.invoke(null, pos, 100L));
+            var dueInTime = asList(pollDue.invoke(null, pos, 50100L));
+            report(player, "片内项 ε 容差判定",
+                notDue.isEmpty() && dueInTime.size() == 1);
+
+            enqueue.invoke(null, pos, ctor.newInstance(
+                "stale", 0xFFFFFF, DanmakuMode.SCROLL, 1000L, null, UUID.randomUUID(), 0L));
+            pollDue.invoke(null, pos, 100L);
+            pollDue.invoke(null, pos, 50000L);
+            var afterSeek = asList(pollDue.invoke(null, pos, 50100L));
+            report(player, "seek 自检压缩过期残留", afterSeek.isEmpty());
+
+            clearQuietly(store, pos);
+            report(player, "clear 后队列为空",
+                asList(pollDue.invoke(null, pos, 99999L)).isEmpty());
+        } catch (ReflectiveOperationException e) {
+            fail(player, "Store 契约反射失败: " + e);
+        }
+    }
+
+    /** F10：服务端监听器与旁路池结构存在性（按方法名探测，避免编译期类引用） */
+    private static void checkDanmakuServerShapes(Player player) {
+        try {
+            Class<?> listener = fqn("me.zuogeren.kazumiplayer.server.danmaku.DanmakuChatListener");
+            boolean hasChatHook = false;
+            for (var m : listener.getDeclaredMethods()) {
+                if (m.getName().equals("onServerChat")) hasChatHook = true;
+            }
+            report(player, "ServerChatEvent 监听器存在", hasChatHook);
+
+            Class<?> mgr = fqn("me.zuogeren.kazumiplayer.server.danmaku.DanmakuRoomManager");
+            boolean hasAppend = false;
+            boolean hasClear = false;
+            for (var m : mgr.getMethods()) {
+                if (m.getName().equals("append")) hasAppend = true;
+                if (m.getName().equals("clear")) hasClear = true;
+            }
+            report(player, "旁路池 append/clear 存在", hasAppend && hasClear);
+
+            Class<?> sm = fqn("me.zuogeren.kazumiplayer.sync.SyncGroupManager");
+            boolean hasFind = false;
+            for (var m : sm.getMethods()) {
+                if (m.getName().equals("findGroupByPlayer")) hasFind = true;
+            }
+            report(player, "SyncGroupManager.findGroupByPlayer 存在", hasFind);
+        } catch (ReflectiveOperationException e) {
+            fail(player, "服务端结构反射失败: " + e);
+        }
+    }
+
+    /** F10 MANUAL：确需双端联机/实机的回归指引，随报告带走 */
+    private static void manualDanmakuItems() {
+        gray("F10：双端同屏观看，一端聊天栏发言——另一端画面弹幕「名字：内容」滚过且聊天栏照常显示（双重可见为预期）");
+        gray("F10：非观看玩家的聊天不产生任何弹幕；同一玩家连发第二条约 1s 冷却后才上屏");
+        gray("F10：全屏观影两路径（GUI 全屏按钮 / 观影器物品）弹幕均显示；退出世界重进无残留弹幕");
+        gray("F10：直播直链屏互发弹幕照常显示（不依赖时间同步）；换集/停止后旧弹幕清空");
+    }
+
+    private static void clearQuietly(Class<?> store, BlockPos pos) throws ReflectiveOperationException {
+        store.getMethod("clear", BlockPos.class).invoke(null, pos);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> asList(Object obj) {
+        return (List<Object>) obj;
+    }
+
+    private static String entryText(Class<?> entryCls, Object entry) throws ReflectiveOperationException {
+        return (String) entryCls.getMethod("text").invoke(entry);
+    }
 
     // ===== 验证实现区结束 =====
 

@@ -270,6 +270,9 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         // 进度条（画面下方）
         drawProgressBar(collector, poseStack, state, halfW, halfH);
 
+        // 弹幕文字层（屏幕面局部坐标内右进左出，z=0.46 位于全部既有元素之前）
+        me.zuogeren.kazumiplayer.client.danmaku.DanmakuWorldLayer.draw(collector, poseStack, state, halfW, halfH);
+
         poseStack.popPose();
     }
 

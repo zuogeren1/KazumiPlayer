@@ -13,6 +13,10 @@ public class Config {
     public final ModConfigSpec.ConfigValue<String> githubRulesRepoUrl;
     // 是否启用规则目录热重载（监视 rules 目录，外部修改 plugins.json 自动生效）
     public final ModConfigSpec.BooleanValue ruleHotReload;
+    // 房间弹幕互发总开关（聊天栏监听）
+    public final ModConfigSpec.BooleanValue danmakuEnabled;
+    // 每屏房间弹幕旁路缓冲池容量
+    public final ModConfigSpec.IntValue danmakuPoolCapacity;
     // 最大同时搜索的规则数
     public final ModConfigSpec.IntValue maxConcurrentSearches;
     // 单个规则搜索超时 (ms)
@@ -40,6 +44,18 @@ public class Config {
                 .comment("规则目录热重载：监视 rules 目录，外部修改 plugins.json 后自动重载并同步在线玩家",
                          "关闭后仍可手动执行 /kazumi rule reload")
                 .define("ruleHotReload", true);
+
+        builder.pop();
+        builder.push("danmaku");
+
+        danmakuEnabled = builder
+                .comment("房间弹幕互发总开关：观看者在原版聊天栏发言时同步为同屏弹幕",
+                         "关闭后聊天监听零开销")
+                .define("danmakuEnabled", true);
+
+        danmakuPoolCapacity = builder
+                .comment("每屏房间弹幕旁路缓冲池容量（仅内存审计用，超限丢最旧）")
+                .defineInRange("danmakuPoolCapacity", 500, 10, 10000);
 
         builder.pop();
         builder.push("limits");

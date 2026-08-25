@@ -231,6 +231,8 @@ public class ClientPlaybackScheduler {
             }
             sp.lastEpisodeUrl = url;
             sp.endedNotified = false;
+            // 换集清屏：上一集的在途/驻留弹幕作废（对即时项幂等双保险）
+            me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.clear(screen.getBlockPos());
         }
     }
 
@@ -238,6 +240,10 @@ public class ClientPlaybackScheduler {
     @SubscribeEvent
     public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
         stopAllActive();
+        // 弹幕状态全量回收：pending 队列与两层活动列表（BE 移除后 draw 停调，滞留条目靠此兜底）
+        me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.clearAll();
+        me.zuogeren.kazumiplayer.client.danmaku.DanmakuWorldLayer.reset();
+        me.zuogeren.kazumiplayer.client.danmaku.DanmakuHudLayer.reset();
     }
 
     // ---- 队列容错：播放失败自动跳过 ----

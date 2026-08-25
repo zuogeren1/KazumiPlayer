@@ -50,4 +50,7 @@ public final class KazumiLog {
 
     /** HTTP 请求 (HttpUtil) */
     public static final Logger http      = LoggerFactory.getLogger("kazumiplayer.http");
+
+    /** 弹幕 (DanmakuRoomManager, DanmakuWorldLayer, ClientDanmakuStore) */
+    public static final Logger danmaku   = LoggerFactory.getLogger("kazumiplayer.danmaku");
 }

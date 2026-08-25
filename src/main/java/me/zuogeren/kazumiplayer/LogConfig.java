@@ -38,6 +38,7 @@ public final class LogConfig {
         add(builder, "search", "搜索日志");
         add(builder, "rule", "规则引擎日志");
         add(builder, "http", "HTTP 请求日志");
+        add(builder, "danmaku", "弹幕日志");
 
         builder.pop();
     }

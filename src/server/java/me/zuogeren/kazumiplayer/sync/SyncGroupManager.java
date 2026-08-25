@@ -75,6 +75,9 @@ public class SyncGroupManager {
             if (entry.getValue().players.remove(playerId)) {
                 if (entry.getValue().players.isEmpty()) {
                     it.remove();
+                    // 房间随组走：删组点接线之一（最后一人离开/退服路径）
+                    me.zuogeren.kazumiplayer.server.danmaku.DanmakuRoomManager.get()
+                        .clear(entry.getKey());
                 }
             }
         }
@@ -82,10 +85,20 @@ public class SyncGroupManager {
 
     public void leaveByScreenId(UUID screenId) {
         groups.remove(screenId);
+        // 房间随组走：删组点接线之二（stopScreen/屏幕破坏路径）
+        me.zuogeren.kazumiplayer.server.danmaku.DanmakuRoomManager.get().clear(screenId);
     }
 
     public SyncGroup getGroup(UUID screenId) {
         return groups.get(screenId);
+    }
+
+    /** 反查玩家所在同步组（含待机组；发送侧自行过滤 videoUrl 空），无则返回 null */
+    public SyncGroup findGroupByPlayer(UUID playerId) {
+        for (SyncGroup g : groups.values()) {
+            if (g.players.contains(playerId)) return g;
+        }
+        return null;
     }
 
     public void updateState(UUID screenId, long positionMs, boolean paused) {

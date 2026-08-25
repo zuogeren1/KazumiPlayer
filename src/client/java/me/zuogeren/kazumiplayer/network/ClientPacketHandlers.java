@@ -14,6 +14,7 @@ import me.zuogeren.kazumiplayer.network.packet.SyncStatePacket;
 import me.zuogeren.kazumiplayer.network.packet.TimeSyncResponsePacket;
 import me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
+import me.zuogeren.kazumiplayer.util.MonoClock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -39,6 +40,8 @@ public class ClientPacketHandlers implements IClientPacketHandler {
         register(OpenRemoteGuiPacket.class, ClientPacketHandlers::handleOpenRemoteGui);
         register(OpenRemoteFullscreenPacket.class, ClientPacketHandlers::handleOpenRemoteFullscreen);
         register(TimeSyncResponsePacket.class, (pkt, ctx) -> ClientClockSync.handleResponse((TimeSyncResponsePacket) pkt));
+        register(me.zuogeren.kazumiplayer.network.packet.DanmakuBroadcastPacket.class,
+            ClientPacketHandlers::handleDanmakuBroadcast);
     }
 
     private static <T extends CustomPacketPayload> void register(Class<T> cls,
@@ -89,6 +92,32 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 // 清空播放 URL，防止客户端 tick 循环立即重开播放
                 screen.clearPlayback();
             }
+            // 停止清屏：该屏在途与驻留弹幕一并作废（对即时项幂等双保险）
+            me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.clear(packet.screenPos());
+        });
+    }
+
+    /** 房间弹幕广播：BE 校验 screenId 一致性后入队统一 Store（即时项，下一帧出队） */
+    private static void handleDanmakuBroadcast(me.zuogeren.kazumiplayer.network.packet.DanmakuBroadcastPacket packet,
+            IPayloadContext context) {
+        context.enqueueWork(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null) return;
+            if (!(mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity screen)) {
+                KazumiLog.danmaku.debug("Danmaku dropped: no BE at {}", packet.screenPos());
+                return;
+            }
+            if (!packet.screenId().equals(screen.getScreenId())) {
+                KazumiLog.danmaku.debug("Danmaku dropped: screenId mismatch at {} ({} != {})",
+                    packet.screenPos(), packet.screenId(), screen.getScreenId());
+                return;
+            }
+            me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.enqueue(packet.screenPos(),
+                new me.zuogeren.kazumiplayer.client.danmaku.DanmakuEntry(
+                    packet.text(), packet.colorRgb(), packet.mode(),
+                    0L, packet.senderName(), packet.senderUuid(), MonoClock.millis()));
+            KazumiLog.danmaku.debug("Danmaku enqueued at {}: [{}] {}",
+                packet.screenPos(), packet.senderName(), packet.text());
         });
     }
 

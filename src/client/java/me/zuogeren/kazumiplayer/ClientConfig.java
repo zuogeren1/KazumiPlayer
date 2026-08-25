@@ -23,6 +23,20 @@ public class ClientConfig {
     public final ModConfigSpec.EnumValue<VideoFit> videoFit;
     // 未播放时在世界中显示屏幕面位置预览框（便于调整屏幕）
     public final ModConfigSpec.BooleanValue showIdleScreenFrame;
+    // 显示弹幕开关
+    public final ModConfigSpec.BooleanValue danmakuEnabled;
+    // 弹幕整体不透明度
+    public final ModConfigSpec.DoubleValue danmakuOpacity;
+    // 弹幕字号缩放
+    public final ModConfigSpec.DoubleValue danmakuFontScale;
+    // 弹幕滚动速度倍率
+    public final ModConfigSpec.DoubleValue danmakuSpeedMultiplier;
+    // 弹幕显示区域占屏幕高度比例
+    public final ModConfigSpec.DoubleValue danmakuAreaRatio;
+    // 单屏同屏最大弹幕条数
+    public final ModConfigSpec.IntValue danmakuMaxOnScreen;
+    // 全屏观影时显示弹幕
+    public final ModConfigSpec.BooleanValue danmakuShowInFullscreen;
 
     /** 屏幕为非常规比例时视频画面的适配方式 */
     public enum VideoFit {
@@ -68,6 +82,37 @@ public class ClientConfig {
         showIdleScreenFrame = builder
                 .comment("未播放时在世界中显示屏幕面位置预览框（便于调整屏幕的位置与大小）")
                 .define("showIdleScreenFrame", true);
+
+        builder.pop();
+        builder.push("danmaku");
+
+        danmakuEnabled = builder
+                .comment("显示弹幕（当前仅房间互发弹幕；关闭后画面上不渲染弹幕层）")
+                .define("danmakuEnabled", true);
+
+        danmakuOpacity = builder
+                .comment("弹幕整体不透明度 (0.0 - 1.0)")
+                .defineInRange("danmakuOpacity", 0.9, 0.1, 1.0);
+
+        danmakuFontScale = builder
+                .comment("弹幕字号缩放 (1.0 = 基准字号)")
+                .defineInRange("danmakuFontScale", 1.0, 0.5, 3.0);
+
+        danmakuSpeedMultiplier = builder
+                .comment("弹幕滚动速度倍率 (越大越快，基准行程 5 秒)")
+                .defineInRange("danmakuSpeedMultiplier", 1.0, 0.25, 4.0);
+
+        danmakuAreaRatio = builder
+                .comment("弹幕显示区域占屏幕高度的比例")
+                .defineInRange("danmakuAreaRatio", 0.5, 0.1, 1.0);
+
+        danmakuMaxOnScreen = builder
+                .comment("单屏同屏最大弹幕条数，超出丢弃")
+                .defineInRange("danmakuMaxOnScreen", 60, 5, 200);
+
+        danmakuShowInFullscreen = builder
+                .comment("全屏观影时在画面上显示弹幕")
+                .define("danmakuShowInFullscreen", true);
 
         builder.pop();
     }

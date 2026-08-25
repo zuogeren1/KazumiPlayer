@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.network;
 
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
+import me.zuogeren.kazumiplayer.network.packet.DanmakuBroadcastPacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
@@ -50,5 +51,6 @@ public class NetworkManager {
         registrar.playToClient(GuiDataPacket.TYPE, GuiDataPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
         registrar.playToServer(TimeSyncPacket.TYPE, TimeSyncPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToClient(TimeSyncResponsePacket.TYPE, TimeSyncResponsePacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
+        registrar.playToClient(DanmakuBroadcastPacket.TYPE, DanmakuBroadcastPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
     }
 }

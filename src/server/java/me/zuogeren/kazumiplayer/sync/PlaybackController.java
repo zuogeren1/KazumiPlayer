@@ -71,8 +71,10 @@ public final class PlaybackController {
             VideoScreenBlockEntity screen, List<Road> roads, int roadIdx, int episodeIdx, String title) {
         Road road = roads.get(roadIdx);
         String url = road.data().get(episodeIdx - 1);
-        screen.setPlaybackFull(url, 0, roadIdx, episodeIdx, JsonUtil.GSON.toJson(roads));
         UUID sid = screen.getScreenId();
+        // 换片旧弹幕作废（房间随组走，内容变更接线）
+        me.zuogeren.kazumiplayer.server.danmaku.DanmakuRoomManager.get().clear(sid);
+        screen.setPlaybackFull(url, 0, roadIdx, episodeIdx, JsonUtil.GSON.toJson(roads));
         SyncGroupManager.get().onPlayStart(actor, sid, screenPos, url);
         syncWatchingPlayers(screen);
         screen.setPlayingTitle(title);
@@ -126,6 +128,8 @@ public final class PlaybackController {
         }
         screen.setPlaybackFull(url, 0, roadIdx, episodeIdx, roadJson);
         UUID sid = screen.getScreenId();
+        // 换片旧弹幕作废（房间随组走，内容变更接线）
+        me.zuogeren.kazumiplayer.server.danmaku.DanmakuRoomManager.get().clear(sid);
         // 组重置不可省略：缺失时周期广播携带旧集 URL，客户端换片保护会吞掉后续所有暂停/seek
         SyncGroupManager.get().onPlayStart(actor, sid, screenPos, url);
         syncWatchingPlayers(screen);

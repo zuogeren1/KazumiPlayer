@@ -23,7 +23,7 @@ public final class KazumiConfigScreen {
 
     private static final List<String> LOG_CATEGORIES = List.of(
             "general", "playback", "sniff", "render", "screen",
-            "speaker", "audio", "network", "sync", "command", "search", "rule", "http");
+            "speaker", "audio", "network", "sync", "command", "search", "rule", "http", "danmaku");
 
     private static final java.util.Map<String, String> LOG_LABELS = java.util.Map.ofEntries(
             java.util.Map.entry("general", "kazumiplayer.config.log.general"),
@@ -38,7 +38,8 @@ public final class KazumiConfigScreen {
             java.util.Map.entry("command", "kazumiplayer.config.log.command"),
             java.util.Map.entry("search", "kazumiplayer.config.log.search"),
             java.util.Map.entry("rule", "kazumiplayer.config.log.rule"),
-            java.util.Map.entry("http", "kazumiplayer.config.log.http"));
+            java.util.Map.entry("http", "kazumiplayer.config.log.http"),
+            java.util.Map.entry("danmaku", "kazumiplayer.config.log.danmaku"));
 
     public static Screen create(Screen parent) {
         ConfigBuilder builder = ConfigBuilder.create()
