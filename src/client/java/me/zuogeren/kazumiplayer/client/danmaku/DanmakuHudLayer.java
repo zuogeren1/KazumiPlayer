@@ -12,6 +12,8 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.util.ARGB;
 import net.minecraft.util.FormattedCharSequence;
 
@@ -68,8 +70,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 固定项字形按 {@link DanmakuWorldLayer#textTopLocal} 在槽位内垂直居中、滚动/逆向条目的行顶即落点上缘
  * （与世界层同一口径）。
  *
- * <p>逐帧成本：视觉序文本、绘制宽、pose 缩放、主色/描边色/框色与字形外接框都在准入时一次算好
- * （见 {@link Visual}），绘制循环只做取整与偏移算术、不重排文本也不再合成颜色，且不新建任何对象。
+ * <p>逐帧成本：视觉序文本（含描边投影样式）、绘制宽、pose 缩放、主色/框色与字形外接框都在准入时
+ * 一次算好（见 {@link Visual}），绘制循环只做取整与偏移算术、不重排文本也不再合成颜色，且不新建任何对象；
+ * 每条在屏条目的文本绘制调用恒为 1 次（主字与其描边由同一个字形元素产出）。
  *
  * <p>开关：来源三开关与模式三开关过滤出队条目；danmakuShowColored=false 时跳过颜色非白的
  * B 站条目（房间互发恒金字不受影响）；danmakuShowAdvanced=true 时把高级弹幕（B 站 mode 7/8/9）
@@ -80,9 +83,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * 文字框矩形由字形实际绘制外接框（{@code Font#prepareText} 的 bounds）四边各外扩 {@link #FRAME_PAD}
  * 像素推导，文字在框内水平与垂直都居中。文字框与描边的 alpha 一律由 danmakuOpacity 控制。
  *
- * <p>描边：GuiGraphicsExtractor 的文本 API 无 outlineColor 形参（26.1.2 mojmap
- * GuiGraphicsExtractor L241-L280 五个重载均只到 color/dropShadow），故按原版
- * Font.drawInBatch8xOutline 的同款做法自绘：八向偏移各画一遍描边色，再画主色，主色不叠投影。
+ * <p>描边：GUI 侧文本 API 不带 outlineColor 形参（26.1.2 mojmap {@code GuiGraphicsExtractor}
+ * L241-L267 六个 {@code text} 重载只到 color/dropShadow——String/FormattedCharSequence/Component
+ * 各两档，{@code GuiTextRenderState} 构造亦无该形参；NeoForge 扩展只补了
+ * {@code submitGuiElementRenderState}/{@code peekScissorStack}），故描边走原版<b>字形投影</b>通道：
+ * 条目文本在准入时挂 {@link #OUTLINE_SHADOW_STYLE}（纯黑、alpha 255），
+ * {@code Font$PreparedTextBuilder#getShadowColor} 把该色按主字 alpha 缩放成字形投影色，
+ * 一次 {@code text} 调用即产出主字 + 1px 右下描边（{@code BakedSheetGlyph$GlyphInstance#renderChar}
+ * 在同一字形元素内先画投影四边形再画主字），故描边与主字同一 alpha 基准、alpha 由 danmakuOpacity 缩放；
+ * 描边色 alpha 传 255 而非已缩放值——{@code getShadowColor} 会再乘一次主字 alpha（传缩放值会平方）。
+ * 世界层走 {@code SubmitNodeCollector#submitText} 的 outlineColor（原版八向描边），两层机制不同：
+ * 全屏层为单次右下 1px 阴影、世界层为八向描边（出处与取舍见
+ * plans/f11-danmaku-outline-parity.md）。
  * 文字框在画面像素域自绘四条 {@link #FRAME_EDGE} 细边（{@code fill}），框内不填充；
  * 整批框先于整批文字提交，GUI 状态同一层内矩形先于字形绘制，故框恒在文字下层。
  *
@@ -93,10 +105,11 @@ public final class DanmakuHudLayer {
 
     /** 顶部/底部项驻留时长（毫秒）：固定模式不受 speedMultiplier 影响 */
     private static final long PIN_HOLD_MS = 4500L;
-    /** 描边偏移像素：八向各一遍，等效原版 8xOutline 的一像素描边 */
-    private static final int[][] OUTLINE_OFFSETS = {
-        {-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}
-    };
+    /**
+     * 描边色（原版字形投影通道）：纯黑、alpha 255——字形侧按主字 alpha 缩放出实际描边 alpha，
+     * 故描边强度恒与主字同源（{@code Font$PreparedTextBuilder#getShadowColor}）。
+     */
+    private static final Style OUTLINE_SHADOW_STYLE = Style.EMPTY.withShadowColor(ARGB.black(255));
     /** 房间互发弹幕定色（金色）；alpha 仍由 danmakuOpacity 决定 */
     private static final int ROOM_CHAT_COLOR = 0xFFD700;
     /** 房间互发弹幕文字框内边距（画面像素，四边相等，与 {@link DanmakuPack} 的占位口径同源）与线宽 */
@@ -108,18 +121,18 @@ public final class DanmakuHudLayer {
     /**
      * 准入时一次算好的绘制参数（绘制循环逐帧只读，零重算、零分配）。
      *
-     * @param text         视觉序文本（入场时 {@code getVisualOrderText()} 一次，此后不再重排）
+     * @param text         视觉序文本（入场时 {@code getVisualOrderText()} 一次，此后不再重排；
+     *                     描边开启时已带 {@link #OUTLINE_SHADOW_STYLE} 投影色——子序列撇取原样透传样式）
      * @param index        字符槽索引（前缀推进宽度 + 原始位置）：可见区间二分与子序列撇取都读它
      * @param textWPx      条目文本实际像素宽（基础字宽 × {@code scale}）
      * @param scale        条目 pose 缩放：danmakuFontScale × fontSizePercent/100，上限为单个车道高度
      * @param textTop      字形在车道内垂直居中的局部行顶 y（{@link DanmakuWorldLayer#textTopLocal}）
-     * @param color        主色（已按 danmakuOpacity 合成 alpha；房间互发恒金）
-     * @param outlineColor 描边色（已合成 alpha）
+     * @param color        主色（已按 danmakuOpacity 合成 alpha；房间互发恒金）——描边 alpha 亦由它决定
      * @param frameColor   文字框色（已合成 alpha）
-     * @param frameInk     房间互发条目的字形外接框（{@code prepareText} 一次），其余来源为 null
+     * @param frameInk     房间互发条目的字形外接框（{@code prepareText} 一次，含投影），其余来源为 null
      */
     private record Visual(FormattedCharSequence text, DanmakuWorldLayer.CharIndex index, float textWPx,
-                          float scale, float textTop, int color, int outlineColor, int frameColor,
+                          float scale, float textTop, int color, int frameColor,
                           ScreenRectangle frameInk) {
         /** 字符槽数 */
         int chars() {
@@ -291,7 +304,6 @@ public final class DanmakuHudLayer {
         float alphaFactor = config.danmakuOpacity.get().floatValue();
         boolean outline = config.danmakuOutline.get();
         int alpha = Math.max(0, Math.min(255, Math.round(alphaFactor * 255.0f)));
-        int outlineColorBase = ARGB.black(alpha);
         int frameColorBase = ARGB.color(alpha, ROOM_CHAT_COLOR);
 
         // 允许压叠：开关开启，或密度档位本身就是「重叠」（该档位语义即"不丢视频弹幕"，与开关同义）
@@ -318,7 +330,7 @@ public final class DanmakuHudLayer {
                 capped++;
                 continue;
             }
-            FormattedCharSequence text = entryText(entry);
+            FormattedCharSequence text = entryText(entry, outline);
             float scalePercent = Math.max(10, entry.fontSizePercent())
                 / (float) DanmakuEntry.FONT_SIZE_STANDARD;
             // 缩放上限取单条车道高：大字号条目按自身尺寸放大，但不越出固定槽位、也不多占纵向空间
@@ -331,9 +343,9 @@ public final class DanmakuHudLayer {
             // 字符槽索引：可见区间裁剪一次建表；超长条目另记一条 DEBUG 便于定位异常弹幕
             DanmakuWorldLayer.CharIndex index = DanmakuWorldLayer.indexChars(font, text);
             DanmakuWorldLayer.logLongEntry(index.chars(), entry.source(), screenPos);
-            Visual visual = new Visual(text, index, drawWPx, entryScale, textTop, color, outlineColorBase,
-                frameColorBase, entry.source() == DanmakuSource.ROOM_CHAT
-                    ? inkBounds(font, text, textTop, color, !outline) : null);
+            Visual visual = new Visual(text, index, drawWPx, entryScale, textTop, color, frameColorBase,
+                entry.source() == DanmakuSource.ROOM_CHAT
+                    ? inkBounds(font, text, textTop, color, true) : null);
             Admission adm = admit(entry, mode, visual, actives, clocks, travelMs, pw, lanes,
                 allowOverlap);
             if (adm.active() == null) {
@@ -373,10 +385,10 @@ public final class DanmakuHudLayer {
         }
 
         // 分带提交：滚动带先画，TOP/BOTTOM 后画 → 三条带重叠处固定项压在上层
-        drawBand(g, font, actives, DanmakuMode.SCROLL, clocks, px, py, pw, outline, lanes);
-        drawBand(g, font, actives, DanmakuMode.REVERSE, clocks, px, py, pw, outline, lanes);
-        drawBand(g, font, actives, DanmakuMode.TOP, clocks, px, py, pw, outline, lanes);
-        drawBand(g, font, actives, DanmakuMode.BOTTOM, clocks, px, py, pw, outline, lanes);
+        drawBand(g, font, actives, DanmakuMode.SCROLL, clocks, px, py, pw, lanes);
+        drawBand(g, font, actives, DanmakuMode.REVERSE, clocks, px, py, pw, lanes);
+        drawBand(g, font, actives, DanmakuMode.TOP, clocks, px, py, pw, lanes);
+        drawBand(g, font, actives, DanmakuMode.BOTTOM, clocks, px, py, pw, lanes);
     }
 
     /**
@@ -384,8 +396,7 @@ public final class DanmakuHudLayer {
      * TOP 自顶部向下、BOTTOM 自底部向上（槽位 0 最靠下）。
      */
     private static void drawBand(GuiGraphicsExtractor g, Font font, List<Active> actives, DanmakuMode band,
-                                 Clocks clocks, int px, int py, int pw, boolean outline,
-                                 LaneGeometry lanes) {
+                                 Clocks clocks, int px, int py, int pw, LaneGeometry lanes) {
         for (int i = 0; i < actives.size(); i++) {
             Active active = actives.get(i);
             if (active.mode() != band) continue;
@@ -414,15 +425,9 @@ public final class DanmakuHudLayer {
             g.pose().scale(visual.scale(), visual.scale());
             // 字号缩放后行顶仍是浮点，GUI 文本 API 只收整型坐标 → 取整到最近像素
             int textTopPx = Math.round(visual.textTop());
-            if (outline) {
-                int outlineColor = visual.outlineColor();
-                for (int[] offset : OUTLINE_OFFSETS) {
-                    g.text(font, seq, offset[0], textTopPx + offset[1], outlineColor, false);
-                }
-                g.text(font, seq, 0, textTopPx, visual.color(), false);
-            } else {
-                g.text(font, seq, 0, textTopPx, visual.color(), true);
-            }
+            // 主字与描边一次提交：描边色由条目文本自带的投影样式决定（见类注释），
+            // 故描边 alpha 与主字同源（danmakuOpacity），条目在屏文本绘制调用恒为 1 次
+            g.text(font, seq, 0, textTopPx, visual.color(), true);
             g.pose().popMatrix();
         }
     }
@@ -602,13 +607,16 @@ public final class DanmakuHudLayer {
         };
     }
 
-    /** 文本：房间互发按「昵称：内容」组装（senderName 为 null 的 B 站来源不加前缀） */
-    private static FormattedCharSequence entryText(DanmakuEntry entry) {
-        if (entry.source() == DanmakuSource.ROOM_CHAT
-                && entry.senderName() != null && !entry.senderName().isEmpty()) {
-            return Component.literal(entry.senderName() + "：" + entry.text()).getVisualOrderText();
-        }
-        return Component.literal(entry.text()).getVisualOrderText();
+    /**
+     * 文本：房间互发按「昵称：内容」组装（senderName 为 null 的 B 站来源不加前缀）；
+     * 描边开启时挂 {@link #OUTLINE_SHADOW_STYLE} 投影色（原版字形投影通道，见类注释）。
+     */
+    private static FormattedCharSequence entryText(DanmakuEntry entry, boolean outline) {
+        MutableComponent text = entry.source() == DanmakuSource.ROOM_CHAT
+                && entry.senderName() != null && !entry.senderName().isEmpty()
+            ? Component.literal(entry.senderName() + "：" + entry.text())
+            : Component.literal(entry.text());
+        return (outline ? text.withStyle(OUTLINE_SHADOW_STYLE) : text).getVisualOrderText();
     }
 
     /** 条目定色：房间互发恒金色，其余用包内颜色；alpha 一律由 danmakuOpacity 决定 */
