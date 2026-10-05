@@ -52,7 +52,12 @@ public final class VideoSourceResolver {
 
     /**
      * 发起播放：同步返回播放器实例供调用方登记（启动快照 seek/pause 依赖立即可用的实例），
-     * 解析与起播异步完成。直链直接起播，网页型 URL 走嗅探解析。
+     * 解析与起播异步完成。入口按 URL 分三条互斥的路：
+     * <ol>
+     *   <li><b>B 站链接</b>（{@link BilibiliUrls#isBilibiliUrl}）→ 服务端代理解析，失败/超时/未连接本端回落；</li>
+     *   <li><b>直链</b>（file://、盘符、视频扩展名）→ 直接播放；m3u8/m3u 播放列表按直播直连（bypassSync）；</li>
+     *   <li><b>其余网页 URL</b> → MCEF 嗅探（租约池 + 失败重试一次）。</li>
+     * </ol>
      */
     public WaterMediaPlayer beginPlayback(VideoScreenBlockEntity screen, String episodeUrl) {
         sizePoolOnce();
@@ -63,14 +68,15 @@ public final class VideoSourceResolver {
         // （条目被 stopAll/remove 置空 player、或被新播放器实例顶替 → 本次结果作废）
         ScreenPlayerManager.ScreenPlayer session = ScreenPlayerManager.get(screen.getBlockPos());
 
-        // B 站页面链接：WaterMedia 内置平台解析直接产出可播流（视频/直播），
-        // 嗅探浏览器对 B 站 DASH 播放页拿不到可用直链，因此必须绕开嗅探
+        // 路 1：B 站链接 —— 服务端代理解析（凭据不出服务端），失败/超时/未连接时本端凭据回落。
+        // 嗅探浏览器对 B 站播放页拿不到可用直链，故在此提前分流、不进嗅探链路
         if (BilibiliUrls.isBilibiliUrl(episodeUrl)) {
-            KazumiLog.sniff.info("[source] bilibili URL, using built-in platform resolver");
+            KazumiLog.sniff.info("[source] bilibili URL, routing to server-side resolver");
             resolveBilibili(screen, episodeUrl, player, session);
             return player;
         }
 
+        // 路 2：直链 —— 交给播放器，不需要解析
         if (looksLikeDirectVideo(episodeUrl)) {
             KazumiLog.sniff.info("[source] direct video URL, playing without sniffing");
             // .m3u8/.m3u 播放列表直链按 HLS 直播流处理：置直连模式绕过服务端时钟同步
@@ -85,6 +91,7 @@ public final class VideoSourceResolver {
             return player;
         }
 
+        // 路 3：其余网页 URL —— MCEF 嗅探（租约池按屏互斥，失败重试一次）
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         resolveWithRetry(screen, episodeUrl, player, session, 0);
         return player;
@@ -235,8 +242,10 @@ public final class VideoSourceResolver {
      * 直链与直播播放列表不预解析——前者无需嗅探，后者时间轴语义不同。
      */
     public void prefetchNext(net.minecraft.core.BlockPos pos, String episodeUrl) {
+        // 直链与直播播放列表无需嗅探；B 站链接走服务端代理/本端回落，同样不该占用嗅探租约
         if (episodeUrl == null || episodeUrl.isBlank()
-                || looksLikeDirectVideo(episodeUrl) || isLivePlaylistUrl(episodeUrl)) {
+                || looksLikeDirectVideo(episodeUrl) || isLivePlaylistUrl(episodeUrl)
+                || BilibiliUrls.isBilibiliUrl(episodeUrl)) {
             return;
         }
         String key = pos.toString();

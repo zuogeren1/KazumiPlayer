@@ -2,8 +2,9 @@ package me.zuogeren.kazumiplayer.util;
 
 /**
  * B 站链接识别（纯字符串判定，零网络访问）。
- * WaterMedia 内置 BiliBiliPlatform 可直接解析这些页面 URL（视频/番剧/直播），
- * 播放侧据此绕开 MCEF 嗅探——嗅探浏览器对 B 站 DASH 播放页拿不到可用直链。
+ * 播放侧据此绕开 MCEF 嗅探：B 站页面链接交给服务端代理调用 B 站接口解析
+ * （见 network/packet/BilibiliResolve*，凭据留在服务端），失败时本端凭据回落；
+ * 嗅探浏览器对 B 站播放页拿不到可用直链。
  */
 public final class BilibiliUrls {
 

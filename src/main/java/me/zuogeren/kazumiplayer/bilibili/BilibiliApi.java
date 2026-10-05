@@ -23,8 +23,8 @@ import java.util.regex.Pattern;
  *
  * <ul>
  *   <li><b>视频页</b>：view 取 cid → WBI 签名调 html5 播放接口（fnval=0 + platform=html5 + high_quality=1）
- *       取 durl 单流 mp4（音视频合一）。不用内置平台的 DASH 解析：分离流在播放器侧音频 slave 建连会被
- *       CDN 终止（无音轨且画面卡缓冲）。</li>
+ *       取 durl 单流 mp4（音视频合一）。不取 DASH：分离流的音频 slave 在播放器侧建连会被 CDN 终止
+ *       （表现为无音轨且 demux 无数据推进、画面卡缓冲）。</li>
  *   <li><b>直播间</b>：getRoomPlayInfo 取 http_hls 的 m3u8（ts 优先，回落 fmp4）。</li>
  * </ul>
  *
