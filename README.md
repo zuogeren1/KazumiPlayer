@@ -39,20 +39,20 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 
 **客户端**需安装以下前置 Mod，**服务端无需任何前置**：
 
-| 前置 | 用途 |
-|------|------|
-| [Rinku](https://modrinth.com/mod/rinku) 3.0.4（原 MCEF，作者改名） | Chromium 视频嗅探 |
-| WaterMedia 3.0.0.23（含 WaterMedia Binaries 3.0.0.6） | FFmpeg 解码 + GL 纹理 |
-| Cloth Config 26.1.154（可选） | 游戏内配置界面，不装不影响功能 |
+| 前置                                                                                                                                                                         | 用途                |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------|
+| [Rinku](https://modrinth.com/mod/rinku) 3.0.4（原 MCEF，作者改名）                                                                                                                 | Chromium 视频嗅探     |
+| [WaterMedia](https://modrinth.com/mod/watermedia/version/3.0.0.23) 3.0.0.23（[含 WaterMedia Binaries](https://modrinth.com/mod/watermedia-binaries/version/3.0.0.6) 3.0.0.6） | FFmpeg 解码 + GL 纹理 |
+| Cloth Config 26.1.154（可选）                                                                                                                                                  | 游戏内配置界面，不装不影响功能   |
 
 ## 配置
 
 配置文件位于 `.minecraft/config/`（单人/服务器共用同一份）：
 
-| 文件 | 内容 |
-|------|------|
-| `kazumiplayer-server.toml` | 服务端通用配置（凭据、搜索、同步等）+ 日志分类 DEBUG 开关（`log.debugGeneral` 等 14 项） |
-| `kazumiplayer_client-client.toml` | 客户端配置（播放/嗅探/全屏/弹幕，含「弹幕」分类全部选项） |
+| 文件                                | 内容                                                           |
+|-----------------------------------|--------------------------------------------------------------|
+| `kazumiplayer-server.toml`        | 服务端通用配置（凭据、搜索、同步等）+ 日志分类 DEBUG 开关（`log.debugGeneral` 等 14 项） |
+| `kazumiplayer_client-client.toml` | 客户端配置（播放/嗅探/全屏/弹幕，含「弹幕」分类全部选项）                               |
 
 **日志开关**：默认全部关闭，开启后对应分类输出 DEBUG 诊断日志并即时生效，无需重启。
 
