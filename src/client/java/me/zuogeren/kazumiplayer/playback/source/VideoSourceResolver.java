@@ -4,6 +4,8 @@ import me.zuogeren.kazumiplayer.client.KazumiClientMessages;
 
 import me.zuogeren.kazumiplayer.ClientConfig;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
+import me.zuogeren.kazumiplayer.bilibili.BilibiliApi;
+import me.zuogeren.kazumiplayer.client.BilibiliCredentials;
 import me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs;
 import me.zuogeren.kazumiplayer.util.BilibiliUrls;
 import me.zuogeren.kazumiplayer.util.HttpUtil;
@@ -89,39 +91,25 @@ public final class VideoSourceResolver {
     }
 
     /**
-     * B 站链接起播：直播间交 WaterMedia 内置平台解析（实测可用）；视频页走自研解析取 html5
-     * 单流 mp4——内置解析产出的 DASH 分离流在播放器侧不可用（音频 slave 建连被 CDN 终止 →
-     * 无音轨且画面卡缓冲）。短链先跟随重定向展开，再按展开结果分流。
+     * B 站链接起播：向服务端请求代理解析（凭据只留在服务端，一次解析全组可复用），
+     * 服务端失败/超时/未连接时用本地凭据回落自解析。短链先跟随重定向展开。
      * 直播间置 bypassSync：直播无稳定时间轴，时钟同步与时间轴控制不适用。
      */
     private void resolveBilibili(VideoScreenBlockEntity screen, String episodeUrl,
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
-        // 解析前刷新平台凭据：本地配置可能刚变更（扫码登录/手工编辑），保证两条链路一致
-        me.zuogeren.kazumiplayer.client.BilibiliCredentials.applyToWaterMedia();
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         if (!BilibiliUrls.isShortLink(episodeUrl)) {
-            // 同步上下文（beginPlayback 调用栈内）：调度器尚未登记 player，直播只能直接起播；
-            // 视频走异步解析，回调时登记已完成，可走受守卫起播
-            if (BilibiliUrls.isLiveRoom(episodeUrl)) {
-                startLiveDirect(screen, session, player, episodeUrl);
-            } else {
-                resolveBilibiliVideo(screen, episodeUrl, player, session);
-            }
+            requestServerResolve(screen, episodeUrl, player, session);
             return;
         }
         KazumiLog.sniff.info("[source] expanding bilibili short link: {}", episodeUrl);
         HttpUtil.resolveFinalUrl(episodeUrl)
             .thenAccept(finalUrl -> {
                 KazumiLog.sniff.info("[source] bilibili short link resolved to {}", finalUrl);
-                // 展开回调晚于调度器登记，可走受守卫起播；直播标记在同一守卫内设置
+                // 展开回调晚于调度器登记，可继续走解析流程
                 Minecraft.getInstance().execute(() -> {
                     if (session.player != player || screen.isRemoved()) return;
-                    if (BilibiliUrls.isLiveRoom(finalUrl)) {
-                        session.bypassSync = true;
-                        startWhenValid(screen, session, player, finalUrl);
-                    } else {
-                        resolveBilibiliVideo(screen, finalUrl, player, session);
-                    }
+                    requestServerResolve(screen, finalUrl, player, session);
                 });
             })
             .exceptionally(t -> {
@@ -130,43 +118,107 @@ public final class VideoSourceResolver {
             });
     }
 
-    /** 直播间同步起播：WaterMedia 内置 BiliBiliPlatform 解析出 m3u8 直播流 */
-    private void startLiveDirect(VideoScreenBlockEntity screen, ScreenPlayerManager.ScreenPlayer session,
-            WaterMediaPlayer player, String liveUrl) {
-        session.bypassSync = true;
-        KazumiLog.sniff.info("[source] bilibili live room, sync bypassed");
-        player.play(liveUrl);
-        screen.setVideoState(VideoState.PLAYING);
-        reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
-    }
+    /** 在途的服务端解析请求（每屏唯一：新请求顶替旧请求，迟到结果按 requestId 丢弃） */
+    private record PendingResolve(long requestId, String pageUrl, VideoScreenBlockEntity screen,
+                                  WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session,
+                                  boolean live) {}
 
-    /**
-     * 视频页：自研解析 html5 单流 mp4 直链后起播；解析失败回退内置平台解析
-     * （DASH 分离流可能无声或卡缓冲，但优于整屏停播，且失败原因会进日志）。
-     */
-    private void resolveBilibiliVideo(VideoScreenBlockEntity screen, String pageUrl,
+    private final java.util.Map<String, PendingResolve> pendingResolves = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong resolveSeq = new java.util.concurrent.atomic.AtomicLong();
+
+    /** 服务端代理解析超时（超时后回落本端解析，避免网络异常时永久等待） */
+    private static final long SERVER_RESOLVE_TIMEOUT_MS = 20_000L;
+    private static final java.util.concurrent.ScheduledExecutorService RESOLVE_TIMEOUT =
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "KazumiPlayer-BiliResolve-Timeout");
+            t.setDaemon(true);
+            return t;
+        });
+
+    /** 发起服务端代理解析；直播链接在此置 bypassSync（早于起播生效） */
+    private void requestServerResolve(VideoScreenBlockEntity screen, String pageUrl,
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
         net.minecraft.core.BlockPos pos = screen.getBlockPos();
-        int preferredQn = BilibiliQualityPrefs.preferredQn(pos);
-        BilibiliApi.resolveVideo(pageUrl, preferredQn).whenComplete((stream, t) -> {
+        boolean live = BilibiliApi.liveRoomId(pageUrl) > 0;
+        if (live) {
+            session.bypassSync = true;
+            KazumiLog.sniff.info("[source] bilibili live room, sync bypassed");
+        }
+        int qn = BilibiliQualityPrefs.preferredQn(pos);
+        long requestId = resolveSeq.incrementAndGet();
+        PendingResolve pending = new PendingResolve(requestId, pageUrl, screen, player, session, live);
+        pendingResolves.put(pos.toString(), pending);
+
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getConnection() == null) {
+            pendingResolves.remove(pos.toString());
+            failPlayback(screen, new IllegalStateException("未连接服务端"));
+            return;
+        }
+        mc.getConnection().send(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
+            new me.zuogeren.kazumiplayer.network.packet.BilibiliResolveRequestPacket(
+                pos, screen.getScreenId(), requestId, pageUrl, qn)));
+        KazumiLog.sniff.info("[source] server-side bilibili resolve requested: {} (qn={}, live={})",
+            pageUrl, qn, live);
+        RESOLVE_TIMEOUT.schedule(() -> Minecraft.getInstance().execute(() -> {
+            PendingResolve current = pendingResolves.get(pos.toString());
+            if (current == null || current.requestId() != requestId) return;
+            pendingResolves.remove(pos.toString());
+            KazumiLog.sniff.warn("[source] server-side bilibili resolve timed out ({}ms), falling back",
+                SERVER_RESOLVE_TIMEOUT_MS);
+            fallbackLocalResolve(pending, "服务端解析超时");
+        }), SERVER_RESOLVE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
+    /** 服务端解析结果（ClientPacketHandlers 转发）；与在途请求不匹配（换集/停止/迟到包）直接丢弃 */
+    public void onServerResolveResult(me.zuogeren.kazumiplayer.network.packet.BilibiliResolveResultPacket packet) {
+        String key = packet.screenPos().toString();
+        PendingResolve pending = pendingResolves.get(key);
+        if (pending == null || pending.requestId() != packet.requestId()) return;
+        pendingResolves.remove(key);
+        if (!pending.pageUrl().equals(packet.pageUrl())) return;
+        if (packet.ok()) {
+            applyStream(pending, packet.url(), packet.qualities(), packet.currentQn(), "server");
+        } else {
+            KazumiLog.sniff.warn("[source] server-side bilibili resolve failed ({}), falling back",
+                packet.error());
+            fallbackLocalResolve(pending, packet.error());
+        }
+    }
+
+    /** 本端回落解析：用本地凭据（可能为空 = 匿名，清晰度上限 720P）直接调 B 站接口 */
+    private void fallbackLocalResolve(PendingResolve pending, String reason) {
+        net.minecraft.core.BlockPos pos = pending.screen().getBlockPos();
+        int qn = BilibiliQualityPrefs.preferredQn(pos);
+        String cookie = BilibiliCredentials.get();
+        KazumiLog.sniff.warn("[source] local bilibili fallback ({}), credentials={}",
+            reason, cookie.isEmpty() ? "anonymous" : "local");
+        var future = pending.live()
+            ? BilibiliApi.resolveLive(pending.pageUrl(), qn, cookie)
+            : BilibiliApi.resolveVideo(pending.pageUrl(), qn, cookie);
+        future.whenComplete((stream, t) -> {
             if (t != null) {
-                KazumiLog.sniff.warn("[source] bilibili mp4 resolve failed ({}), falling back to platform resolver",
-                    String.valueOf(unwrap(t).getMessage()));
-                startWhenValid(screen, session, player, pageUrl);
+                failPlayback(pending.screen(), unwrap(t));
                 return;
             }
-            // 档位表供播放器 GUI 的清晰度下拉展示（仅本端）
-            BilibiliQualityPrefs.setInfo(pos,
-                new BilibiliQualityPrefs.Info(stream.qualities(), stream.currentQn()));
-            KazumiLog.sniff.info("[source] bilibili mp4 resolved (qn={}, {} qualities): {}",
-                stream.currentQn(), stream.qualities().size(), stream.url());
-            startWhenValid(screen, session, player, stream.url());
+            applyStream(pending, stream.url(), BilibiliApi.encodeQualities(stream.qualities()),
+                stream.currentQn(), "local");
         });
     }
 
-    /** 停止/拆屏时取消全部在途解析 */
+    /** 记录档位表并受守卫起播（服务端与本端两条来源共用） */
+    private void applyStream(PendingResolve pending, String url, String encodedQualities,
+            int currentQn, String origin) {
+        BilibiliQualityPrefs.setInfo(pending.screen().getBlockPos(),
+            new BilibiliQualityPrefs.Info(BilibiliApi.decodeQualities(encodedQualities), currentQn));
+        KazumiLog.sniff.info("[source] bilibili stream resolved via {} (qn={}): {}", origin, currentQn, url);
+        startWhenValid(pending.screen(), pending.session(), pending.player(), url);
+    }
+
+    /** 停止/拆屏时取消全部在途解析（含服务端代理解析请求） */
     public void cancelAllResolves() {
         pool.cancelAll();
+        pendingResolves.clear();
     }
 
     /** 取消指定屏幕的在途解析并回收其租约（URL 切换停旧播放器时调用）。
@@ -174,6 +226,7 @@ public final class VideoSourceResolver {
      * 被取消的 future 留存于条目中，消费端按「已取消→回落常规解析」处理）。 */
     public void cancelResolve(net.minecraft.core.BlockPos pos) {
         pool.cancel(pos.toString());
+        pendingResolves.remove(pos.toString());
     }
 
     /**

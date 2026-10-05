@@ -1,6 +1,7 @@
 package me.zuogeren.kazumiplayer.network;
 
-import me.zuogeren.kazumiplayer.network.packet.BilibiliCookiePacket;
+import me.zuogeren.kazumiplayer.network.packet.BilibiliResolveRequestPacket;
+import me.zuogeren.kazumiplayer.network.packet.BilibiliResolveResultPacket;
 import me.zuogeren.kazumiplayer.network.packet.NextEpisodePacket;
 import me.zuogeren.kazumiplayer.network.packet.DanmakuBroadcastPacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiActionPacket;
@@ -41,7 +42,8 @@ public class NetworkManager {
         registrar.playToClient(ScreenSyncPacket.TYPE, ScreenSyncPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
         registrar.playToClient(SyncStatePacket.TYPE, SyncStatePacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
         registrar.playToClient(PlayStopPacket.TYPE, PlayStopPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
-        registrar.playToClient(BilibiliCookiePacket.TYPE, BilibiliCookiePacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
+        registrar.playToClient(BilibiliResolveResultPacket.TYPE, BilibiliResolveResultPacket.STREAM_CODEC, PacketDispatcher::dispatchClient);
+        registrar.playToServer(BilibiliResolveRequestPacket.TYPE, BilibiliResolveRequestPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(NextEpisodePacket.TYPE, NextEpisodePacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(PlaybackControlPacket.TYPE, PlaybackControlPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(PositionReportPacket.TYPE, PositionReportPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);

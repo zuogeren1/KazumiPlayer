@@ -6,6 +6,9 @@ import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
 import me.zuogeren.kazumiplayer.network.packet.PositionReportPacket;
+import me.zuogeren.kazumiplayer.bilibili.BilibiliApi;
+import me.zuogeren.kazumiplayer.network.packet.BilibiliResolveRequestPacket;
+import me.zuogeren.kazumiplayer.network.packet.BilibiliResolveResultPacket;
 import me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteOpenPacket;
@@ -52,6 +55,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         register(PlaybackControlPacket.class, ServerPacketHandlers::handlePlaybackControl);
         register(PositionReportPacket.class, ServerPacketHandlers::handlePositionReport);
         register(ResolveStatusPacket.class, ServerPacketHandlers::handleResolveStatus);
+        register(BilibiliResolveRequestPacket.class, ServerPacketHandlers::handleBilibiliResolve);
         register(SpeakerConnectPacket.class, ServerPacketHandlers::handleSpeakerConnect);
         register(RemoteOpenPacket.class, ServerPacketHandlers::handleRemoteOpen);
         register(RemoteFullscreenPacket.class, ServerPacketHandlers::handleRemoteFullscreen);
@@ -212,6 +216,56 @@ public class ServerPacketHandlers implements IServerPacketHandler {
                     packet.status(), packet.screenPos(), sp.getName().getString());
             }
         });
+    }
+
+    /**
+     * B 站代理解析：凭据只留在服务端（不再下发到客户端），解析产物（有时效的 mp4 直链 / 直播 m3u8）
+     * 连同档位表下发给请求者；失败回传原因，客户端据此用本地凭据回落自解析。
+     * 校验与解析状态上报同款：屏幕存在 → screenId 一致 → 请求者是该屏观看组成员。
+     */
+    private static void handleBilibiliResolve(BilibiliResolveRequestPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer sp)) return;
+            var be = sp.level().getBlockEntity(packet.screenPos());
+            if (!(be instanceof VideoScreenBlockEntity screen)) return;
+            if (!packet.screenId().equals(screen.getScreenId())) return;
+            var group = SyncGroupManager.get().getGroup(packet.screenId());
+            if (group == null || !group.players.contains(sp.getUUID())) return;
+
+            String cookie = me.zuogeren.kazumiplayer.ServerConfig.CONFIG.bilibiliCookie.get();
+            String pageUrl = packet.pageUrl();
+            boolean live = BilibiliApi.liveRoomId(pageUrl) > 0;
+            KazumiLog.sniff.info("[bilibili] server-side resolve by {} for {} (qn={}, live={}, credentials={})",
+                sp.getName().getString(), pageUrl, packet.preferredQn(), live,
+                cookie == null || cookie.isBlank() ? "anonymous" : "configured");
+            var future = live
+                ? BilibiliApi.resolveLive(pageUrl, packet.preferredQn(), cookie)
+                : BilibiliApi.resolveVideo(pageUrl, packet.preferredQn(), cookie);
+            future.whenComplete((stream, t) -> {
+                BilibiliResolveResultPacket result = t != null
+                    ? new BilibiliResolveResultPacket(packet.screenPos(), packet.requestId(), pageUrl,
+                        false, "", "", 0, String.valueOf(unwrapFuture(t).getMessage()))
+                    : new BilibiliResolveResultPacket(packet.screenPos(), packet.requestId(), pageUrl,
+                        true, stream.url(), BilibiliApi.encodeQualities(stream.qualities()),
+                        stream.currentQn(), "");
+                var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+                if (server == null) return;
+                // 解析在异步线程完成：回到服务端线程再发包
+                server.execute(() -> {
+                    ServerPlayer target = server.getPlayerList().getPlayer(sp.getUUID());
+                    if (target != null) PacketDistributor.sendToPlayer(target, result);
+                });
+            });
+        });
+    }
+
+    /** 剥掉 CompletableFuture 的包装异常，取真实原因 */
+    private static Throwable unwrapFuture(Throwable t) {
+        while ((t instanceof java.util.concurrent.CompletionException
+                || t instanceof java.util.concurrent.ExecutionException) && t.getCause() != null) {
+            t = t.getCause();
+        }
+        return t;
     }
 
     private static void handleSpeakerConnect(SpeakerConnectPacket packet, IPayloadContext context) {

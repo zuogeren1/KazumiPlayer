@@ -1,6 +1,6 @@
 package me.zuogeren.kazumiplayer.client;
 
-import me.zuogeren.kazumiplayer.playback.source.BilibiliApi;
+import me.zuogeren.kazumiplayer.bilibili.BilibiliApi;
 import net.minecraft.core.BlockPos;
 
 import java.util.List;

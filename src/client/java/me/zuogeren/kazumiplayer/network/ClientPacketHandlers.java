@@ -5,7 +5,7 @@ import me.zuogeren.kazumiplayer.client.ClientClockSync;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.client.gui.GuiClientState;
 import me.zuogeren.kazumiplayer.playback.WaterMediaPlayer;
-import me.zuogeren.kazumiplayer.network.packet.BilibiliCookiePacket;
+import me.zuogeren.kazumiplayer.network.packet.BilibiliResolveResultPacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
@@ -41,7 +41,7 @@ public class ClientPacketHandlers implements IClientPacketHandler {
         register(OpenRemoteGuiPacket.class, ClientPacketHandlers::handleOpenRemoteGui);
         register(OpenRemoteFullscreenPacket.class, ClientPacketHandlers::handleOpenRemoteFullscreen);
         register(TimeSyncResponsePacket.class, (pkt, ctx) -> ClientClockSync.handleResponse((TimeSyncResponsePacket) pkt));
-        register(BilibiliCookiePacket.class, ClientPacketHandlers::handleBilibiliCookie);
+        register(BilibiliResolveResultPacket.class, ClientPacketHandlers::handleBilibiliResolveResult);
         register(me.zuogeren.kazumiplayer.network.packet.DanmakuBroadcastPacket.class,
             ClientPacketHandlers::handleDanmakuBroadcast);
     }
@@ -58,22 +58,12 @@ public class ClientPacketHandlers implements IClientPacketHandler {
     }
 
     /**
-     * 服务端下发 B 站 Cookie：注入 WaterMedia 平台配置。
-     * BiliBiliPlatform 每次请求实时读取 WaterMediaConfig.platforms.biliBiliCookie，
-     * 故运行期赋值即时生效（空串 = 未登录，回落到 720P 清晰度上限）。
+     * 服务端代理解析结果：转交解析器按 requestId 匹配在途请求——
+     * 命中则记录档位表并受守卫起播；失败/不匹配（换集、停止、迟到包）由解析器决定回落或丢弃。
      */
-    private static void handleBilibiliCookie(BilibiliCookiePacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            try {
-                // 服务端凭据只作回落：本地已登录（扫码/手填）时优先级更高
-                me.zuogeren.kazumiplayer.client.BilibiliCredentials.setServer(packet.cookie());
-                me.zuogeren.kazumiplayer.client.BilibiliCredentials.applyToWaterMedia();
-                KazumiLog.network.debug("Bilibili server cookie applied ({} chars, effective {} chars)",
-                    packet.cookie().length(), me.zuogeren.kazumiplayer.client.BilibiliCredentials.get().length());
-            } catch (Throwable t) {
-                KazumiLog.network.warn("Bilibili cookie apply failed: {}", String.valueOf(t.getMessage()));
-            }
-        });
+    private static void handleBilibiliResolveResult(BilibiliResolveResultPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver
+            .getInstance().onServerResolveResult(packet));
     }
 
     /** 屏幕遥控器：服务端已校验屏幕存在，打开对应屏幕的播放器 GUI */

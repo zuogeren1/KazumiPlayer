@@ -4,9 +4,9 @@ import net.neoforged.neoforge.common.ModConfigSpec;
 import org.apache.commons.lang3.tuple.Pair;
 
 /**
- * 服务端配置：需要随玩家登录下发到客户端的共享设置。
- * B 站接口请求由客户端发出（WaterMedia 与解析链路都在客户端），
- * 服务端填写的凭据因此必须在登录时同步过去才能生效。
+ * 服务端配置：B 站凭据等服务端专属设置。
+ * B 站解析由服务端代理执行（客户端只拿到有时效的可播放地址），凭据不下发到客户端；
+ * 客户端仅在服务端解析失败/超时/未连接时，用各自的本地凭据回落解析。
  */
 public class ServerConfig {
     public static final ServerConfig CONFIG;
@@ -21,8 +21,8 @@ public class ServerConfig {
         bilibiliCookie = builder
                 .comment("B 站登录 Cookie（浏览器开发者工具复制完整 Cookie，至少含 SESSDATA）",
                          "留空 = 未登录：视频清晰度上限 720P、直播取默认码率",
-                         "填入后可请求 1080P/原画（是否可播取决于 WaterMedia 解析结果）",
-                         "该值在玩家登录时下发到各客户端，仅用于 B 站平台接口请求")
+                         "填入后可请求 1080P/原画（能否真正播放取决于接口返回的流形态）",
+                         "凭据只留在服务端：解析在服务端执行，只有有时效的直链/直播流地址会下发给客户端")
                 .define("bilibiliCookie", "");
 
         builder.pop();

@@ -44,6 +44,14 @@ public final class KazumiConfigScreen {
             java.util.Map.entry("http", "kazumiplayer.config.log.http"),
             java.util.Map.entry("danmaku", "kazumiplayer.config.log.danmaku"));
 
+    /** 本地登录态文案（只含字符数，不含明文） */
+    private static Component localStatusText() {
+        int len = BilibiliCredentials.get().length();
+        return len > 0
+                ? Component.translatable("kazumiplayer.config.bilibili_local_logged", len)
+                : Component.translatable("kazumiplayer.config.bilibili_local_none");
+    }
+
     public static Screen create(Screen parent) {
         ConfigBuilder builder = ConfigBuilder.create()
                 .setParentScreen(parent)
@@ -122,14 +130,19 @@ public final class KazumiConfigScreen {
         // ---- B 站（扫码登录 / 手工粘贴凭据；本地优先于服务端下发的共享凭据） ----
         ConfigCategory biliCategory = builder.getOrCreateCategory(
                 Component.translatable("kazumiplayer.config.category_bilibili"));
+        // 状态行：只报长度，不回显凭据明文（配置界面常被截图/录屏）
+        biliCategory.addEntry(entry.startTextDescription(
+                Component.translatable("kazumiplayer.config.bilibili_status", localStatusText()))
+            .build());
+        // 输入框保持为空：留空=不修改，粘贴新值=覆盖本地凭据
         biliCategory.addEntry(entry.startStrField(
                         Component.translatable("kazumiplayer.config.bilibili_cookie"),
-                        ClientConfig.CONFIG.bilibiliCookie.get())
+                        "")
                 .setDefaultValue("")
                 .setTooltip(Component.translatable("kazumiplayer.config.bilibili_cookie_tooltip"))
                 .setSaveConsumer(value -> {
-                    ClientConfig.CONFIG.bilibiliCookie.set(value == null ? "" : value.trim());
-                    BilibiliCredentials.applyToWaterMedia();
+                    if (value == null || value.isBlank()) return; // 留空表示不修改（避免误清空）
+                    ClientConfig.CONFIG.bilibiliCookie.set(value.trim());
                 })
                 .build());
         biliCategory.addEntry(new ConfigButtonEntry(
@@ -157,7 +170,6 @@ public final class KazumiConfigScreen {
                 () -> {
                     ClientConfig.CONFIG.bilibiliCookie.set("");
                     ClientConfig.SPEC.save();
-                    BilibiliCredentials.applyToWaterMedia();
                     KazumiClientMessages.chatSuccess(
                         Component.translatable("kazumiplayer.msg.bili_cookie_cleared").getString());
                 }));

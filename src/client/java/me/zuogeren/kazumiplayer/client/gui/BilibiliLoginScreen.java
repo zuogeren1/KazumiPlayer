@@ -6,7 +6,6 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 import com.mojang.blaze3d.platform.NativeImage;
 import me.zuogeren.kazumiplayer.ClientConfig;
-import me.zuogeren.kazumiplayer.client.BilibiliCredentials;
 import me.zuogeren.kazumiplayer.client.BilibiliLoginApi;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import net.minecraft.client.Minecraft;
@@ -161,7 +160,6 @@ public class BilibiliLoginScreen extends Screen {
                 }
                 ClientConfig.CONFIG.bilibiliCookie.set(result.cookie());
                 ClientConfig.SPEC.save();
-                BilibiliCredentials.applyToWaterMedia();
                 done = true;
                 statusKey = "kazumiplayer.gui.bili_login.success";
                 statusColor = 0xFF55FF55;
