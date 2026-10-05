@@ -25,8 +25,8 @@ import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
  *
  * 渲染挂在原版 HOTBAR 层之后：盖住准心/血条等已渲染 HUD，聊天层随后渲染自然浮于其上；
  * 画面区域 = 窗口 × fullscreenCoverage%，居中，整体不透明度 fullscreenOpacity%；
- * 底部悬浮控制条：暂停/继续、±10s、可拖动进度条与时间（seek 经服务端 forceSeek 定向指令
- * 全组即时生效），直播直连屏整体停用；
+ * 底部悬浮控制条：暂停/继续、±10s、B 站弹幕快捷开关、可拖动进度条与时间（seek 经服务端 forceSeek
+ * 定向指令全组即时生效）；直播直连屏只保留弹幕开关（无稳定时间轴，暂停/seek 无意义）；
  * 快捷键：空格暂停/继续、←/→ ±10s、↑/↓ RECORDS 总音量（带瞬时 OSD）；
  * 控制条与右上角「退出」按钮共用鼠标静止 3s 淡出的显隐策略，淡出后不响应命中。
  *
@@ -44,8 +44,15 @@ public class ClientFullscreenState {
     private static final int CTL_BTN_H = 14;
     private static final int PAUSE_BTN_W = 26;
     private static final int SEEK_BTN_W = 32;
+    /** 弹幕快捷开关按钮宽度：容下 en「Danmaku」41px 并留居中余量 */
+    private static final int DANMAKU_BTN_W = 46;
     private static final int BAR_PAD = 6;
     private static final int PROGRESS_H = 5;
+    /** 弹幕开关两态配色：开=亮绿（与进度条已播色同系）+ 亮字，关=与其余按钮一致的暗灰 + 暗字 */
+    private static final int DANMAKU_ON_IDLE = 0x664C8F3F;
+    private static final int DANMAKU_ON_HOVER = 0xE063BF4C;
+    private static final int DANMAKU_ON_TEXT = 0xFFE6FFD8;
+    private static final int DANMAKU_OFF_TEXT = 0xFF9A9AA8;
     /** 拖动进度条期间的目标位置；-1 = 未在拖动 */
     private static boolean progressDragging;
     private static double dragTargetMs = -1;
@@ -111,11 +118,13 @@ public class ClientFullscreenState {
         return x >= r[0] && x < r[2] && y >= r[1] && y < r[3];
     }
 
-    /** 控制条点击分发：按钮/进度条命中返回 true（已消费）；控制条淡出或直播屏时整体不响应 */
+    /** 控制条点击分发：按钮/进度条命中返回 true（已消费）；控制条淡出时不响应 */
     public static boolean handleControlClick(double x, double y) {
-        var player = ScreenPlayerManager.getPlayer(screenPos);
-        if (player == null || isLiveStream()) return false;
         if (controlsAlpha(System.currentTimeMillis()) <= 0.05f) return false;
+        var player = ScreenPlayerManager.getPlayer(screenPos);
+        if (player == null) return false;
+        if (hit(danmakuButtonRect(), x, y)) { toggleBilibiliDanmaku(); return true; }
+        if (isLiveStream()) return false; // 直播直连无稳定时间轴：暂停/±10s/进度条整体不可用
         int[][] btns = controlButtonRects();
         if (hit(btns[0], x, y)) { togglePause(); return true; }
         if (hit(btns[1], x, y)) { seekBy(-10); return true; }
@@ -153,6 +162,28 @@ public class ClientFullscreenState {
 
     private static boolean isFiniteTarget(double v) {
         return !Double.isNaN(v) && !Double.isInfinite(v);
+    }
+
+    /**
+     * B 站弹幕快捷开关：视频片内与直播间实时弹幕一并切换（两键恒被写成同值，语义与配置界面这两项一致）；
+     * 房间互发弹幕（danmakuRoomChat）与总开关（danmakuEnabled）不受影响；改值后立即写盘。
+     */
+    public static void toggleBilibiliDanmaku() {
+        boolean on = !bilibiliDanmakuOn();
+        var config = ClientConfig.CONFIG;
+        config.danmakuBilibiliVideo.set(on);
+        config.danmakuBilibiliLive.set(on);
+        ClientConfig.SPEC.save();
+        osdText = Component.translatable(on
+                ? "kazumiplayer.gui.full.danmaku_on"
+                : "kazumiplayer.gui.full.danmaku_off").getString();
+        osdUntil = System.currentTimeMillis() + 1500;
+    }
+
+    /** 按钮与提示的两态判定：两键同为开才算开（按钮置反时两键同值） */
+    private static boolean bilibiliDanmakuOn() {
+        return ClientConfig.CONFIG.danmakuBilibiliVideo.get()
+            && ClientConfig.CONFIG.danmakuBilibiliLive.get();
     }
 
     /** 空格：暂停/继续（按键重复防抖；直播直连屏忽略） */
@@ -272,10 +303,11 @@ public class ClientFullscreenState {
             }
         }
 
-        // 控制条：仅正常媒体显示（直播直连无稳定时间轴，暂停/seek 无意义）
-        if (hasSignal && !isLiveStream()) {
+        // 控制条：弹幕开关在直播屏同样可用（B 站弹幕开关与时间轴无关）；
+        // 时间轴控件与重缓冲提示仅正常媒体显示（直播直连无稳定时间轴，暂停/seek 无意义）
+        if (hasSignal) {
             drawControls(g, mc);
-            drawBufferingHint(g, mc);
+            if (!isLiveStream()) drawBufferingHint(g, mc);
         }
         drawStartupStatus(g, mc);
         drawOsd(g, mc); // 音量/静音反馈：直播屏无控制条但快捷键仍可用，须独立于控制条绘制
@@ -333,7 +365,7 @@ public class ClientFullscreenState {
             (pb[0] + pb[2] - mc.font.width(buf)) / 2, pb[1] - 11, 0xFFFFC060);
     }
 
-    // ---- 控制条（暂停/±10s/可拖动进度条/时间；显隐与退出按钮共用静止淡出策略）----
+    // ---- 控制条（暂停/±10s/弹幕开关/可拖动进度条/时间；显隐与退出按钮共用静止淡出策略）----
 
     /**
      * 本屏当前播放位置（毫秒）：片内弹幕到期的唯一时间基准。
@@ -345,7 +377,7 @@ public class ClientFullscreenState {
         return Math.max(0, player.getTimeMs());
     }
 
-    /** 直播直连屏判定：对齐 GUI 的 liveCtl 语义，控制条与快捷键整体停用 */
+    /** 直播直连屏判定：对齐 GUI 的 liveCtl 语义，时间轴类控件与快捷键停用（弹幕开关与音量类保留） */
     private static boolean isLiveStream() {
         var sp = ScreenPlayerManager.get(screenPos);
         return sp == null || sp.bypassSync;
@@ -359,7 +391,11 @@ public class ClientFullscreenState {
 
     /** 三枚按钮矩形 {pause, back, forward}，绘制与命中共用 */
     private static int[][] controlButtonRects() {
-        int[] bar = controlBarRect();
+        return controlButtonRects(controlBarRect());
+    }
+
+    /** 三枚按钮矩形 {pause, back, forward}：全部以给定控制条矩形为基准（纯几何，布局自检可直接调用） */
+    private static int[][] controlButtonRects(int[] bar) {
         int by = bar[1] + (CTL_BAR_H - CTL_BTN_H) / 2;
         int bx = bar[0] + BAR_PAD;
         return new int[][]{
@@ -367,6 +403,23 @@ public class ClientFullscreenState {
             {bx + PAUSE_BTN_W + 4, by, bx + PAUSE_BTN_W + 4 + SEEK_BTN_W, by + CTL_BTN_H},
             {bx + PAUSE_BTN_W + 8 + SEEK_BTN_W, by, bx + PAUSE_BTN_W + 8 + SEEK_BTN_W * 2, by + CTL_BTN_H}
         };
+    }
+
+    /** 弹幕快捷开关按钮矩形 {x0,y0,x1,y1}：紧随 +10s 之后（与按钮组同 4px 间距、同高同基线） */
+    private static int[] danmakuButtonRect() {
+        return danmakuButtonRect(controlBarRect());
+    }
+
+    /** 弹幕快捷开关按钮矩形：以给定控制条矩形为基准（纯几何，布局自检可直接调用） */
+    private static int[] danmakuButtonRect(int[] bar) {
+        int by = bar[1] + (CTL_BAR_H - CTL_BTN_H) / 2;
+        int x0 = bar[0] + BAR_PAD + PAUSE_BTN_W + 8 + SEEK_BTN_W * 2 + 4;
+        return new int[]{x0, by, x0 + DANMAKU_BTN_W, by + CTL_BTN_H};
+    }
+
+    /** 进度条左缘：弹幕开关按钮右缘之后 8px（右侧留给时间文本的宽度不变） */
+    private static int progressBarLeft(int[] bar) {
+        return bar[0] + BAR_PAD + PAUSE_BTN_W + 8 + SEEK_BTN_W * 2 + 4 + DANMAKU_BTN_W + 8;
     }
 
     private static String timeText(WaterMediaPlayer player) {
@@ -384,7 +437,7 @@ public class ClientFullscreenState {
         String time = progressDragging
             ? KazumiMessages.formatMs(Math.max(0, (long) dragTargetMs)) + " / " + KazumiMessages.formatMs(player.getDurationMs())
             : timeText(player);
-        int x0 = bar[0] + BAR_PAD + PAUSE_BTN_W + 8 + SEEK_BTN_W * 2 + 8;
+        int x0 = progressBarLeft(bar);
         int x1 = bar[0] + bar[2] - BAR_PAD - mc.font.width(time) - 8;
         if (x1 - x0 < 40) return null;
         int yBar = bar[1] + (CTL_BAR_H - PROGRESS_H) / 2;
@@ -400,6 +453,9 @@ public class ClientFullscreenState {
 
         int[] bar = controlBarRect();
         g.fill(bar[0], bar[1], bar[0] + bar[2], bar[1] + bar[3], fadeAlpha(0xB0000000, alpha));
+
+        drawDanmakuButton(g, mc, m, alpha);
+        if (isLiveStream()) return; // 直播直连无稳定时间轴：暂停/±10s/进度条/时间整体不绘制
 
         boolean playing = player.isPlaying();
         int[][] btns = controlButtonRects();
@@ -440,13 +496,30 @@ public class ClientFullscreenState {
         return pb[0] + (int) Math.min(pb[2] - pb[0], (pb[2] - pb[0]) * cur / dur);
     }
 
+    /** 固定配色的按钮绘制（暂停/±10s；悬停提亮沿用控制条既有配色） */
     private static void drawCtlButton(GuiGraphicsExtractor g, Minecraft mc, int[] r,
             String label, double[] mouse, float alpha) {
+        drawCtlButton(g, mc, r, label, mouse, alpha, 0x66333344, 0xE03C3C52, 0xFFFFFFFF);
+    }
+
+    /** 按钮绘制：底色/字色由调用方给出（弹幕开关按开/关两态换色） */
+    private static void drawCtlButton(GuiGraphicsExtractor g, Minecraft mc, int[] r, String label,
+            double[] mouse, float alpha, int idleColor, int hoverColor, int textColor) {
         boolean hover = mouse[0] >= r[0] && mouse[0] < r[2] && mouse[1] >= r[1] && mouse[1] < r[3];
-        g.fill(r[0], r[1], r[2], r[3], fadeAlpha(hover ? 0xE03C3C52 : 0x66333344, alpha));
+        g.fill(r[0], r[1], r[2], r[3], fadeAlpha(hover ? hoverColor : idleColor, alpha));
         g.text(mc.font, Component.literal(label),
             r[0] + Math.max(1, (r[2] - r[0] - mc.font.width(label)) / 2),
-            r[1] + (CTL_BTN_H - mc.font.lineHeight) / 2, fadeAlpha(0xFFFFFFFF, alpha));
+            r[1] + (CTL_BTN_H - mc.font.lineHeight) / 2, fadeAlpha(textColor, alpha));
+    }
+
+    /** 弹幕快捷开关按钮：开=亮绿底亮字，关=暗底暗字；淡出与其余控件共用同一 alpha */
+    private static void drawDanmakuButton(GuiGraphicsExtractor g, Minecraft mc, double[] mouse, float alpha) {
+        boolean on = bilibiliDanmakuOn();
+        String label = Component.translatable("kazumiplayer.gui.full.btn_danmaku").getString();
+        drawCtlButton(g, mc, danmakuButtonRect(), label, mouse, alpha,
+            on ? DANMAKU_ON_IDLE : 0x66333344,
+            on ? DANMAKU_ON_HOVER : 0xE03C3C52,
+            on ? DANMAKU_ON_TEXT : DANMAKU_OFF_TEXT);
     }
 
     /** 瞬时提示绘制（音量/静音反馈）：超时自动消失；独立于控制条淡出，直播屏亦可见 */

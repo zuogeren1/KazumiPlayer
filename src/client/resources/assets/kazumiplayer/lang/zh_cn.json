@@ -209,6 +209,9 @@
   "kazumiplayer.gui.full.mute_osd": "已静音",
   "kazumiplayer.gui.full.buffering": "缓冲中…",
   "kazumiplayer.gui.full.btn_exit": "✕ 退出",
+  "kazumiplayer.gui.full.btn_danmaku": "弹幕",
+  "kazumiplayer.gui.full.danmaku_on": "B 站弹幕：开",
+  "kazumiplayer.gui.full.danmaku_off": "B 站弹幕：关",
 
   "kazumiplayer.msg.notify_other": "%1$s %2$s §7(%3$s, %4$s, %5$s)",
   "kazumiplayer.msg.broadcast_to_group": "%1$s §7(%2$s, %3$s, %4$s)",

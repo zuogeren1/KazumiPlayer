@@ -209,6 +209,9 @@
   "kazumiplayer.gui.full.mute_osd": "Muted",
   "kazumiplayer.gui.full.buffering": "Buffering…",
   "kazumiplayer.gui.full.btn_exit": "✕ Exit",
+  "kazumiplayer.gui.full.btn_danmaku": "Danmaku",
+  "kazumiplayer.gui.full.danmaku_on": "Bilibili danmaku: ON",
+  "kazumiplayer.gui.full.danmaku_off": "Bilibili danmaku: OFF",
 
   "kazumiplayer.msg.notify_other": "%1$s %2$s §7(%3$s, %4$s, %5$s)",
   "kazumiplayer.msg.broadcast_to_group": "%1$s §7(%2$s, %3$s, %4$s)",
