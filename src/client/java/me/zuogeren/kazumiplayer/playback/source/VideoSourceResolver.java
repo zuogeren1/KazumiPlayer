@@ -7,6 +7,7 @@ import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.bilibili.BilibiliApi;
 import me.zuogeren.kazumiplayer.client.BilibiliCredentials;
 import me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs;
+import me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService;
 import me.zuogeren.kazumiplayer.util.BilibiliUrls;
 import me.zuogeren.kazumiplayer.util.HttpUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
@@ -85,6 +86,7 @@ public final class VideoSourceResolver {
                 session.bypassSync = true;
                 KazumiLog.sniff.info("[source] live playlist URL, sync bypassed");
             }
+            me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 直链/直播无片内弹幕源，关掉上一段的
             player.play(episodeUrl);
             screen.setVideoState(VideoState.PLAYING);
             reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
@@ -92,6 +94,7 @@ public final class VideoSourceResolver {
         }
 
         // 路 3：其余网页 URL —— MCEF 嗅探（租约池按屏互斥，失败重试一次）
+        me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 嗅探路径拿不到 cid/房间号，旧弹幕源作废
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         resolveWithRetry(screen, episodeUrl, player, session, 0);
         return player;
@@ -217,7 +220,8 @@ public final class VideoSourceResolver {
         pendingResolves.remove(key);
         if (!pending.pageUrl().equals(packet.pageUrl())) return;
         if (packet.ok()) {
-            applyStream(pending, packet.url(), packet.audioUrl(), packet.qualities(), packet.currentQn(), "server");
+            applyStream(pending, packet.url(), packet.audioUrl(), packet.qualities(), packet.currentQn(), "server",
+                packet.cid(), packet.liveRoomId());
         } else {
             KazumiLog.sniff.warn("[source] server-side bilibili resolve failed ({}), falling back",
                 packet.error());
@@ -241,13 +245,23 @@ public final class VideoSourceResolver {
                 return;
             }
             applyStream(pending, stream.url(), stream.audioUrl(),
-                BilibiliApi.encodeQualities(stream.qualities()), stream.currentQn(), "local");
+                BilibiliApi.encodeQualities(stream.qualities()), stream.currentQn(), "local",
+                stream.cid(), stream.liveRoomId());
         });
     }
 
     /** 记录档位表并受守卫起播（服务端与本端两条来源共用） */
     private void applyStream(PendingResolve pending, String url, String audioUrl, String encodedQualities,
-            int currentQn, String origin) {
+            int currentQn, String origin, long cid, long liveRoomId) {
+        var pos = pending.screen().getBlockPos();
+        // 本屏弹幕源：直播帧按房间号建实时连接，视频帧按 cid 装载片内时间轴；两者都没有时关掉旧附件
+        if (liveRoomId > 0) {
+            BilibiliDanmakuService.getInstance().attachLive(pos, liveRoomId, pending.prewarm());
+        } else if (cid > 0) {
+            BilibiliDanmakuService.getInstance().attachVideo(pos, cid, pending.prewarm());
+        } else {
+            BilibiliDanmakuService.getInstance().detach(pos);
+        }
         var qualities = BilibiliApi.decodeQualities(encodedQualities);
         BilibiliQualityPrefs.setInfo(pending.screen().getBlockPos(),
             new BilibiliQualityPrefs.Info(qualities, currentQn));
@@ -363,6 +377,7 @@ public final class VideoSourceResolver {
 
     /** 停止/拆屏时取消全部在途解析（含服务端代理解析请求） */
     public void cancelAllResolves() {
+        BilibiliDanmakuService.getInstance().detachAll();
         pool.cancelAll();
         pendingResolves.clear();
     }
@@ -371,6 +386,7 @@ public final class VideoSourceResolver {
      * 预解析缓存条目保留：集间切换的主路径恰好在 URL 变更时消费它（在途租约由 pool.cancel 回收，
      * 被取消的 future 留存于条目中，消费端按「已取消→回落常规解析」处理）。 */
     public void cancelResolve(net.minecraft.core.BlockPos pos) {
+        BilibiliDanmakuService.getInstance().detach(pos); // 该屏弹幕源随在途解析一并作废（换集/停播）
         pool.cancel(pos.toString());
         pendingResolves.remove(pos.toString());
     }

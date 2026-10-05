@@ -10,6 +10,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +43,10 @@ public final class BilibiliApi {
             "https://api.live.bilibili.com/room/v1/Room/get_info";
     private static final String LIVE_ANCHOR_API =
             "https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room";
+    private static final String DM_VIEW_API = "https://api.bilibili.com/x/v2/dm/web/view";
+    private static final String DM_SEG_API = "https://api.bilibili.com/x/v2/dm/web/seg.so";
+    private static final String LIVE_DANMU_INFO_API =
+            "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo";
     private static final String REFERER = "https://www.bilibili.com";
     private static final String LIVE_REFERER = "https://live.bilibili.com";
 
@@ -67,6 +72,12 @@ public final class BilibiliApi {
     );
 
     private static final long MIXIN_KEY_TTL_MS = 30 * 60 * 1000L;
+    /** 弹幕接口单次请求超时 */
+    private static final int DM_HTTP_TIMEOUT_MS = 15_000;
+    /** 分段拉取窗口：同一窗口内的分段并发请求数 */
+    private static final int DM_SEGMENT_WINDOW = 4;
+    /** dm/web/view 不可用时的段数上限兜底 */
+    private static final int DM_SEGMENT_CAP_DEFAULT = 100;
     /** 大会员档位编号（1080P+ / 1080P60 / 4K / HDR / 杜比视界 / 8K）：接口未给上标时的兜底判定 */
     private static final Set<Integer> VIP_QNS = Set.of(112, 116, 120, 125, 126, 127);
     /** CDN 候选节点探测超时：候选并行探测，整体等待上限即此值 */
@@ -98,8 +109,11 @@ public final class BilibiliApi {
      * 解析结果。1080P 及以上只有 DASH，而 DASH 的音视频是两条独立流，
      * 此时 {@code audioUrl} 非空、必须挂成音频从属流（否则画面无声）；
      * 单流源（≤720P 的 mp4 与直播 m3u8）{@code audioUrl} 为空。
+     * {@code cid} 与 {@code liveRoomId} 供弹幕取数使用：视频页填分 P 的 cid（直播为 0），
+     * 直播间填房间号（视频为 0）。
      */
-    public record Stream(String url, String audioUrl, List<Quality> qualities, int currentQn) {}
+    public record Stream(String url, String audioUrl, List<Quality> qualities, int currentQn,
+                         long cid, long liveRoomId) {}
 
     /** 页面元数据（队列显示用）：live 区分直播/视频，author 为 UP主或主播名 */
     public record Meta(boolean live, String author, String title) {}
@@ -207,11 +221,11 @@ public final class BilibiliApi {
                     long cid = cidOf(dataOf(body, "视频信息"), finalPage);
                     return HttpUtil.fetch(playUrlApi(finalBvid, finalAid, cid, key, preferredQn, true),
                             "GET", headers, Map.of())
-                        .thenCompose(dashBody -> buildDashStream(dashBody, cookie)
+                        .thenCompose(dashBody -> buildDashStream(dashBody, cookie, cid)
                             .thenCompose(stream -> stream != null
                                 ? CompletableFuture.completedFuture(stream)
                                 : HttpUtil.fetch(playUrlApi(finalBvid, finalAid, cid, key, preferredQn, false),
-                                        "GET", headers, Map.of()).thenApply(BilibiliApi::buildSingleStream)));
+                                        "GET", headers, Map.of()).thenApply(body2 -> buildSingleStream(body2, cid))));
                 }));
     }
 
@@ -220,7 +234,7 @@ public final class BilibiliApi {
      * 两边各自的候选节点并行探测后取第一个可达的。
      * 空结果表示该响应没有可用 DASH，调用方回落单流。
      */
-    private static CompletableFuture<Stream> buildDashStream(String body, String cookie) {
+    private static CompletableFuture<Stream> buildDashStream(String body, String cookie, long cid) {
         JsonObject data;
         JsonObject dash;
         java.util.NavigableMap<Integer, JsonObject> videoByQn;
@@ -249,7 +263,7 @@ public final class BilibiliApi {
         return pickReachable(videoCandidates, headers).thenCombine(
             pickReachable(audioCandidates, headers),
             (videoUrl, audioUrl) -> new Stream(videoUrl, audioUrl,
-                qualitiesOf(data, videoByQn.keySet()), actualQn));
+                qualitiesOf(data, videoByQn.keySet()), actualQn, cid, 0L));
     }
 
     /**
@@ -362,7 +376,7 @@ public final class BilibiliApi {
     }
 
     /** 单流回退路径（音视频合一的 mp4，上限 720P） */
-    private static Stream buildSingleStream(String body) {
+    private static Stream buildSingleStream(String body, long cid) {
         JsonObject data = dataOf(body, "播放地址");
         JsonArray durl = data.getAsJsonArray("durl");
         if (durl == null || durl.isEmpty()) {
@@ -373,7 +387,7 @@ public final class BilibiliApi {
             throw new IllegalStateException("播放接口返回空地址");
         }
         return new Stream(url, "", qualitiesOf(data, null),
-            data.has("quality") ? data.get("quality").getAsInt() : 0);
+            data.has("quality") ? data.get("quality").getAsInt() : 0, cid, 0L);
     }
 
     /**
@@ -433,7 +447,7 @@ public final class BilibiliApi {
                 }
             }
             int currentQn = chosen.has("current_qn") ? chosen.get("current_qn").getAsInt() : 0;
-            return new Stream(url, "", qualities, currentQn);
+            return new Stream(url, "", qualities, currentQn, 0L, roomId);
         });
     }
 
@@ -448,6 +462,229 @@ public final class BilibiliApi {
         String host = info.has("host") ? info.get("host").getAsString() : "";
         String extra = info.has("extra") ? info.get("extra").getAsString() : "";
         return host + base + extra;
+    }
+
+    /**
+     * 拉取视频片内弹幕全量：dm/web/view 取分段配置，seg.so 从第 1 段起按窗口推进
+     * （窗口内并发 {@link #DM_SEGMENT_WINDOW} 个请求，整窗无数据即认为已到末尾——越界分段返回 304）。
+     * 响应按 Content-Encoding 解包后手写 protobuf 解析，按弹幕 id 去重、过滤特殊弹幕池、
+     * 按出现时间升序返回。任何失败都只记 DEBUG 日志并返回已取到的部分（空列表），不抛给调用方。
+     */
+    public static CompletableFuture<List<BilibiliDanmaku>> fetchVideoDanmaku(long cid, String cookie) {
+        if (cid <= 0) {
+            KazumiLog.danmaku.debug("[bilibili] video danmaku skipped: invalid cid {}", cid);
+            return CompletableFuture.completedFuture(List.of());
+        }
+        if (cookie == null || cookie.isBlank()) {
+            KazumiLog.danmaku.debug("[bilibili] video danmaku cid={} anonymous: only high-weight subset available", cid);
+        }
+        Map<String, String> headers = apiHeaders(REFERER, cookie);
+        Map<String, BilibiliDanmaku> byId = new LinkedHashMap<>();
+        return fetchDmSegmentCap(cid, headers)
+            .thenCompose(cap -> fetchSegmentWindow(cid, headers, cap, 1, byId, 0, 0))
+            .handle((ignored, error) -> {
+                if (error != null) {
+                    KazumiLog.danmaku.debug("[bilibili] video danmaku aborted cid={}: {}", cid, describe(error));
+                }
+                List<BilibiliDanmaku> list = new ArrayList<>(byId.values());
+                list.sort(Comparator.comparingLong(BilibiliDanmaku::timeMs));
+                KazumiLog.danmaku.debug("[bilibili] video danmaku cid={} -> {} entries", cid, list.size());
+                return list;
+            });
+    }
+
+    /**
+     * 打开直播间实时弹幕会话：认证后 30s 心跳、解包 zlib、只回调 DANMU_MSG；
+     * 掉线按 3s/6s/12s 退避重连（最多 3 次）。连接与重连在后台线程，回调不在主线程。
+     * {@code cookie} 当前不参与握手：匿名 token 必须配 uid=0，带凭据反而要求 nav 的 mid 配对。
+     */
+    public static LiveDanmakuSession openLiveDanmaku(long roomId, String cookie, LiveDanmakuListener listener) {
+        if (roomId <= 0) throw new IllegalArgumentException("直播间号无效");
+        if (listener == null) throw new IllegalArgumentException("弹幕回调不能为空");
+        return new LiveDanmakuConnection(roomId, cookie, listener);
+    }
+
+    /** 单个分段的取数结果：entries 为空且 failed=false 表示该段确实没有内容（越界/空段） */
+    private record DmSegment(List<BilibiliDanmakuCodec.RawEntry> entries, boolean failed) {}
+
+    /**
+     * 取分段配置。接口给的 total 实测恒为段数上限（不是实际段数），真实段数由窗口探测决定，
+     * 故这里只把上限作为推进边界，取不到时用默认上限，不阻断拉取。
+     */
+    private static CompletableFuture<Integer> fetchDmSegmentCap(long cid, Map<String, String> headers) {
+        String url = DM_VIEW_API + "?type=1&oid=" + cid;
+        return BilibiliHttp.get(url, headers, DM_HTTP_TIMEOUT_MS).handle((response, error) -> {
+            if (error != null || response == null || !response.ok()) {
+                KazumiLog.danmaku.debug("[bilibili] dm view unavailable cid={}: {}", cid,
+                    error != null ? describe(error) : "HTTP " + (response == null ? 0 : response.status()));
+                return DM_SEGMENT_CAP_DEFAULT;
+            }
+            try {
+                BilibiliDanmakuCodec.ViewInfo info = BilibiliDanmakuCodec.parseView(response.body());
+                KazumiLog.danmaku.debug("[bilibili] dm view cid={} pageSize={}ms segmentCap={} total={}",
+                    cid, info.pageSizeMs(), info.segmentCap(), info.totalDanmaku());
+                return info.segmentCap();
+            } catch (RuntimeException e) {
+                KazumiLog.danmaku.debug("[bilibili] dm view parse failed cid={}: {}", cid, e.getMessage());
+                return DM_SEGMENT_CAP_DEFAULT;
+            }
+        });
+    }
+
+    /**
+     * 逐窗拉取分段。越界分段实测有 HTTP 200 + 0 字节与 HTTP 304 两种表现，都按"该段无内容"处理。
+     * 收束条件是连续两窗全空——一窗 4 段共 24 分钟，单个空窗可能只是这一段视频恰好没人发弹幕；
+     * 整窗失败（网络/异常）时额外允许推进一窗，避免一次瞬时故障把后面的弹幕整段截掉。
+     */
+    private static CompletableFuture<Void> fetchSegmentWindow(long cid, Map<String, String> headers, int cap,
+            int firstIndex, Map<String, BilibiliDanmaku> byId, int failureStreak, int emptyStreak) {
+        int lastIndex = Math.min(cap, firstIndex + DM_SEGMENT_WINDOW - 1);
+        List<CompletableFuture<DmSegment>> window = new ArrayList<>();
+        for (int index = firstIndex; index <= lastIndex; index++) {
+            window.add(fetchDmSegment(cid, headers, index));
+        }
+        return CompletableFuture.allOf(window.toArray(new CompletableFuture[0])).thenCompose(ignored -> {
+            boolean present = false;
+            boolean failed = false;
+            for (CompletableFuture<DmSegment> future : window) {
+                DmSegment segment = future.getNow(null);
+                if (segment == null || segment.failed()) {
+                    failed = true;
+                    continue;
+                }
+                if (segment.entries().isEmpty()) continue;
+                present = true;
+                for (BilibiliDanmakuCodec.RawEntry entry : segment.entries()) {
+                    byId.putIfAbsent(entry.id(), entry.danmaku());
+                }
+            }
+            if (lastIndex >= cap) return CompletableFuture.completedFuture(null);
+            if (present) return fetchSegmentWindow(cid, headers, cap, lastIndex + 1, byId, 0, 0);
+            if (failed && failureStreak < 1) {
+                return fetchSegmentWindow(cid, headers, cap, lastIndex + 1, byId, failureStreak + 1, emptyStreak);
+            }
+            if (emptyStreak < 1) {
+                return fetchSegmentWindow(cid, headers, cap, lastIndex + 1, byId, 0, emptyStreak + 1);
+            }
+            return CompletableFuture.completedFuture(null);
+        });
+    }
+
+    private static CompletableFuture<DmSegment> fetchDmSegment(long cid, Map<String, String> headers, int index) {
+        String url = DM_SEG_API + "?type=1&oid=" + cid + "&segment_index=" + index;
+        return BilibiliHttp.get(url, headers, DM_HTTP_TIMEOUT_MS).handle((response, error) -> {
+            if (error != null || response == null) {
+                KazumiLog.danmaku.debug("[bilibili] danmaku segment {} failed: {}", index,
+                    error != null ? describe(error) : "无响应");
+                return new DmSegment(List.of(), true);
+            }
+            if (response.status() == 200 || response.status() == 304) {
+                if (response.body().length == 0) return new DmSegment(List.of(), false);
+                try {
+                    DmSegment segment = new DmSegment(BilibiliDanmakuCodec.parseSegment(response.body()), false);
+                    KazumiLog.danmaku.debug("[bilibili] danmaku segment {} -> {} bytes, {} entries",
+                        index, response.body().length, segment.entries().size());
+                    return segment;
+                } catch (RuntimeException e) {
+                    KazumiLog.danmaku.debug("[bilibili] danmaku segment {} parse failed: {}", index, e.getMessage());
+                    return new DmSegment(List.of(), true);
+                }
+            }
+            KazumiLog.danmaku.debug("[bilibili] danmaku segment {} -> HTTP {}", index, response.status());
+            return new DmSegment(List.of(), true);
+        });
+    }
+
+    /** 直播间弹幕接入信息：真实房间号、token 与 wss 订阅地址（按候选顺序排列） */
+    record LiveDanmakuAccess(long roomId, String token, List<String> wssUrls) {}
+
+    /**
+     * 取直播间弹幕接入信息。getDanmuInfo 必须带 WBI 签名——缺签名时实测恒被风控拒为 code -352，
+     * 故复用 {@link #sign} 与 {@link #deriveAndCacheMixinKey} 的现有实现，不另写一份签名。
+     * 整条链路匿名：token 与认证 uid 必须同源，匿名 token 只能配 uid=0。
+     */
+    static CompletableFuture<LiveDanmakuAccess> fetchLiveDanmakuAccess(long roomId, String cookie) {
+        return resolveLiveRoomId(roomId).thenCompose(realRoomId ->
+            ensureMixinKeyAnonymously().thenCompose(key -> {
+                Map<String, String> params = new LinkedHashMap<>();
+                params.put("id", String.valueOf(realRoomId));
+                params.put("type", "0");
+                params.put("web_location", "444.8");
+                String url = LIVE_DANMU_INFO_API + "?" + sign(params, key);
+                return BilibiliHttp.get(url, apiHeaders(LIVE_REFERER, ""), DM_HTTP_TIMEOUT_MS)
+                    .thenApply(response -> {
+                        if (!response.ok()) {
+                            throw new IllegalStateException("直播弹幕信息失败：HTTP " + response.status());
+                        }
+                        return parseLiveDanmakuAccess(new String(response.body(), StandardCharsets.UTF_8),
+                            realRoomId);
+                    });
+            }));
+    }
+
+    /**
+     * 取真实房间号：短号（实测 room 6 → 7734200）直接拿去认证会失败，必须先经 get_info 映射；
+     * 映射拿不到时回落原值（本就是真实房间号时该接口原样返回）。
+     */
+    private static CompletableFuture<Long> resolveLiveRoomId(long roomId) {
+        String url = LIVE_ROOM_INFO_API + "?room_id=" + roomId;
+        return BilibiliHttp.get(url, apiHeaders(LIVE_REFERER, ""), DM_HTTP_TIMEOUT_MS).handle((response, error) -> {
+            if (error != null || response == null || !response.ok()) {
+                KazumiLog.danmaku.debug("[bilibili] live room info unavailable for {}, using given id: {}", roomId,
+                    error != null ? describe(error) : "HTTP " + (response == null ? 0 : response.status()));
+                return roomId;
+            }
+            try {
+                JsonObject data = dataOf(new String(response.body(), StandardCharsets.UTF_8), "直播间信息");
+                if (data.has("room_id")) {
+                    long real = data.get("room_id").getAsLong();
+                    if (real > 0) {
+                        if (real != roomId) {
+                            KazumiLog.danmaku.debug("[bilibili] live room id mapped {} -> {}", roomId, real);
+                        }
+                        return real;
+                    }
+                }
+            } catch (RuntimeException e) {
+                KazumiLog.danmaku.debug("[bilibili] live room info parse failed for {}: {}", roomId, e.getMessage());
+            }
+            return roomId;
+        });
+    }
+
+    private static LiveDanmakuAccess parseLiveDanmakuAccess(String body, long roomId) {
+        JsonObject data = dataOf(body, "直播弹幕信息");
+        String token = data.has("token") ? data.get("token").getAsString() : "";
+        List<String> urls = new ArrayList<>();
+        JsonArray hosts = data.getAsJsonArray("host_list");
+        if (hosts != null) {
+            for (int i = 0; i < hosts.size(); i++) {
+                JsonObject host = hosts.get(i).getAsJsonObject();
+                String name = host.has("host") ? host.get("host").getAsString() : "";
+                if (name.isBlank()) continue;
+                int port = host.has("wss_port") ? host.get("wss_port").getAsInt() : 0;
+                String url = port > 0 ? "wss://" + name + ":" + port + "/sub" : "wss://" + name + "/sub";
+                if (!urls.contains(url)) urls.add(url);
+            }
+        }
+        // 443 对受限网络更友好（实测可用），作为末位候选
+        String portFallback = "wss://broadcastlv.chat.bilibili.com:443/sub";
+        if (!urls.contains(portFallback)) urls.add(portFallback);
+        if (token.isBlank() || urls.isEmpty()) {
+            throw new IllegalStateException("直播弹幕接口未返回 token 或节点");
+        }
+        return new LiveDanmakuAccess(roomId, token, urls);
+    }
+
+    /** 剥掉 CompletableFuture 的包装异常，取真实原因文本 */
+    private static String describe(Throwable error) {
+        Throwable cause = error;
+        while ((cause instanceof java.util.concurrent.CompletionException
+                || cause instanceof java.util.concurrent.ExecutionException) && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        String message = cause.getMessage();
+        return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
     }
 
     /** 档位表编码："qn|flags|label;..."（label 可能含冒号，故用竖线分隔字段） */
@@ -580,34 +817,58 @@ public final class BilibiliApi {
 
     /** 派生并缓存 WBI 密钥（nav 的 wbi_img 文件名拼接后按表重排取前 32 位） */
     private static CompletableFuture<String> ensureMixinKey(String referer, String cookie) {
-        String cached = mixinKey;
-        if (!cached.isEmpty() && System.currentTimeMillis() - mixinKeyAt < MIXIN_KEY_TTL_MS) {
-            return CompletableFuture.completedFuture(cached);
-        }
-        return HttpUtil.fetch(NAV_API, "GET", apiHeaders(referer, cookie), Map.of()).thenApply(body -> {
-            // nav 未登录时外层 code=-101，但 data.wbi_img 依然有效（匿名请求同样需要 WBI 签名），
-            // 因此这里不能走 dataOf 的 code 校验，只要求 wbi_img 存在；其余接口仍按 code 判定
-            JsonObject root = (body == null || body.isBlank()) ? null : JsonUtil.GSON.fromJson(body, JsonObject.class);
-            JsonObject data = root == null ? null : root.getAsJsonObject("data");
-            JsonObject wbi = data == null ? null : data.getAsJsonObject("wbi_img");
-            if (wbi == null) {
-                String detail = root != null && root.has("message")
-                    ? root.get("message").getAsString() : "响应缺少 wbi_img";
-                throw new IllegalStateException("nav 接口未返回 WBI 密钥：" + detail);
+        String cached = cachedMixinKey();
+        if (cached != null) return CompletableFuture.completedFuture(cached);
+        return HttpUtil.fetch(NAV_API, "GET", apiHeaders(referer, cookie), Map.of())
+            .thenApply(BilibiliApi::deriveAndCacheMixinKey);
+    }
+
+    /**
+     * 弹幕链路取 WBI 密钥：不经过 HttpUtil（它读 Mod 配置，弹幕链路需能在游戏外独立自测），
+     * 且整条直播链路匿名——带 cookie 取到的 token 必须配 nav 的 mid 才能认证，匿名 token 配 uid=0 最稳。
+     */
+    static CompletableFuture<String> ensureMixinKeyAnonymously() {
+        String cached = cachedMixinKey();
+        if (cached != null) return CompletableFuture.completedFuture(cached);
+        return BilibiliHttp.get(NAV_API, apiHeaders(REFERER, ""), DM_HTTP_TIMEOUT_MS).handle((response, error) -> {
+            if (error != null || response == null || !response.ok()) {
+                throw new IllegalStateException("WBI 密钥获取失败："
+                    + (error != null ? describe(error) : "HTTP " + (response == null ? 0 : response.status())));
             }
-            String combined = fileKey(wbi.get("img_url").getAsString())
-                + fileKey(wbi.get("sub_url").getAsString());
-            StringBuilder sb = new StringBuilder();
-            for (int i : MIXIN_KEY_TAB) {
-                if (i < combined.length()) sb.append(combined.charAt(i));
-            }
-            String key = sb.length() <= 32 ? sb.toString() : sb.substring(0, 32);
-            if (key.isEmpty()) throw new IllegalStateException("WBI 密钥派生失败");
-            mixinKey = key;
-            mixinKeyAt = System.currentTimeMillis();
-            KazumiLog.sniff.debug("[bilibili] WBI mixin key refreshed");
-            return key;
+            return deriveAndCacheMixinKey(new String(response.body(), StandardCharsets.UTF_8));
         });
+    }
+
+    private static String cachedMixinKey() {
+        String cached = mixinKey;
+        return !cached.isEmpty() && System.currentTimeMillis() - mixinKeyAt < MIXIN_KEY_TTL_MS ? cached : null;
+    }
+
+    /**
+     * 由 nav 响应派生密钥并写入缓存。nav 未登录时外层 code=-101，但 data.wbi_img 依然有效
+     * （匿名请求同样需要 WBI 签名），因此这里不能走 dataOf 的 code 校验，只要求 wbi_img 存在。
+     */
+    private static String deriveAndCacheMixinKey(String body) {
+        JsonObject root = (body == null || body.isBlank()) ? null : JsonUtil.GSON.fromJson(body, JsonObject.class);
+        JsonObject data = root == null ? null : root.getAsJsonObject("data");
+        JsonObject wbi = data == null ? null : data.getAsJsonObject("wbi_img");
+        if (wbi == null) {
+            String detail = root != null && root.has("message")
+                ? root.get("message").getAsString() : "响应缺少 wbi_img";
+            throw new IllegalStateException("nav 接口未返回 WBI 密钥：" + detail);
+        }
+        String combined = fileKey(wbi.get("img_url").getAsString())
+            + fileKey(wbi.get("sub_url").getAsString());
+        StringBuilder sb = new StringBuilder();
+        for (int i : MIXIN_KEY_TAB) {
+            if (i < combined.length()) sb.append(combined.charAt(i));
+        }
+        String key = sb.length() <= 32 ? sb.toString() : sb.substring(0, 32);
+        if (key.isEmpty()) throw new IllegalStateException("WBI 密钥派生失败");
+        mixinKey = key;
+        mixinKeyAt = System.currentTimeMillis();
+        KazumiLog.sniff.debug("[bilibili] WBI mixin key refreshed");
+        return key;
     }
 
     private static String fileKey(String url) {

@@ -107,6 +107,8 @@ public class ClientPacketHandlers implements IClientPacketHandler {
             }
             // 停止清屏：该屏在途与驻留弹幕一并作废（对即时项幂等双保险）
             me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.clear(packet.screenPos());
+            me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance()
+                .detach(packet.screenPos()); // 停播时断开该屏的弹幕源（WS/在途请求一并作废）
         });
     }
 
@@ -126,9 +128,8 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 return;
             }
             me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.enqueue(packet.screenPos(),
-                new me.zuogeren.kazumiplayer.client.danmaku.DanmakuEntry(
-                    packet.text(), packet.colorRgb(), packet.mode(),
-                    0L, packet.senderName(), packet.senderUuid(), MonoClock.millis()));
+                me.zuogeren.kazumiplayer.client.danmaku.DanmakuEntry.roomChat(
+                    packet.text(), packet.senderName(), packet.senderUuid(), packet.colorRgb()));
             KazumiLog.danmaku.debug("Danmaku enqueued at {}: [{}] {}",
                 packet.screenPos(), packet.senderName(), packet.text());
         });

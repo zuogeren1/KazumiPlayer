@@ -72,6 +72,8 @@
   "kazumiplayer.msg.bili_quality_switched": "Quality switched: %s",
   "kazumiplayer.msg.bili_quality_fallback": "Quality \"%s\" was not granted, playing at \"%s\" - that quality needs a higher account tier",
   "kazumiplayer.msg.bili_quality_vip_required": "Quality \"%s\" requires a Bilibili Premium membership; playing at \"%s\"",
+  "kazumiplayer.msg.danmaku_video_failed": "Failed to load video danmaku",
+  "kazumiplayer.msg.danmaku_live_failed": "Failed to connect live danmaku",
   "kazumiplayer.gui.main.status_quality_switched": "Quality switched: %s (this client only)",
   "kazumiplayer.gui.main.quality_vip_tag": " (Premium)",
   "kazumiplayer.gui.main.quality_unavailable_tag": " (unavailable)",

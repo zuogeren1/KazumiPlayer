@@ -227,7 +227,8 @@ public class ClientFullscreenState {
 
         var player = ScreenPlayerManager.getPlayer(screenPos);
         var tex = VideoScreenRenderer.getScreenTexture(screenPos);
-        boolean hasSignal = tex != null && tex.hasValidFrame() && player != null
+        boolean hasValidFrame = tex != null && tex.hasValidFrame();
+        boolean hasSignal = hasValidFrame && player != null
                 && player.getWidth() > 0 && player.getHeight() > 0;
 
         if (hasSignal) {
@@ -245,8 +246,10 @@ public class ClientFullscreenState {
                 px, py, 0.0F, 0.0F, pw, ph,
                 player.getWidth(), player.getHeight(),
                 player.getWidth(), player.getHeight(), color);
-            // 弹幕层：全屏期由 HUD 独占 Store 出队（防双消费），GUI 按钮与观影器两条进入路径同此绘制
-            me.zuogeren.kazumiplayer.client.danmaku.DanmakuHudLayer.draw(g, mc, screenPos, px, py, pw, ph);
+            // 弹幕层：全屏期由 HUD 独占 Store 出队（防双消费），GUI 按钮与观影器两条进入路径同此绘制；
+            // 出队时刻传本屏真实播放位置——暂停期播放器时钟自冻结，片内弹幕随之定格
+            me.zuogeren.kazumiplayer.client.danmaku.DanmakuHudLayer.draw(g, mc, screenPos, px, py, pw, ph,
+                hasValidFrame ? currentVideoTimeMs(player) : 0);
         } else {
             g.fill(ax, ay, ax + areaW, ay + areaH, 0xC8101010);
             // 本端无信号但屏幕在播且有人上报解析状态：改显组内等待进度
@@ -323,6 +326,16 @@ public class ClientFullscreenState {
     }
 
     // ---- 控制条（暂停/±10s/可拖动进度条/时间；显隐与退出按钮共用静止淡出策略）----
+
+    /**
+     * 本屏当前播放位置（毫秒）：片内弹幕到期的唯一时间基准。
+     * 需要真实解码器位置才与画面同步；暂停/重缓冲期播放器时钟保持冻结值，弹幕随之定格。
+     * 播放器缺失时返回 0（对齐世界层无 player 时的基准）。
+     */
+    public static long currentVideoTimeMs(WaterMediaPlayer player) {
+        if (player == null) return 0;
+        return Math.max(0, player.getTimeMs());
+    }
 
     /** 直播直连屏判定：对齐 GUI 的 liveCtl 语义，控制条与快捷键整体停用 */
     private static boolean isLiveStream() {

@@ -72,6 +72,8 @@
   "kazumiplayer.msg.bili_quality_switched": "已切换清晰度：%s",
   "kazumiplayer.msg.bili_quality_fallback": "清晰度「%s」未生效，当前为「%s」——该档位需要更高的账号权限",
   "kazumiplayer.msg.bili_quality_vip_required": "清晰度「%s」需要大会员，当前为「%s」",
+  "kazumiplayer.msg.danmaku_video_failed": "片内弹幕加载失败",
+  "kazumiplayer.msg.danmaku_live_failed": "直播弹幕连接失败",
   "kazumiplayer.gui.main.status_quality_switched": "已切换清晰度：%s（仅本端生效）",
   "kazumiplayer.gui.main.quality_vip_tag": "（大会员）",
   "kazumiplayer.gui.main.quality_unavailable_tag": "（不可用）",

@@ -93,6 +93,7 @@ public class ClientPlaybackScheduler {
                 sp.getValue().player.stop();
                 sp.getValue().player = null;
                 ScreenPlayerManager.remove(sp.getKey());
+                me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(sp.getKey());
                 KazumiLog.playback.info("Cleaned up stale playback at {}", sp.getKey());
             } else if (sp.getValue().player == null && sp.getValue().lastEpisodeUrl.isEmpty()) {
                 ScreenPlayerManager.remove(sp.getKey());
@@ -301,6 +302,7 @@ public class ClientPlaybackScheduler {
             }
             sp.lastEpisodeUrl = url;
             sp.endedNotified = false;
+            me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 换集断开旧弹幕源（在途结果随代次作废）
             // 换集清屏：上一集的在途/驻留弹幕作废（对即时项幂等双保险）
             me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.clear(screen.getBlockPos());
         }
@@ -375,6 +377,7 @@ public class ClientPlaybackScheduler {
     }
 
     private static void stopAllActive() {
+        me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detachAll(); // 停播/断线：弹幕源全量断开（在途请求作废）
         // 取消全部在途解析（否则解析完成后起播——虽有会话守卫弃播，但让浏览器白跑一趟）
         me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance().cancelAllResolves();
         // 先统一 stop 所有播放器，再清空跟踪集合（remove 也会 stop，但显式 stopAll 保证顺序）

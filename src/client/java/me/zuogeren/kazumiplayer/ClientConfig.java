@@ -39,6 +39,24 @@ public class ClientConfig {
     public final ModConfigSpec.IntValue danmakuMaxOnScreen;
     // 全屏观影时显示弹幕
     public final ModConfigSpec.BooleanValue danmakuShowInFullscreen;
+    // 自动加载 B 站视频片内时间轴弹幕
+    public final ModConfigSpec.BooleanValue danmakuBilibiliVideo;
+    // 自动连接 B 站直播间实时弹幕
+    public final ModConfigSpec.BooleanValue danmakuBilibiliLive;
+    // 显示房间内玩家聊天互发弹幕
+    public final ModConfigSpec.BooleanValue danmakuRoomChat;
+    // 片内弹幕时间偏移（毫秒）
+    public final ModConfigSpec.IntValue danmakuTimeOffsetMs;
+    // 显示滚动弹幕
+    public final ModConfigSpec.BooleanValue danmakuShowScroll;
+    // 显示顶部固定弹幕
+    public final ModConfigSpec.BooleanValue danmakuShowTop;
+    // 显示底部固定弹幕
+    public final ModConfigSpec.BooleanValue danmakuShowBottom;
+    // 弹幕文字描边
+    public final ModConfigSpec.BooleanValue danmakuOutline;
+    // 单屏片内弹幕池上限
+    public final ModConfigSpec.IntValue danmakuMaxEntries;
     // B 站登录 Cookie（本地扫码登录或手动粘贴；本地有值时优先于服务端下发）
     public final ModConfigSpec.ConfigValue<String> bilibiliCookie;
 
@@ -105,7 +123,8 @@ public class ClientConfig {
         builder.push("danmaku");
 
         danmakuEnabled = builder
-                .comment("显示弹幕（当前仅房间互发弹幕；关闭后画面上不渲染弹幕层）")
+                .comment("显示弹幕总开关（B 站视频片内弹幕 / 直播间实时弹幕 / 房间玩家互发弹幕）",
+                         "关闭后画面上不渲染弹幕层，各来源开关同时失效")
                 .define("danmakuEnabled", true);
 
         danmakuOpacity = builder
@@ -131,6 +150,42 @@ public class ClientConfig {
         danmakuShowInFullscreen = builder
                 .comment("全屏观影时在画面上显示弹幕")
                 .define("danmakuShowInFullscreen", true);
+
+        danmakuBilibiliVideo = builder
+                .comment("播放 B 站视频时自动加载该视频的片内弹幕（按视频时间轴显示）")
+                .define("danmakuBilibiliVideo", true);
+
+        danmakuBilibiliLive = builder
+                .comment("播放 B 站直播间时自动连接实时弹幕（收到即显示）")
+                .define("danmakuBilibiliLive", true);
+
+        danmakuRoomChat = builder
+                .comment("显示房间内玩家的聊天互发弹幕")
+                .define("danmakuRoomChat", true);
+
+        danmakuTimeOffsetMs = builder
+                .comment("片内弹幕时间偏移（毫秒，正值延后显示，用于对齐画面延迟）")
+                .defineInRange("danmakuTimeOffsetMs", 0, -60000, 60000);
+
+        danmakuShowScroll = builder
+                .comment("显示滚动弹幕")
+                .define("danmakuShowScroll", true);
+
+        danmakuShowTop = builder
+                .comment("显示顶部固定弹幕")
+                .define("danmakuShowTop", true);
+
+        danmakuShowBottom = builder
+                .comment("显示底部固定弹幕")
+                .define("danmakuShowBottom", true);
+
+        danmakuOutline = builder
+                .comment("弹幕文字描边（关闭后仅按弹幕自身颜色绘制）")
+                .define("danmakuOutline", true);
+
+        danmakuMaxEntries = builder
+                .comment("单屏片内弹幕池上限（超出丢弃时间轴靠后的弹幕，防热门视频占用过多内存）")
+                .defineInRange("danmakuMaxEntries", 30000, 1000, 200000);
 
         builder.pop();
         builder.push("bilibili");

@@ -175,27 +175,31 @@ public class DebugVerifyItem extends Item {
             report(player, "SEEK_DETECT_MS=1500", store.getField("SEEK_DETECT_MS").getLong(null) == 1500L);
 
             BlockPos pos = new BlockPos(1, 2, 3);
-            var ctor = entryCls.getConstructor(String.class, int.class, DanmakuMode.class,
-                long.class, String.class, UUID.class, long.class);
+            var roomChat = entryCls.getMethod("roomChat", String.class, String.class, UUID.class, int.class);
+            var videoTimeline = entryCls.getMethod("videoTimeline", String.class, DanmakuMode.class,
+                int.class, int.class, long.class);
             var enqueue = store.getMethod("enqueue", BlockPos.class, entryCls);
+            var enqueueAll = store.getMethod("enqueueAll", BlockPos.class, java.util.List.class);
             var pollDue = store.getMethod("pollDue", BlockPos.class, long.class);
+            var components = entryCls.getRecordComponents();
+            report(player, "DanmakuEntry 九字段契约", components != null && components.length == 9);
+            report(player, "Store 五方法签名齐备", enqueue != null && enqueueAll != null && pollDue != null);
 
             clearQuietly(store, pos);
-            enqueue.invoke(null, pos, ctor.newInstance(
-                "instant", 0xFFFFFF, DanmakuMode.SCROLL, 0L, null, UUID.randomUUID(), 0L));
+            enqueue.invoke(null, pos, roomChat.invoke(null, "instant", null, UUID.randomUUID(), 0xFFFFFF));
             var due = asList(pollDue.invoke(null, pos, 100L));
             report(player, "即时项下一帧出队",
                 due.size() == 1 && "instant".equals(entryText(entryCls, due.get(0))));
 
-            enqueue.invoke(null, pos, ctor.newInstance(
-                "later", 0xFFFFFF, DanmakuMode.SCROLL, 50000L, null, UUID.randomUUID(), 0L));
+            enqueue.invoke(null, pos, videoTimeline.invoke(null,
+                "later", DanmakuMode.SCROLL, 0xFFFFFF, 100, 50000L));
             var notDue = asList(pollDue.invoke(null, pos, 100L));
             var dueInTime = asList(pollDue.invoke(null, pos, 50100L));
             report(player, "片内项 ε 容差判定",
                 notDue.isEmpty() && dueInTime.size() == 1);
 
-            enqueue.invoke(null, pos, ctor.newInstance(
-                "stale", 0xFFFFFF, DanmakuMode.SCROLL, 1000L, null, UUID.randomUUID(), 0L));
+            enqueue.invoke(null, pos, videoTimeline.invoke(null,
+                "stale", DanmakuMode.SCROLL, 0xFFFFFF, 100, 1000L));
             pollDue.invoke(null, pos, 100L);
             pollDue.invoke(null, pos, 50000L);
             var afterSeek = asList(pollDue.invoke(null, pos, 50100L));
