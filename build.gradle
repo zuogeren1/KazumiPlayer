@@ -179,6 +179,30 @@ var generateClientModMetadata = tasks.register("generateClientModMetadata", Proc
     into "build/generated/sources/clientModMetadata"
 }
 
+// jar-in-jar 内嵌清单：由 configurations.jarJar 解析结果生成，与依赖声明同源。
+// 手写 META-INF/jarjar/metadata.json 会与依赖漂移——zxing 的内嵌 jar 曾在包里而清单漏登记，
+// 正式包因此不加载该类（生产环境扫码登录 NoClassDefFoundError，开发期 classpath 直供故不复现）。
+var generateJarJarMetadata = tasks.register('generateJarJarMetadata') {
+    var jarJarConfig = configurations.jarJar
+    var outputDir = layout.buildDirectory.dir('generated/jarjar-metadata')
+    inputs.files(jarJarConfig)
+    outputs.dir(outputDir)
+    doLast {
+        var jars = jarJarConfig.resolvedConfiguration.resolvedArtifacts.collect { artifact ->
+            var id = artifact.moduleVersion.id
+            [
+                identifier  : [group: id.group, artifact: id.name],
+                version     : [range: "[${id.version},)", artifactVersion: id.version],
+                path        : "META-INF/jarjar/${artifact.file.name}",
+                isObfuscated: false
+            ]
+        }
+        var target = outputDir.get().file('META-INF/jarjar/metadata.json').asFile
+        target.parentFile.mkdirs()
+        target.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([jars: jars]))
+    }
+}
+
 neoForge.ideSyncTask generateServerModMetadata
 neoForge.ideSyncTask generateClientModMetadata
 
@@ -195,6 +219,7 @@ tasks.register('serverJar', Jar) {
     from(sourceSets.main.output) { exclude 'META-INF/neoforge.mods.toml' }
     from(sourceSets.server.output) { exclude 'META-INF/neoforge.mods.toml' }
     from generateServerModMetadata.map { it.destinationDir }
+    from generateJarJarMetadata
     from(configurations.jarJar) {
         into 'META-INF/jarjar'
     }
@@ -211,6 +236,7 @@ tasks.register('clientJar', Jar) {
     from(sourceSets.server.output) { exclude 'META-INF/neoforge.mods.toml' }
     from(sourceSets.client.output) { exclude 'META-INF/neoforge.mods.toml' }
     from generateClientModMetadata.map { it.destinationDir }
+    from generateJarJarMetadata
     from(configurations.jarJar) {
         into 'META-INF/jarjar'
     }
