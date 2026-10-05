@@ -7,6 +7,7 @@ import me.zuogeren.kazumiplayer.bilibili.LiveDanmakuListener;
 import me.zuogeren.kazumiplayer.bilibili.LiveDanmakuSession;
 import me.zuogeren.kazumiplayer.client.BilibiliCredentials;
 import me.zuogeren.kazumiplayer.client.KazumiClientMessages;
+import me.zuogeren.kazumiplayer.client.bilibili.BilibiliBlockWords;
 import me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore;
 import me.zuogeren.kazumiplayer.client.danmaku.DanmakuEntry;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
@@ -49,11 +50,16 @@ public final class BilibiliDanmakuService {
     /** 直播间弹幕登记：session 关闭即断开 WS */
     private record LiveAttachment(long roomId, LiveDanmakuSession session) implements Attachment {}
 
+    /** 直播侧命中屏蔽词的累计条数每满该值记一次 DEBUG（不逐条刷屏） */
+    private static final int LIVE_BLOCK_LOG_EVERY = 50;
+
     private static final int STAGE_LOADING = 0;
     private static final int STAGE_LOADED = 1;
     private static final int STAGE_FAILED = 2;
 
     private final Map<BlockPos, Attachment> attachments = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong liveBlocked =
+        new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong fetchSeq =
         new java.util.concurrent.atomic.AtomicLong();
 
@@ -71,6 +77,8 @@ public final class BilibiliDanmakuService {
      */
     public void attachVideo(BlockPos pos, long cid, boolean notifyUser) {
         if (pos == null || cid <= 0) return;
+        // 兜底补一次账号屏蔽词同步：配置事件触发时公共配置可能尚未就绪，此处必定已加载
+        BilibiliBlockWords.retryPendingAutoSync();
         if (!config().danmakuBilibiliVideo.get()) {
             KazumiLog.danmaku.debug("Video danmaku disabled by config, skip attach at {}", pos);
             return;
@@ -117,6 +125,7 @@ public final class BilibiliDanmakuService {
      */
     public void attachLive(BlockPos pos, long roomId, boolean notifyUser) {
         if (pos == null || roomId <= 0) return;
+        BilibiliBlockWords.retryPendingAutoSync();
         if (!config().danmakuBilibiliLive.get()) {
             KazumiLog.danmaku.debug("Live danmaku disabled by config, skip attach at {}", pos);
             return;
@@ -213,12 +222,13 @@ public final class BilibiliDanmakuService {
         }
         long offsetMs = config().danmakuTimeOffsetMs.get();
         int maxEntries = config().danmakuMaxEntries.get();
-        List<DanmakuEntry> entries = capEntries(buildEntries(items, offsetMs), maxEntries);
+        VideoEntries built = buildEntries(items, offsetMs);
+        List<DanmakuEntry> entries = capEntries(built.entries(), maxEntries);
         attachments.put(pos, new VideoAttachment(cid, fetchId, STAGE_LOADED));
         ClientDanmakuStore.clear(pos);
         ClientDanmakuStore.enqueueAll(pos, entries);
-        KazumiLog.danmaku.debug("Video danmaku loaded at {}: {} entries (cid={}, offset={}ms)",
-            pos, entries.size(), cid, offsetMs);
+        KazumiLog.danmaku.debug("Video danmaku loaded at {}: {} entries, {} blocked (cid={}, offset={}ms)",
+            pos, entries.size(), built.blocked(), cid, offsetMs);
     }
 
     /** 单次装载上限：取时间轴靠前的一段（弹幕按 timeMs 升序），超出部分丢弃并记 DEBUG */
@@ -228,15 +238,23 @@ public final class BilibiliDanmakuService {
         return new ArrayList<>(entries.subList(0, maxEntries));
     }
 
-    /** 拉取结果的条目转换与清洗（网络回调线程执行，不触碰 Store 与 MC 状态） */
-    private static List<DanmakuEntry> buildEntries(List<BilibiliDanmaku> items, long offsetMs) {
+    /** 片内装载的转换结果：可入队条目 + 命中屏蔽词被丢弃的条数 */
+    private record VideoEntries(List<DanmakuEntry> entries, int blocked) {}
+
+    /** 拉取结果的条目转换与清洗（网络回调线程执行，不触碰 Store 与 MC 状态）；命中屏蔽词的不入队 */
+    private static VideoEntries buildEntries(List<BilibiliDanmaku> items, long offsetMs) {
         List<DanmakuEntry> entries = new ArrayList<>(items.size());
+        int blocked = 0;
         for (BilibiliDanmaku item : items) {
             if (item == null || item.text() == null || item.text().isBlank()) continue;
+            if (BilibiliBlockWords.blocked(item.text())) {
+                blocked++;
+                continue;
+            }
             entries.add(DanmakuEntry.videoTimeline(item.text(), item.mode(), item.colorRgb(),
                 item.fontSizePercent(), item.timeMs() + offsetMs));
         }
-        return entries;
+        return new VideoEntries(entries, blocked);
     }
 
     /** 装载失败（主线程）：请求已失效时静默丢弃，仍在途则标记失败并按需提示 */
@@ -251,11 +269,19 @@ public final class BilibiliDanmakuService {
         if (notifyUser) notifyFailure(Minecraft.getInstance(), "kazumiplayer.msg.danmaku_video_failed");
     }
 
-    /** 直播条目入队（主线程）：连接已被替换/断开时丢弃 */
+    /** 直播条目入队（主线程）：连接已被替换/断开时丢弃；命中屏蔽词的不入队（累计到阈值记一次 DEBUG） */
     private void enqueueLive(BlockPos pos, long roomId, BilibiliDanmaku item) {
         if (item == null || item.text() == null || item.text().isBlank()) return;
         if (!(attachments.get(pos) instanceof LiveAttachment live) || live.roomId() != roomId) {
             KazumiLog.danmaku.debug("Stale live danmaku discarded at {} (room={})", pos, roomId);
+            return;
+        }
+        if (BilibiliBlockWords.blocked(item.text())) {
+            long total = liveBlocked.incrementAndGet();
+            if (total % LIVE_BLOCK_LOG_EVERY == 0) {
+                KazumiLog.danmaku.debug("Live danmaku blocked: {} entries filtered so far (room={})",
+                    total, roomId);
+            }
             return;
         }
         ClientDanmakuStore.enqueue(pos, DanmakuEntry.live(item.text(), item.mode(), item.colorRgb(),

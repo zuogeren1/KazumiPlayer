@@ -35,8 +35,20 @@ public class ClientConfig {
     public final ModConfigSpec.DoubleValue danmakuSpeedMultiplier;
     // 弹幕显示区域占屏幕高度比例
     public final ModConfigSpec.DoubleValue danmakuAreaRatio;
-    // 单屏同屏最大弹幕条数
-    public final ModConfigSpec.IntValue danmakuMaxOnScreen;
+    // 显示彩色弹幕（关=只显示白色弹幕）
+    public final ModConfigSpec.BooleanValue danmakuShowColored;
+    // 高级弹幕（B 站 mode 7/8/9）降级为普通滚动显示
+    public final ModConfigSpec.BooleanValue danmakuShowAdvanced;
+    // 弹幕密度档位（决定同屏上限）
+    public final ModConfigSpec.EnumValue<DanmakuDensity> danmakuDensity;
+    // 世界内屏幕的弹幕字号随屏幕尺寸缩放
+    public final ModConfigSpec.BooleanValue danmakuScaleWithScreen;
+    // 弹幕屏蔽词（换行或逗号分隔）
+    public final ModConfigSpec.ConfigValue<String> danmakuBlockWords;
+    // 启动/登录后自动从账号同步屏蔽词
+    public final ModConfigSpec.BooleanValue danmakuAutoSyncBlockWords;
+    // 账号同步下来的屏蔽词（自动写入，勿手工编辑）
+    public final ModConfigSpec.ConfigValue<String> danmakuAccountBlockWords;
     // 全屏观影时显示弹幕
     public final ModConfigSpec.BooleanValue danmakuShowInFullscreen;
     // 自动加载 B 站视频片内时间轴弹幕
@@ -74,6 +86,25 @@ public class ClientConfig {
         STRETCH,
         /** 等比缩放后居中：保持视频原始宽高比，屏幕面内居中显示（两侧或上下留边） */
         CONTAIN
+    }
+
+    /** 弹幕密度档位 */
+    public enum DanmakuDensity {
+        /** 正常：同屏 60 条 */
+        NORMAL,
+        /** 较多：同屏 100 条 */
+        MORE,
+        /** 重叠：同屏 200 条 */
+        OVERLAP
+    }
+
+    /** 当前密度档位对应的单屏同屏上限（社交来源弹幕不受此上限约束） */
+    public int danmakuScreenCap() {
+        return switch (danmakuDensity.get()) {
+            case NORMAL -> 60;
+            case MORE -> 100;
+            case OVERLAP -> 200;
+        };
     }
 
     private ClientConfig(ModConfigSpec.Builder builder) {
@@ -143,9 +174,37 @@ public class ClientConfig {
                 .comment("弹幕显示区域占屏幕高度的比例")
                 .defineInRange("danmakuAreaRatio", 0.5, 0.1, 1.0);
 
-        danmakuMaxOnScreen = builder
-                .comment("单屏同屏最大弹幕条数，超出丢弃")
-                .defineInRange("danmakuMaxOnScreen", 60, 5, 200);
+        danmakuShowColored = builder
+                .comment("显示彩色弹幕（关闭后只渲染白色弹幕）")
+                .define("danmakuShowColored", true);
+
+        danmakuShowAdvanced = builder
+                .comment("高级弹幕降级显示：B 站 mode 7/8/9（高级定位/代码/BAS）没有定位与代码字段，",
+                         "开启后按其文本按时间降级为普通滚动弹幕，关闭则直接跳过")
+                .define("danmakuShowAdvanced", false);
+
+        danmakuDensity = builder
+                .comment("弹幕密度：决定单屏同屏最大条数（NORMAL=60 / MORE=100 / OVERLAP=200）",
+                         "房间互发与直播弹幕不受此上限约束，始终优先上屏")
+                .defineEnum("danmakuDensity", DanmakuDensity.NORMAL);
+
+        danmakuScaleWithScreen = builder
+                .comment("世界内屏幕的弹幕字号随屏幕方块尺寸缩放（关闭后使用固定世界字号）")
+                .define("danmakuScaleWithScreen", true);
+
+        danmakuBlockWords = builder
+                .comment("弹幕屏蔽词：换行或逗号分隔，命中即不显示（对 B 站片内/直播弹幕生效）",
+                         "可手工填写，也可由「自动同步」从已登录账号拉取后写入")
+                .define("danmakuBlockWords", "");
+
+        danmakuAutoSyncBlockWords = builder
+                .comment("启动/登录后自动从 B 站账号同步屏蔽词（需要本机已登录）")
+                .define("danmakuAutoSyncBlockWords", true);
+
+        danmakuAccountBlockWords = builder
+                .comment("账号同步下来的屏蔽词（由同步流程写入，请勿手工编辑；手工词请写 danmakuBlockWords）",
+                         "格式：每行一条，正则词以 re: 前缀标记")
+                .define("danmakuAccountBlockWords", "");
 
         danmakuShowInFullscreen = builder
                 .comment("全屏观影时在画面上显示弹幕")

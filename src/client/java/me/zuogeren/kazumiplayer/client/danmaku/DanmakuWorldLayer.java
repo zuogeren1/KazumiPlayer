@@ -35,19 +35,27 @@ import java.util.concurrent.ConcurrentHashMap;
  * 互不改变对方的几何：滚动带起点恒为显示区顶部、TOP 带自顶部向下、BOTTOM 带自底部向上，
  * 三条带重叠时按「滚动 → TOP → BOTTOM」次序提交，固定项自然压在滚动项之上（B 站语义）。
  *
+ * <p>时钟：条目按来源选驱动时钟——片内弹幕（BILIBILI_VIDEO）用 {@link VideoScreenRenderState}
+ * 携带的播放器位置（{@code state.player.getTimeMs()}，暂停期为冻结值），暂停即冻结、恢复后从
+ * 停住处继续；房间互发与直播弹幕用本地单调钟，不受暂停影响。行程进度、驻留时长与车道让位判据
+ * 的推进量都取该条自身的时钟。
+ *
  * <p>车道准入是占用感知的：该车道每条在途弹幕的已推进像素须 ≥ max(新条绘制宽, 该条绘制宽) +
- * {@link #MIN_GAP_PX} 才允许新条入轨（按行程比例换算成时间提前量），没有满足条件的车道就丢弃该条
- * 并计入 DEBUG 统计，不再轮转硬塞；占位宽度取两者的较大值，保证更宽的追随弹幕（行程更快）在最坏
- * 时刻也不会追上前车。TOP/BOTTOM 槽位同样按驻留时长占位，无空闲槽即丢弃。
+ * {@link #MIN_GAP_PX} 才允许新条入轨（按行程比例换算成时间提前量），占位宽度取两者的较大值，
+ * 保证更宽的追随弹幕（行程更快）在最坏时刻也不会追上前车。TOP/BOTTOM 槽位同样按驻留时长占位。
  *
  * <p>社交优先：出队后按来源优先级（ROOM_CHAT &gt; BILIBILI_LIVE &gt; BILIBILI_VIDEO）稳定排序再准入；
- * danmakuMaxOnScreen 容量闸只拦视频片内条目，社交条目不受上限约束（仍计入在屏数、仍受车道可用性约束）；
- * 社交条目找不到空闲车道时抢占——丢弃该车道里最接近离场的视频片内条目腾位（无视频占位者则照常丢弃），
- * 抢占计入 evicted-for-social DEBUG 计数。
+ * {@code config.danmakuScreenCap()} 容量闸只拦视频片内条目，社交条目不受上限约束（仍计入在屏数）；
+ * 社交条目优先走空闲车道，其次抢占该车道里最接近离场的视频片内条目腾位，仍不足时放进「最空」
+ * 的车道并允许与在途条目重叠（该条豁免 MIN_GAP 不变量，计入 forced-overlap DEBUG 计数）——
+ * 即社交条目永不丢弃；视频片内条目按原规则丢弃。
  *
  * <p>模式：SCROLL 右进左出、REVERSE 左进右出（镜像）；TOP/BOTTOM 居中驻留 {@link #PIN_HOLD_MS}，
- * 不受 speedMultiplier 影响。行程由本地 MonoClock 驱动：即时项出队即起跑，暂停/seek 不影响
- * 互发弹幕的社交语义；片内项由 Store 按解码器钟判定到期。
+ * 不受 speedMultiplier 影响。
+ *
+ * <p>开关：来源三开关与模式三开关过滤出队条目；danmakuShowColored=false 时跳过颜色非白的
+ * B 站条目（房间互发恒金字不受影响）；danmakuShowAdvanced=true 时把高级弹幕（B 站 mode 7/8/9）
+ * 按其文本按时间降级为普通滚动，降级后与普通条目同样参与车道准入，false 则跳过。
  *
  * <p>来源差异：房间互发（{@link DanmakuSource#ROOM_CHAT}）按「昵称：内容」组装并染
  * {@link #ROOM_CHAT_COLOR} 金色、外描一个空心矩形文字框；B 站弹幕按包内自身颜色渲染、不画框。
@@ -56,7 +64,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>字号→世界换算：车道几何恒按 100% 基准（laneHPx = 9×1.4）计算，字号百分比只作用于条目自身
  * 的 pose 缩放 q_i = danmakuFontScale × fontSizePercent/100，故任一条目上下场都不会改变他人的
- * 位置与大小；q_i 会被钳制到单条带高以内，避免超高条目溢出到相邻车道。
+ * 位置与大小；q_i 会被钳制到单条带高以内，避免超高条目溢出到相邻车道。基准换算因子
+ * {@link #baseScale} 按 danmakuScaleWithScreen 取屏幕实际尺寸或固定基准半高——关闭缩放时字号
+ * 在世界中恒为默认屏幕（3×2 格）折算的大小，不随屏幕方块尺寸变化（全屏 HUD 层不受该开关影响）。
  *
  * <p>显示区坐标：原点为屏幕面中心，显示带高 = LANE_COUNT×laneHPx（即 danmakuAreaRatio 指定的
  * 居中显示区）、宽 = 屏幕面宽，x 向为 SCROLL 的起跑侧、y 向为下缘侧。条目位置一律按实际绘制宽度（textWPx × q）计算，
@@ -84,8 +94,12 @@ public final class DanmakuWorldLayer {
     private static final long PIN_HOLD_MS = 4500L;
     /** 车道让位判据的水平间隔（像素）：旧条已推进像素须 ≥ max(新条,旧条)文本宽 + 此值才释放车道 */
     private static final float MIN_GAP_PX = 6.0f;
+    /** danmakuScaleWithScreen=false 时的固定世界字号基准：默认屏幕尺寸（3×2 格）的半高 */
+    private static final float FIXED_SCALE_BASIS_HALF_H = 1.0f;
     /** 房间互发弹幕定色（金色）；alpha 仍由 danmakuOpacity 决定 */
     private static final int ROOM_CHAT_COLOR = 0xFFD700;
+    /** 白色弹幕过滤基准色（danmakuShowColored=false 时保留的 B 站条目颜色） */
+    private static final int WHITE_RGB = 0xFFFFFF;
     /** 房间互发弹幕文字框内边距（显示区像素，四边相等）与线宽（显示区像素） */
     private static final float FRAME_PAD = 2.0f;
     private static final float FRAME_EDGE = 1.0f;
@@ -96,17 +110,42 @@ public final class DanmakuWorldLayer {
         Identifier.fromNamespaceAndPath("kazumiplayer", "danmaku_frame_white");
     private static boolean frameTexRegistered;
 
-    private record Active(DanmakuEntry entry, FormattedCharSequence text, long startMono,
+    /**
+     * 在屏条目。
+     *
+     * @param startMs 该条驱动时钟在准入时刻的取值（社交=单调钟，片内=播放器位置）
+     * @param textWPx 条目文本的基础像素宽（未乘 {@code scalePercent}）
+     */
+    private record Active(DanmakuEntry entry, FormattedCharSequence text, long startMs,
                           long seq, DanmakuMode mode, int travelMs, int lane,
                           float textWPx, float scalePercent) {}
+
+    /** 帧时钟：社交弹幕（房间/直播）用单调钟，片内弹幕用播放器位置——暂停期后者冻结 */
+    private record Clocks(long monoMs, long videoMs) {
+        long of(DanmakuSource source) {
+            return isVideoDanmaku(source) ? videoMs : monoMs;
+        }
+    }
 
     /**
      * 车道分配结果。
      *
-     * @param lane       可用车道下标（&lt; 0 表示无车道可入，调用侧丢弃该条）
+     * @param lane       可用车道下标（&lt; 0 表示无车道可入）
      * @param evictIndex 需先移除的在途条目下标（-1 表示无需腾位）
+     * @param forced     社交条目被迫与在途条目重叠入轨（该条豁免 MIN_GAP 不变量）
      */
-    private record LanePick(int lane, int evictIndex) {}
+    private record LanePick(int lane, int evictIndex, boolean forced) {}
+
+    /**
+     * 准入结果。
+     *
+     * @param active  已登记条目（null 表示丢弃该条）
+     * @param evicted 因抢占腾位被移除的在途条目（null 表示未抢占）
+     * @param forced  社交条目被迫重叠入轨（无空闲车道/槽位且无可腾位视频）
+     */
+    private record Admission(Active active, Active evicted, boolean forced) {
+        private static final Admission DROPPED = new Admission(null, null, false);
+    }
 
     /** 来源优先级（数值越小越优先）：社交弹幕先占位，视频片内条目最低 */
     private static int sourcePriority(DanmakuSource source) {
@@ -117,9 +156,35 @@ public final class DanmakuWorldLayer {
         };
     }
 
-    /** 视频片内条目：受 danmakuMaxOnScreen 容量闸限制，且可被更高优先级的弹幕抢占腾位 */
+    /** 视频片内条目：受 danmakuScreenCap 容量闸限制，且可被更高优先级的弹幕抢占腾位 */
     private static boolean isVideoDanmaku(DanmakuSource source) {
         return source == DanmakuSource.BILIBILI_VIDEO;
+    }
+
+    /** 容量闸：只拦视频片内条目（社交条目不受 danmakuScreenCap 上限约束，始终优先上屏） */
+    static boolean capBlocks(DanmakuSource source, int activeCount, ClientConfig config) {
+        return isVideoDanmaku(source) && activeCount >= config.danmakuScreenCap();
+    }
+
+    /** B 站来源（片内/直播）：白色过滤开关只作用于这两类来源 */
+    private static boolean isBilibiliDanmaku(DanmakuSource source) {
+        return source == DanmakuSource.BILIBILI_VIDEO || source == DanmakuSource.BILIBILI_LIVE;
+    }
+
+    /** 彩色弹幕开关：关闭时跳过颜色非白的 B 站条目（房间互发恒金字，不受该开关影响） */
+    private static boolean colorAllowed(DanmakuSource source, int colorRgb, boolean showColored) {
+        return showColored || !isBilibiliDanmaku(source) || (colorRgb & 0xFFFFFF) == WHITE_RGB;
+    }
+
+    /**
+     * 高级弹幕（B 站 mode 7/8/9：高级定位/代码/BAS）没有定位与代码字段：开启时按其文本按时间
+     * 降级为普通滚动弹幕，关闭时跳过。
+     *
+     * @return 生效模式；null 表示跳过该条
+     */
+    private static DanmakuMode effectiveMode(DanmakuMode mode, boolean showAdvanced) {
+        if (mode != DanmakuMode.ADVANCED) return mode;
+        return showAdvanced ? DanmakuMode.SCROLL : null;
     }
 
     private static final Map<BlockPos, List<Active>> ACTIVE = new ConcurrentHashMap<>();
@@ -145,9 +210,9 @@ public final class DanmakuWorldLayer {
         installClearHook();
 
         BlockPos pos = state.blockPos;
-        long now = MonoClock.millis();
         long travelMs = scrollTravelMs();
         long videoTimeMs = state.player != null ? state.player.getTimeMs() : 0;
+        Clocks clocks = new Clocks(MonoClock.millis(), videoTimeMs);
 
         // 场景态清理先于出队：跳变帧的旧弹幕整批作废
         if (clearOnSeek(pos, videoTimeMs)) {
@@ -163,55 +228,57 @@ public final class DanmakuWorldLayer {
         List<Active> actives = ACTIVE.computeIfAbsent(pos, k -> new ArrayList<>());
 
         // 车道几何恒按 100% 基准：字号只影响条目自身缩放，不挤压/不位移他人
-        float laneWorldH = 2 * halfH * config.danmakuAreaRatio.get().floatValue() / LANE_COUNT;
-        float baseScale = laneWorldH / (GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR);
+        float baseScale = baseScale(halfH, config);
         float halfWPx = halfW / baseScale;
         float laneHPx = GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR;
         float fontScale = config.danmakuFontScale.get().floatValue();
         Font font = Minecraft.getInstance().font;
 
-        int maxOnScreen = config.danmakuMaxOnScreen.get();
         int accepted = 0;
         int noLane = 0;
         int capped = 0;
         int evicted = 0;
+        int forced = 0;
         int skipped = 0;
         for (DanmakuEntry entry : due) {
-            if (entry.mode() == DanmakuMode.ADVANCED) {
+            // 高级弹幕降级为普通滚动（关闭时跳过），降级后与普通条目同样参与车道准入
+            DanmakuMode mode = effectiveMode(entry.mode(), config.danmakuShowAdvanced.get());
+            if (mode == null) {
                 skipped++;
                 continue;
             }
-            if (!isVisible(entry, config)) continue;
+            if (!isVisible(entry, mode, config)) continue;
             // 容量闸只拦视频片内条目：社交条目不受上限约束（仍计入 actives、仍受车道可用性约束）
-            if (isVideoDanmaku(entry.source()) && actives.size() >= maxOnScreen) {
+            if (capBlocks(entry.source(), actives.size(), config)) {
                 capped++;
                 continue;
             }
-            float textWPx = font.width(entryText(entry));
-            float scalePercent = Math.max(10, entry.fontSizePercent()) / 100.0f;
+            FormattedCharSequence text = entryText(entry);
+            float scalePercent = Math.max(10, entry.fontSizePercent())
+                / (float) DanmakuEntry.FONT_SIZE_STANDARD;
             // 单条占用高度按实际缩放算并钳制到带高以内，避免超大字号溢出压到相邻车道
-            float bandH = laneHPx;
-            float entryScale = Math.min(fontScale * scalePercent, bandH / GLYPH_HEIGHT_PX);
-            int before = actives.size();
-            Active active = admit(entry, actives, now, travelMs, textWPx, entryScale, halfWPx, laneHPx);
-            if (active == null) {
+            float entryScale = Math.min(fontScale * scalePercent, laneHPx / GLYPH_HEIGHT_PX);
+            float textWPx = font.width(text);
+            Admission adm = admit(entry, mode, text, actives, clocks, travelMs, textWPx, entryScale,
+                halfWPx, laneHPx);
+            if (adm.active() == null) {
                 noLane++;
                 continue;
             }
-            // 抢位：admit 已就地移除被抢占的在途条目，此时净增为 0
-            if (actives.size() < before) evicted++;
-            actives.add(active);
+            if (adm.evicted() != null) evicted++;
+            if (adm.forced()) forced++;
+            actives.add(adm.active());
             accepted++;
         }
-        if (!due.isEmpty() || noLane > 0 || capped > 0 || evicted > 0 || skipped > 0) {
+        if (!due.isEmpty() || noLane > 0 || capped > 0 || evicted > 0 || forced > 0 || skipped > 0) {
             KazumiLog.danmaku.debug(
-                "World layer consumed {} due at {} (admitted {}, no-free-lane {}, capped-video {}, evicted-for-social {}, advanced-skipped {}, active {})",
-                due.size(), pos, accepted, noLane, capped, evicted, skipped, actives.size());
+                "World layer consumed {} due at {} (admitted {}, no-free-lane {}, capped-video {}, evicted-for-social {}, forced-overlap {}, advanced-skipped {}, active {})",
+                due.size(), pos, accepted, noLane, capped, evicted, forced, skipped, actives.size());
         }
 
         for (int i = actives.size() - 1; i >= 0; i--) {
             Active active = actives.get(i);
-            if (now - active.startMono() >= lifetimeMs(active)) {
+            if (clocks.of(active.entry().source()) - active.startMs() >= lifetimeMs(active)) {
                 actives.remove(i);
             }
         }
@@ -232,26 +299,39 @@ public final class DanmakuWorldLayer {
         poseStack.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(180.0F));
 
         // 分带提交：滚动带先画，TOP/BOTTOM 后画 → 三条带重叠处固定项压在上层
-        drawBand(collector, poseStack, actives, DanmakuMode.SCROLL, now, font, halfWPx, laneHPx,
+        drawBand(collector, poseStack, actives, DanmakuMode.SCROLL, clocks, font, halfWPx, laneHPx,
             alphaFactor, outline, outlineColor, frameColor);
-        drawBand(collector, poseStack, actives, DanmakuMode.REVERSE, now, font, halfWPx, laneHPx,
+        drawBand(collector, poseStack, actives, DanmakuMode.REVERSE, clocks, font, halfWPx, laneHPx,
             alphaFactor, outline, outlineColor, frameColor);
-        drawBand(collector, poseStack, actives, DanmakuMode.TOP, now, font, halfWPx, laneHPx,
+        drawBand(collector, poseStack, actives, DanmakuMode.TOP, clocks, font, halfWPx, laneHPx,
             alphaFactor, outline, outlineColor, frameColor);
-        drawBand(collector, poseStack, actives, DanmakuMode.BOTTOM, now, font, halfWPx, laneHPx,
+        drawBand(collector, poseStack, actives, DanmakuMode.BOTTOM, clocks, font, halfWPx, laneHPx,
             alphaFactor, outline, outlineColor, frameColor);
         poseStack.popPose();
     }
 
+    /**
+     * 像素域→世界域的基准缩放：车道带高（世界单位）= 屏幕面高 × danmakuAreaRatio，除以五条车道、
+     * 再除以单车道像素高。danmakuScaleWithScreen=false 时改用固定基准半高
+     * {@link #FIXED_SCALE_BASIS_HALF_H}（默认屏幕尺寸），字号不再随屏幕方块尺寸缩放。
+     *
+     * @param halfH 屏幕面半高（世界单位/格）
+     */
+    static float baseScale(float halfH, ClientConfig config) {
+        float basisHalfH = config.danmakuScaleWithScreen.get() ? halfH : FIXED_SCALE_BASIS_HALF_H;
+        float laneWorldH = 2 * basisHalfH * config.danmakuAreaRatio.get().floatValue() / LANE_COUNT;
+        return laneWorldH / (GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR);
+    }
+
     /** 单条带的提交：滚动带起点恒为显示区顶部；TOP 自顶部向下、BOTTOM 自底部向上（slot 0 最靠下） */
     private static void drawBand(SubmitNodeCollector collector, PoseStack poseStack, List<Active> actives,
-                                 DanmakuMode band, long now, Font font, float halfWPx, float laneHPx,
+                                 DanmakuMode band, Clocks clocks, Font font, float halfWPx, float laneHPx,
                                  float alphaFactor, boolean outline, int outlineColor, int frameColor) {
         for (Active active : actives) {
             if (active.mode() != band) continue;
             float q = active.scalePercent();
             float drawnWPx = active.textWPx() * q;
-            Placement place = placementOf(active, now, halfWPx, laneHPx);
+            Placement place = placementOf(active, clocks, halfWPx, laneHPx);
             // 整条移出显示区即不再提交（按实际绘制外接框求交，避免文字飘到屏幕面之外）
             if (outsideDisplay(place, drawnWPx, laneHPx, halfWPx)) continue;
             // 字形在带内垂直居中：字号缩放后仍不越出本带与显示区上下缘
@@ -290,12 +370,12 @@ public final class DanmakuWorldLayer {
      * SCROLL 自 +x 缘进入向左行进、REVERSE 自 -x 缘进入向右行进（互为镜像）；
      * TOP 带自显示区上缘向下、BOTTOM 带自下缘向上，槽位 0 分别最靠上/最靠下。
      */
-    private static Placement placementOf(Active active, long now, float halfWPx, float laneHPx) {
+    private static Placement placementOf(Active active, Clocks clocks, float halfWPx, float laneHPx) {
         float drawnWPx = active.textWPx() * active.scalePercent();
         float half = halfBand(laneHPx);
         float yTop = -half + active.lane() * laneHPx;
         float travel = 2 * halfWPx + drawnWPx;
-        float progress = progress(active, now);
+        float progress = progress(active, clocks);
         return switch (active.mode()) {
             case TOP -> new Placement(-drawnWPx / 2.0f, yTop);
             case BOTTOM -> new Placement(-drawnWPx / 2.0f, half - (active.lane() + 1) * laneHPx);
@@ -304,10 +384,11 @@ public final class DanmakuWorldLayer {
         };
     }
 
-    /** 行程进度 p∈[0,1]（本地钟驱动，与画面时间无关；固定项 travelMs=0，不参与行程） */
-    private static float progress(Active active, long now) {
+    /** 行程进度 p∈[0,1]：按条目自身时钟推进（片内弹幕暂停即冻结；固定项 travelMs=0 不参与行程） */
+    private static float progress(Active active, Clocks clocks) {
         int travelMs = active.travelMs();
-        return travelMs <= 0 ? 0.0f : (now - active.startMono()) / (float) travelMs;
+        if (travelMs <= 0) return 0.0f;
+        return (clocks.of(active.entry().source()) - active.startMs()) / (float) travelMs;
     }
 
     /** 字形在带内的垂直偏移（显示区像素）：缩放后仍居中于本带 */
@@ -348,125 +429,178 @@ public final class DanmakuWorldLayer {
     /**
      * 单条准入：占用感知地分配车道/槽位。
      *
-     * <p>社交条目抢占腾位时会直接从 actives 就地移除被抢占的在途条目（调用侧据列表长度变化计数）。
+     * <p>社交条目永不丢弃：抢占腾位时会从 actives 就地移除被抢占条目，仍无空位则被迫重叠入轨。
      *
-     * @return 已登记的 Active；无可用车道/槽位返回 null（调用侧丢弃并计入 DEBUG）
+     * @param textWPx      条目文本基础像素宽（未乘 {@code scalePercent}）
+     * @param scalePercent 条目 pose 缩放（danmakuFontScale × fontSizePercent/100，钳制到带高以内）
+     * @return 准入结果；active 为 null 表示丢弃该条
      */
-    private static Active admit(DanmakuEntry entry, List<Active> actives, long now, long travelMs,
-                                float textWPx, float entryScale, float halfWPx, float laneHPx) {
+    private static Admission admit(DanmakuEntry entry, DanmakuMode mode, FormattedCharSequence text,
+                                   List<Active> actives, Clocks clocks, long travelMs, float textWPx,
+                                   float scalePercent, float halfWPx, float laneHPx) {
         long seq = seqCursor++;
-        return switch (entry.mode()) {
-            case TOP -> {
-                int slot = claimPinSlot(actives, DanmakuMode.TOP, now);
-                yield slot < 0 ? null : new Active(entry, entryText(entry), now, seq,
-                    DanmakuMode.TOP, 0, slot, textWPx, entryScale);
-            }
-            case BOTTOM -> {
-                int slot = claimPinSlot(actives, DanmakuMode.BOTTOM, now);
-                yield slot < 0 ? null : new Active(entry, entryText(entry), now, seq,
-                    DanmakuMode.BOTTOM, 0, slot, textWPx, entryScale);
-            }
+        long startMs = clocks.of(entry.source());
+        return switch (mode) {
+            case TOP -> pinAdmit(entry, text, actives, clocks, DanmakuMode.TOP, textWPx, scalePercent, seq, startMs);
+            case BOTTOM -> pinAdmit(entry, text, actives, clocks, DanmakuMode.BOTTOM, textWPx, scalePercent, seq, startMs);
             case SCROLL, REVERSE -> {
-                // 占位宽度按条目实际缩放后的绘制宽度计（与 HUD 侧一致）
-                LanePick pick = pickLane(actives, entry.mode(), textWPx * entryScale, halfWPx, now, travelMs,
+                // 占位宽度按条目实际缩放后的绘制宽度计（与 HUD 侧同判据）
+                LanePick pick = pickLane(actives, mode, textWPx * scalePercent, halfWPx, clocks, travelMs,
                     !isVideoDanmaku(entry.source()));
-                if (pick.lane() < 0) yield null;
-                if (pick.evictIndex() >= 0) actives.remove(pick.evictIndex());
-                yield new Active(entry, entryText(entry), now, seq,
-                    entry.mode(), (int) travelMs, pick.lane(), textWPx, entryScale);
+                if (pick.lane() < 0) yield Admission.DROPPED;
+                Active victim = pick.evictIndex() >= 0 ? actives.remove(pick.evictIndex()) : null;
+                yield new Admission(new Active(entry, text, startMs, seq, mode, (int) travelMs,
+                    pick.lane(), textWPx, scalePercent), victim, pick.forced());
             }
-            default -> null;
+            case ADVANCED -> Admission.DROPPED;
         };
+    }
+
+    /** 固定项准入：优先空槽；社交条目无空槽时占「最接近释放」的槽位（被迫重叠并计入 forced） */
+    private static Admission pinAdmit(DanmakuEntry entry, FormattedCharSequence text, List<Active> actives,
+                                      Clocks clocks, DanmakuMode pinMode, float textWPx, float scalePercent,
+                                      long seq, long startMs) {
+        int slot = firstFreePin(actives, pinMode);
+        boolean forced = false;
+        if (slot < 0) {
+            if (isVideoDanmaku(entry.source())) return Admission.DROPPED;
+            slot = oldestPin(actives, pinMode, clocks);
+            if (slot < 0) return Admission.DROPPED;
+            forced = true;
+        }
+        return new Admission(new Active(entry, text, startMs, seq, pinMode, 0, slot, textWPx, scalePercent),
+            null, forced);
+    }
+
+    /** 固定槽位占用感知：被在途条目占用的槽位不可复用；返回可用槽位下标，无则 -1 */
+    private static int firstFreePin(List<Active> actives, DanmakuMode mode) {
+        boolean[] used = new boolean[PIN_SLOT_COUNT];
+        for (Active active : actives) {
+            if (active.mode() == mode && active.lane() < PIN_SLOT_COUNT) {
+                used[active.lane()] = true;
+            }
+        }
+        for (int i = 0; i < PIN_SLOT_COUNT; i++) {
+            if (!used[i]) return i;
+        }
+        return -1;
+    }
+
+    /** 「最接近释放」的固定槽位：占用者中按各自时钟已驻留最久者；无占用返回 -1 */
+    private static int oldestPin(List<Active> actives, DanmakuMode mode, Clocks clocks) {
+        int slot = -1;
+        long bestElapsed = Long.MIN_VALUE;
+        for (Active active : actives) {
+            if (active.mode() != mode || active.lane() >= PIN_SLOT_COUNT) continue;
+            long elapsed = clocks.of(active.entry().source()) - active.startMs();
+            if (elapsed > bestElapsed) {
+                bestElapsed = elapsed;
+                slot = active.lane();
+            }
+        }
+        return slot;
+    }
+
+    /**
+     * 车道分配三遍：1) 按轮转游标找已让出空间的车道；2) 社交条目按同一轮转序试算抢占——移除该车道
+     * 里行程 progress 最大的视频片内条目后确实让出空间才腾位（不成立不白丢视频条目）；
+     * 3) 社交条目仍无位时放进「最空」的车道（该车道最后一条已推进像素最多者，重叠量最小）并标记被迫重叠。
+     * 视频片内条目只走第一遍，无位即丢弃。
+     *
+     * @param social 该条是否为社交条目（房间互发/直播）：可抢占、可被迫重叠
+     */
+    private static LanePick pickLane(List<Active> actives, DanmakuMode mode, float newWPx, float halfWPx,
+                                     Clocks clocks, long travelMs, boolean social) {
+        for (int offset = 0; offset < LANE_COUNT; offset++) {
+            int lane = Math.floorMod(laneCursor + offset, LANE_COUNT);
+            if (laneReleased(actives, mode, lane, newWPx, halfWPx, clocks, travelMs)) {
+                laneCursor = Math.floorMod(lane + 1, LANE_COUNT);
+                return new LanePick(lane, -1, false);
+            }
+        }
+        if (!social) return new LanePick(-1, -1, false);
+        for (int offset = 0; offset < LANE_COUNT; offset++) {
+            int lane = Math.floorMod(laneCursor + offset, LANE_COUNT);
+            int victim = evictCandidate(actives, mode, lane, clocks);
+            if (victim < 0) continue;
+            if (!laneReleased(actives, mode, lane, newWPx, halfWPx, clocks, travelMs, victim)) continue;
+            laneCursor = Math.floorMod(lane + 1, LANE_COUNT);
+            return new LanePick(lane, victim, false);
+        }
+        int bestLane = -1;
+        float mostAdvance = -1.0f;
+        for (int lane = 0; lane < LANE_COUNT; lane++) {
+            float advance = lastAdvance(actives, mode, lane, halfWPx, clocks, travelMs);
+            if (advance > mostAdvance) {
+                mostAdvance = advance;
+                bestLane = lane;
+            }
+        }
+        if (bestLane < 0) return new LanePick(-1, -1, false);
+        laneCursor = Math.floorMod(bestLane + 1, LANE_COUNT);
+        return new LanePick(bestLane, -1, true);
     }
 
     /**
      * 车道准入判据：该车道每条在途弹幕的已推进像素须 ≥ max(新条绘制宽, 该条绘制宽) + {@link #MIN_GAP_PX}。
      * 宽度一律按条目实际缩放后的绘制宽度计（textWPx × scalePercent），与 HUD 侧同一口径；
      * 占位宽度取两者较大值——更宽的弹幕行程更快会追上较窄的前车，只用前车宽度算提前量会在最坏时刻追尾；
-     * 已推进像素按行程比例换算成时间提前量（毫秒向上取整，让位不早于理论时刻），与画面时间无关（本地钟驱动）。
+     * 推进量按该条自身时钟计（片内弹幕暂停期不推进，不会被误判为已让位）。
      */
     private static boolean laneReleased(List<Active> actives, DanmakuMode mode, int lane, float newWPx,
-                                        float halfWPx, long now, long travelMs) {
-        return laneReleased(actives, mode, lane, newWPx, halfWPx, now, travelMs, -1);
+                                        float halfWPx, Clocks clocks, long travelMs) {
+        return laneReleased(actives, mode, lane, newWPx, halfWPx, clocks, travelMs, -1);
     }
 
     /**
      * @param skipIndex 试算抢占腾位时忽略的在途条目下标（-1 表示不忽略）
      */
     private static boolean laneReleased(List<Active> actives, DanmakuMode mode, int lane, float newWPx,
-                                        float halfWPx, long now, long travelMs, int skipIndex) {
+                                        float halfWPx, Clocks clocks, long travelMs, int skipIndex) {
         for (int i = 0; i < actives.size(); i++) {
             if (i == skipIndex) continue;
             Active active = actives.get(i);
             if (active.mode() != mode || active.lane() != lane) continue;
             float widest = Math.max(newWPx, active.textWPx() * active.scalePercent());
-            double span = 2 * halfWPx + widest;
+            float span = 2 * halfWPx + widest;
             long advance = (long) Math.ceil(travelMs * Math.min(1.0, (widest + MIN_GAP_PX) / span));
-            if (now - active.startMono() < advance) return false;
+            if (clocks.of(active.entry().source()) - active.startMs() < advance) return false;
         }
         return true;
     }
 
-    /** 固定槽位占用感知：驻留未满的槽位不可复用；返回可用槽位下标，无则 -1 */
-    private static int claimPinSlot(List<Active> actives, DanmakuMode mode, long now) {
-        long[] busyUntil = new long[PIN_SLOT_COUNT];
-        for (Active active : actives) {
-            if (active.mode() != mode || active.lane() >= PIN_SLOT_COUNT) continue;
-            busyUntil[active.lane()] = Math.max(busyUntil[active.lane()], active.startMono() + PIN_HOLD_MS);
-        }
-        for (int offset = 0; offset < PIN_SLOT_COUNT; offset++) {
-            int slot = Math.floorMod(laneCursor + offset, PIN_SLOT_COUNT);
-            if (busyUntil[slot] <= now) {
-                laneCursor = Math.floorMod(slot + 1, PIN_SLOT_COUNT);
-                return slot;
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * 车道分配：先按轮转游标找一条已让出空间的车道；全部车道都在占用期且该条可抢占时，再按同一
-     * 轮转序试算腾位——移除该车道里行程 progress 最大的视频片内条目后确实让出空间才标记抢占
-     * （试算不成立不白丢视频条目）；无可用车道返回 lane &lt; 0，由调用侧丢弃该条。
-     *
-     * @param preempt 该条是否为可抢占的社交条目（视频片内条目不得抢占）
-     */
-    private static LanePick pickLane(List<Active> actives, DanmakuMode mode, float newWPx, float halfWPx,
-                                     long now, long travelMs, boolean preempt) {
-        for (int offset = 0; offset < LANE_COUNT; offset++) {
-            int lane = Math.floorMod(laneCursor + offset, LANE_COUNT);
-            if (laneReleased(actives, mode, lane, newWPx, halfWPx, now, travelMs)) {
-                laneCursor = Math.floorMod(lane + 1, LANE_COUNT);
-                return new LanePick(lane, -1);
-            }
-        }
-        if (!preempt) return new LanePick(-1, -1);
-        for (int offset = 0; offset < LANE_COUNT; offset++) {
-            int lane = Math.floorMod(laneCursor + offset, LANE_COUNT);
-            int victim = evictCandidate(actives, mode, lane, now);
-            if (victim < 0) continue;
-            if (!laneReleased(actives, mode, lane, newWPx, halfWPx, now, travelMs, victim)) continue;
-            laneCursor = Math.floorMod(lane + 1, LANE_COUNT);
-            return new LanePick(lane, victim);
-        }
-        return new LanePick(-1, -1);
-    }
-
     /** 抢占候选：该车道里行程 progress 最大（最接近离场）的视频片内条目下标；没有则 -1 */
-    private static int evictCandidate(List<Active> actives, DanmakuMode mode, int lane, long now) {
+    private static int evictCandidate(List<Active> actives, DanmakuMode mode, int lane, Clocks clocks) {
         int candidate = -1;
         float bestProgress = -1.0f;
         for (int i = 0; i < actives.size(); i++) {
             Active active = actives.get(i);
             if (active.mode() != mode || active.lane() != lane) continue;
             if (!isVideoDanmaku(active.entry().source())) continue;
-            float progress = (now - active.startMono()) / (float) active.travelMs();
+            float progress = progress(active, clocks);
             if (progress > bestProgress) {
                 bestProgress = progress;
                 candidate = i;
             }
         }
         return candidate;
+    }
+
+    /** 该车道最后一条（行程推进最少）在途弹幕的已推进像素；车道为空返回 -1 */
+    private static float lastAdvance(List<Active> actives, DanmakuMode mode, int lane, float halfWPx,
+                                     Clocks clocks, long travelMs) {
+        float newestElapsed = Float.MAX_VALUE;
+        float newestWidth = -1.0f;
+        for (Active active : actives) {
+            if (active.mode() != mode || active.lane() != lane) continue;
+            float elapsed = clocks.of(active.entry().source()) - active.startMs();
+            if (elapsed < newestElapsed) {
+                newestElapsed = elapsed;
+                newestWidth = active.textWPx() * active.scalePercent();
+            }
+        }
+        if (newestWidth < 0) return -1.0f;
+        return newestElapsed / travelMs * (2 * halfWPx + newestWidth);
     }
 
     /** 条目寿命：滚动/逆向滚动按行程，固定项按驻留时长 */
@@ -492,20 +626,21 @@ public final class DanmakuWorldLayer {
         return ARGB.color(Math.round(alphaFactor * 255.0f), rgb & 0xFFFFFF);
     }
 
-    /** 来源与模式开关过滤：关闭的来源/模式在出队后即丢弃，不占容量闸；REVERSE 跟随滚动开关 */
-    private static boolean isVisible(DanmakuEntry entry, ClientConfig config) {
+    /** 来源/模式/颜色开关过滤：关闭的来源、模式与非白 B 站条目在出队后即丢弃，不占容量闸 */
+    private static boolean isVisible(DanmakuEntry entry, DanmakuMode mode, ClientConfig config) {
         boolean sourceOn = switch (entry.source()) {
             case BILIBILI_VIDEO -> config.danmakuBilibiliVideo.get();
             case BILIBILI_LIVE -> config.danmakuBilibiliLive.get();
             case ROOM_CHAT -> config.danmakuRoomChat.get();
         };
-        boolean modeOn = switch (entry.mode()) {
+        boolean modeOn = switch (mode) {
             case SCROLL, REVERSE -> config.danmakuShowScroll.get();
             case TOP -> config.danmakuShowTop.get();
             case BOTTOM -> config.danmakuShowBottom.get();
             case ADVANCED -> false;
         };
-        return sourceOn && modeOn;
+        return sourceOn && modeOn
+            && colorAllowed(entry.source(), entry.colorRgb(), config.danmakuShowColored.get());
     }
 
     /** 断线/卸载世界时清空活动列表（BE 移除后 draw 不再被调，滞留条目靠此钩子回收） */

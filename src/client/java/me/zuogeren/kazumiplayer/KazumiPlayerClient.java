@@ -6,6 +6,7 @@ import me.zuogeren.kazumiplayer.client.ClientPlaybackScheduler;
 import me.zuogeren.kazumiplayer.client.ClientClockSync;
 import me.zuogeren.kazumiplayer.client.ClientModEvents;
 import me.zuogeren.kazumiplayer.client.KazumiConfigScreen;
+import me.zuogeren.kazumiplayer.client.bilibili.BilibiliBlockWords;
 import me.zuogeren.kazumiplayer.client.gui.KazumiPlayerScreen;
 import me.zuogeren.kazumiplayer.network.ClientPacketHandlers;
 import me.zuogeren.kazumiplayer.network.PacketDispatcher;
@@ -40,11 +41,18 @@ public class KazumiPlayerClient {
         modContainer.registerConfig(ModConfig.Type.CLIENT, ClientConfig.SPEC);
 
         // 拉流模式依赖配置值：构造期配置可能尚未加载，这里在加载/重载后再应用一次（幂等）
+        // 账号屏蔽词同步同样挂在配置事件上：开关关闭或本机未登录时内部直接跳过
         modEventBus.addListener((net.neoforged.fml.event.config.ModConfigEvent.Loading event) -> {
-            if (event.getConfig().getSpec() == ClientConfig.SPEC) applyWaterMediaStreamMode();
+            if (event.getConfig().getSpec() == ClientConfig.SPEC) {
+                applyWaterMediaStreamMode();
+                BilibiliBlockWords.requestAutoSync();
+            }
         });
         modEventBus.addListener((net.neoforged.fml.event.config.ModConfigEvent.Reloading event) -> {
-            if (event.getConfig().getSpec() == ClientConfig.SPEC) applyWaterMediaStreamMode();
+            if (event.getConfig().getSpec() == ClientConfig.SPEC) {
+                applyWaterMediaStreamMode();
+                BilibiliBlockWords.requestAutoSync();
+            }
         });
 
         applyWaterMediaStreamMode();
