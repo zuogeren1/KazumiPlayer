@@ -10,12 +10,13 @@ import net.minecraft.resources.Identifier;
 
 /**
  * S→C: 服务端代理解析的结果。
- * 成功时携带有时效的可播放地址（视频 mp4 直链 / 直播 m3u8）与档位表；
+ * 成功时携带有时效的可播放地址（DASH 视频流 / 单流 mp4 / 直播 m3u8）、DASH 的音频从属流地址与档位表；
  * 失败时 ok=false 且 error 为原因（客户端据此决定是否用本地凭据回落解析）。
- * 档位表编码为 "qn|label;qn|label"（label 可能含冒号，故用竖线分隔）。
+ * 档位表编码为 "qn|flags|label;..."（label 可能含冒号，故用竖线分隔字段）。
+ * audioUrl 非空表示该结果是 DASH：音视频分离，播放时必须把音频挂成从属流。
  */
 public record BilibiliResolveResultPacket(BlockPos screenPos, long requestId, String pageUrl,
-                                          boolean ok, String url, String qualities,
+                                          boolean ok, String url, String audioUrl, String qualities,
                                           int currentQn, String error) implements CustomPacketPayload {
 
     public static final Type<BilibiliResolveResultPacket> TYPE =
@@ -28,6 +29,7 @@ public record BilibiliResolveResultPacket(BlockPos screenPos, long requestId, St
             ByteBufCodecs.STRING_UTF8, BilibiliResolveResultPacket::pageUrl,
             ByteBufCodecs.BOOL, BilibiliResolveResultPacket::ok,
             ByteBufCodecs.STRING_UTF8, BilibiliResolveResultPacket::url,
+            ByteBufCodecs.STRING_UTF8, BilibiliResolveResultPacket::audioUrl,
             ByteBufCodecs.STRING_UTF8, BilibiliResolveResultPacket::qualities,
             ByteBufCodecs.VAR_INT, BilibiliResolveResultPacket::currentQn,
             ByteBufCodecs.STRING_UTF8, BilibiliResolveResultPacket::error,

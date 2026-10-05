@@ -244,9 +244,9 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             future.whenComplete((stream, t) -> {
                 BilibiliResolveResultPacket result = t != null
                     ? new BilibiliResolveResultPacket(packet.screenPos(), packet.requestId(), pageUrl,
-                        false, "", "", 0, String.valueOf(unwrapFuture(t).getMessage()))
+                        false, "", "", "", 0, String.valueOf(unwrapFuture(t).getMessage()))
                     : new BilibiliResolveResultPacket(packet.screenPos(), packet.requestId(), pageUrl,
-                        true, stream.url(), BilibiliApi.encodeQualities(stream.qualities()),
+                        true, stream.url(), stream.audioUrl(), BilibiliApi.encodeQualities(stream.qualities()),
                         stream.currentQn(), "");
                 var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
                 if (server == null) return;

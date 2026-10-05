@@ -310,6 +310,46 @@ public class HttpUtil {
     }
 
     /**
+     * 探测媒体地址是否可读：带 Range 的 GET，只读到首个分片就释放连接。
+     * 用于在 CDN 候选节点里挑出真正可达的那个——B 站返回的候选里含 P2P 节点
+     * （*.mcdn.bilivideo.cn），在部分网络下不可达；若直接取第一个候选，
+     * 会出现"画面能出、音频流拉不到"的半瘫状态。
+     *
+     * @param headers 附加请求头（Referer、Cookie 等）
+     * @return 响应 2xx/206 为 true；异常/超时一律视为不可达
+     */
+    public static CompletableFuture<Boolean> probeReadable(String urlString,
+            java.util.Map<String, String> headers, int timeoutMs) {
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        CompletableFuture.runAsync(() -> {
+            try {
+                URI uri = URI.create(urlString);
+                checkSsrf(uri);
+                HttpRequest.Builder builder = HttpRequest.newBuilder()
+                        .uri(uri)
+                        .timeout(Duration.ofMillis(timeoutMs))
+                        .header("User-Agent", getRandomUserAgent())
+                        .header("Range", "bytes=0-1")
+                        .GET();
+                headers.forEach(builder::header);
+                HttpResponse<InputStream> response = CLIENT.send(
+                        builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+                int status = response.statusCode();
+                try (InputStream in = response.body()) {
+                    in.read(new byte[2]);
+                } catch (IOException ignored) {
+                    // 读到响应头即已证明节点可用，字节读失败不影响判定
+                }
+                future.complete(status >= 200 && status < 300);
+            } catch (Exception e) {
+                KazumiLog.http.debug("Media probe failed for {}: {}", urlString, e.getMessage());
+                future.complete(false);
+            }
+        });
+        return future;
+    }
+
+    /**
      * SSRF 防护: 禁止请求内网地址。
      * 对 host 的全部解析结果逐一校验（round-robin DNS 可能同时返回公网与内网记录）；
      * 校验与后续 CLIENT.send 共享同一 JVM DNS 缓存视图，消除多次解析间的选址漂移窗口。

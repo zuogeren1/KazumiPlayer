@@ -424,8 +424,9 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                     boolean selected = option.qn() == qInfo.currentQn();
                     graphics.fill(dx, y0, dx + dw, y0 + ROW_HEIGHT,
                         hovered ? 0xFF3C3C52 : (selected ? 0xF0252545 : 0xE0000000));
-                    String label = (selected ? "> " : "") + option.label();
-                    graphics.text(this.font, Component.literal(label).withStyle(ChatFormatting.GRAY), dx + 4, y0 + 4, -1);
+                    String label = (selected ? "> " : "") + option.label() + qualityTag(option);
+                    graphics.text(this.font, Component.literal(label)
+                        .withStyle(option.available() ? ChatFormatting.GRAY : ChatFormatting.DARK_GRAY), dx + 4, y0 + 4, -1);
                 }
             }
         }
@@ -999,6 +1000,13 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         var info = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
         if (info == null || idx < 0 || idx >= info.qualities().size()) return;
         var quality = info.qualities().get(idx);
+        // 本账号拿不到的档位（多为大会员专属）：点选不会生效，直接说明原因而不是静默降级
+        if (!quality.available()) {
+            setStatus(Component.translatable(quality.vip()
+                ? "kazumiplayer.gui.main.status_quality_vip_required"
+                : "kazumiplayer.gui.main.status_quality_unavailable", quality.label()));
+            return;
+        }
         var sp = ScreenPlayerManager.get(this.screenPos);
         // 直播无稳定时间轴：切档后重新拉流即可，不续播位置（对 m3u8 直播 seek 无意义）
         var bound = this.boundScreen();
@@ -1009,6 +1017,15 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance()
             .beginQualitySwitch(bound, quality.qn(), keepMs);
         setStatus(Component.translatable("kazumiplayer.gui.main.status_quality_switched", quality.label()));
+    }
+
+    /** 档位后缀标记：需要大会员、或本账号当前拿不到 */
+    private static String qualityTag(me.zuogeren.kazumiplayer.bilibili.BilibiliApi.Quality quality) {
+        if (quality.vip()) {
+            return Component.translatable("kazumiplayer.gui.main.quality_vip_tag").getString();
+        }
+        return quality.available()
+            ? "" : Component.translatable("kazumiplayer.gui.main.quality_unavailable_tag").getString();
     }
 
     /** 清晰度按钮文案：优先显示当前档位名，无档位表时回落到「清晰度」 */

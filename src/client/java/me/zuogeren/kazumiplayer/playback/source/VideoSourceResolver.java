@@ -217,7 +217,7 @@ public final class VideoSourceResolver {
         pendingResolves.remove(key);
         if (!pending.pageUrl().equals(packet.pageUrl())) return;
         if (packet.ok()) {
-            applyStream(pending, packet.url(), packet.qualities(), packet.currentQn(), "server");
+            applyStream(pending, packet.url(), packet.audioUrl(), packet.qualities(), packet.currentQn(), "server");
         } else {
             KazumiLog.sniff.warn("[source] server-side bilibili resolve failed ({}), falling back",
                 packet.error());
@@ -240,33 +240,89 @@ public final class VideoSourceResolver {
                 failPlayback(pending.screen(), unwrap(t));
                 return;
             }
-            applyStream(pending, stream.url(), BilibiliApi.encodeQualities(stream.qualities()),
-                stream.currentQn(), "local");
+            applyStream(pending, stream.url(), stream.audioUrl(),
+                BilibiliApi.encodeQualities(stream.qualities()), stream.currentQn(), "local");
         });
     }
 
     /** 记录档位表并受守卫起播（服务端与本端两条来源共用） */
-    private void applyStream(PendingResolve pending, String url, String encodedQualities,
+    private void applyStream(PendingResolve pending, String url, String audioUrl, String encodedQualities,
             int currentQn, String origin) {
         var qualities = BilibiliApi.decodeQualities(encodedQualities);
         BilibiliQualityPrefs.setInfo(pending.screen().getBlockPos(),
             new BilibiliQualityPrefs.Info(qualities, currentQn));
-        // 请求的档位未生效（直播/视频在未登录时会被接口降级）：明确提示原因，避免"切了没反应"
+        // 请求的档位未生效（权限不足/接口降级）：区分"需要大会员"与其它原因，避免"切了没反应"
         int requested = BilibiliQualityPrefs.preferredQn(pending.screen().getBlockPos());
         if (requested > 0 && currentQn > 0 && requested != currentQn) {
+            BilibiliApi.Quality target = null;
+            for (BilibiliApi.Quality quality : qualities) {
+                if (quality.qn() == requested) {
+                    target = quality;
+                    break;
+                }
+            }
+            boolean vipTarget = target != null && target.vip();
             String want = qualityLabel(qualities, requested);
             String got = qualityLabel(qualities, currentQn);
             Minecraft.getInstance().execute(() -> KazumiClientMessages.chatWarn(
-                net.minecraft.network.chat.Component.translatable(
-                    "kazumiplayer.msg.bili_quality_fallback", want, got).getString()));
-            KazumiLog.sniff.warn("[source] requested quality {} not granted, got {} ({})", requested, currentQn, origin);
+                net.minecraft.network.chat.Component.translatable(vipTarget
+                    ? "kazumiplayer.msg.bili_quality_vip_required"
+                    : "kazumiplayer.msg.bili_quality_fallback", want, got).getString()));
+            KazumiLog.sniff.warn("[source] requested quality {} not granted (vip={}), got {} ({})",
+                requested, vipTarget, currentQn, origin);
         }
+        String playUri = mediaUriOf(url, audioUrl);
         if (pending.prewarm()) {
-            installPrewarmPlayer(pending, url);
+            installPrewarmPlayer(pending, playUri, currentQn);
             return;
         }
         KazumiLog.sniff.info("[source] bilibili stream resolved via {} (qn={}): {}", origin, currentQn, url);
-        startWhenValid(pending.screen(), pending.session(), pending.player(), url);
+        startWhenValid(pending.screen(), pending.session(), pending.player(), playUri);
+    }
+
+    /**
+     * DASH 结果的音视频是两条独立流，直接把视频地址交给播放器会没有声音：
+     * 先登记成 WaterMedia 平台可解析的媒体 URI（见 KazumiBiliPlatform），由音频从属流补齐音轨。
+     * 音频缺失或登记失败时退回单播原地址。
+     */
+    private static String mediaUriOf(String url, String audioUrl) {
+        if (audioUrl == null || audioUrl.isBlank()) return url;
+        String mediaUri = me.zuogeren.kazumiplayer.client.bilibili.BiliDashRegistry
+            .register(url, audioUrl, 0, 0, expiresAtOf(url));
+        if (mediaUri == null) return url;
+        KazumiLog.sniff.info("[source] dash stream registered as {} (video host={}, audio host={})",
+            mediaUri, hostOf(url), hostOf(audioUrl));
+        return mediaUri;
+    }
+
+    /**
+     * DASH 直链的有效期。官方 CDN 的 query 带 deadline（秒级时间戳，实测为签发后 2 小时），
+     * 留 10 分钟余量；P2P 节点没有该参数，退回 1 小时保守估。
+     */
+    private static long expiresAtOf(String url) {
+        long now = System.currentTimeMillis() / 1000;
+        try {
+            String query = java.net.URI.create(url).getRawQuery();
+            if (query != null) {
+                for (String pair : query.split("&")) {
+                    if (pair.startsWith("deadline=")) {
+                        long deadline = Long.parseLong(pair.substring("deadline=".length()));
+                        if (deadline > now) return deadline - 600;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // 参数缺失或格式变化：按保守值处理
+        }
+        return now + 3600;
+    }
+
+    private static String hostOf(String url) {
+        try {
+            return String.valueOf(java.net.URI.create(url).getHost());
+        } catch (RuntimeException e) {
+            return url;
+        }
     }
 
     /**
@@ -274,7 +330,7 @@ public final class VideoSourceResolver {
      * 出画后由调度器完成交接（见 ClientPlaybackScheduler 的 pending 交接段）。
      * 这段时间同时存在两个 FFmpeg 解码实例，属可控的短暂峰值（仅在清晰度切换时发生）。
      */
-    private void installPrewarmPlayer(PendingResolve pending, String url) {
+    private void installPrewarmPlayer(PendingResolve pending, String url, int actualQn) {
         Minecraft.getInstance().execute(() -> {
             if (Minecraft.getInstance().level == null || pending.screen().isRemoved()) return;
             ScreenPlayerManager.ScreenPlayer session = pending.session();
@@ -285,7 +341,9 @@ public final class VideoSourceResolver {
             session.pendingPlayer = fresh;
             session.pendingResumeMs = pending.resumeMs();
             session.pendingStartedAt = System.currentTimeMillis();
-            session.pendingQualityQn = BilibiliQualityPrefs.preferredQn(pending.screen().getBlockPos());
+            // 记录实际生效档位而非请求档位：降级（会员档拿不到）时交接提示才不会谎报成功
+            session.pendingQualityQn = actualQn > 0
+                ? actualQn : BilibiliQualityPrefs.preferredQn(pending.screen().getBlockPos());
             session.pendingSeeked = false;
             fresh.play(url, true); // 静默加载：新旧播放器短暂共存，交接后由调度器恢复音量
             // 定位不在这里做：旧画面在加载期间仍在前进，等加载完成再按已流逝时间追平（见调度器的定位段），

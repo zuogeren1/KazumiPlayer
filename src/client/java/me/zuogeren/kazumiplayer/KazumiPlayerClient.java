@@ -49,6 +49,9 @@ public class KazumiPlayerClient {
 
         applyWaterMediaStreamMode();
 
+        // DASH 播放平台：B 站 1080P 及以上只有音视频分离的两条流，经此平台把音频挂成从属流
+        me.zuogeren.kazumiplayer.client.bilibili.KazumiBiliPlatform.register();
+
         // Cloth Config 可选：装了才提供配置界面（mods.toml 中声明为 optional 依赖）
         if (ModList.get().isLoaded("cloth_config")) {
             IConfigScreenFactory configScreenFactory = (container, parent) -> KazumiConfigScreen.create(parent);
