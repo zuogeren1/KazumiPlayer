@@ -51,11 +51,17 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>坐标域：车道/槽位/滚动位移都在画面矩形 (px, py, pw, ph) 的像素域内，显示区为画面顶部
  * ph × danmakuAreaRatio 的横带（与世界层「显示区 = 屏高 × danmakuAreaRatio」同口径，见 {@link #displayAreaH}）。
+ * 显示带下界按全屏控制条安全区内缩（调用方每帧传入控制条高与其上缘 {@code bottomReservePx}/
+ * {@code bottomUiTopY}，口径见 {@link LaneGeometry#keepOut}）：滚动/顶部带自显示带上缘向下、底部带自
+ * 内缩下界向上铺开，四条带（含文字框与 REVERSE 镜像）连同字形外扩保护都不进入控制条所占区域；
+ * 内缩量只由控制条几何与字号决定，控制条鼠标静止淡出期间**照常保留**——弹幕落点不随控件显隐跳动
+ * （换取淡出时底部空出一条与显隐无关的带，取舍见 plans/f11-danmaku-ui-safe-area.md）。
  * 车道几何随 danmakuFontScale 缩放（车道高 = 9×1.4×danmakuFontScale，
- * 车道数 = clamp(floor(显示区高 / 车道高), 1, 48)，与世界层共用 {@link DanmakuWorldLayer.LaneGeometry}
- * 同一实现），故字号缩小即行距收紧、车道变多且铺满显示区；滚动/顶部带自显示区上缘向下、底部带自显示区
- * 下缘向上，四条带都落在显示区内。字号由 danmakuFontScale × 条目 fontSizePercent/100 作为逐条 pose
- * 缩放施加（比例自入场固定，不受在屏集合影响），几何量按该缩放折算成实际像素后参与定位与占位计算。
+ * 车道数 = clamp(floor(可用下界 / 车道高), 1, 48)，与世界层共用 {@link DanmakuWorldLayer.LaneGeometry}
+ * 同一实现），故字号缩小即行距收紧、车道变多且铺满显示区；可用高不足一条车道时按 1 条车道处理并整排
+ * 上移（越出显示带上缘而不是越过控制条）。字号由 danmakuFontScale × 条目 fontSizePercent/100 作为逐条 pose
+ * 缩放施加（比例自入场固定，不受在屏集合影响），几何量按该缩放折算成实际像素后参与定位与占位计算；
+ * 字形按 {@link DanmakuWorldLayer#textTopLocal} 在车道内垂直居中（与世界层同一口径）。
  *
  * <p>逐帧成本：视觉序文本、绘制宽、pose 缩放、主色/描边色/框色与字形外接框都在准入时一次算好
  * （见 {@link Visual}），绘制循环只做取整与偏移算术、不重排文本也不再合成颜色，且不新建任何对象。
@@ -80,8 +86,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class DanmakuHudLayer {
 
-    /** 文字左上角相对车道顶部的偏移像素 */
-    private static final int TEXT_BASELINE_OFFSET_PX = 9;
     /** 顶部/底部项驻留时长（毫秒）：固定模式不受 speedMultiplier 影响 */
     private static final long PIN_HOLD_MS = 4500L;
     /** 车道让位判据的水平间隔（像素）：旧条已推进像素须 ≥ max(新条,旧条)文本宽 + 此值才释放车道 */
@@ -105,13 +109,14 @@ public final class DanmakuHudLayer {
      * @param index        字符槽索引（前缀推进宽度 + 原始位置）：可见区间二分与子序列撇取都读它
      * @param textWPx      条目文本实际像素宽（基础字宽 × {@code scale}）
      * @param scale        条目 pose 缩放：danmakuFontScale × fontSizePercent/100，上限为单个车道高度
+     * @param textTop      字形在车道内垂直居中的局部行顶 y（{@link DanmakuWorldLayer#textTopLocal}）
      * @param color        主色（已按 danmakuOpacity 合成 alpha；房间互发恒金）
      * @param outlineColor 描边色（已合成 alpha）
      * @param frameColor   文字框色（已合成 alpha）
      * @param frameInk     房间互发条目的字形外接框（{@code prepareText} 一次），其余来源为 null
      */
     private record Visual(FormattedCharSequence text, DanmakuWorldLayer.CharIndex index, float textWPx,
-                          float scale, int color, int outlineColor, int frameColor,
+                          float scale, float textTop, int color, int outlineColor, int frameColor,
                           ScreenRectangle frameInk) {
         /** 字符槽数 */
         int chars() {
@@ -214,9 +219,13 @@ public final class DanmakuHudLayer {
      * 全屏帧入口：pictureRect 为等比视频画面矩形（弹幕只在画面范围内滚动/驻留）。
      *
      * @param currentVideoTimeMs 该屏当前播放位置（暂停期为冻结位置）；片内弹幕的驱动时钟与到期判定都用它
+     * @param bottomReservePx 底部 UI 预留（画面像素）：全屏控制条高，显示带下界按本值内缩；
+     *                        控制条淡出期间照常传入，保证弹幕落点与控件显隐无关
+     * @param bottomUiTopY    底部 UI（控制条）上缘的 GUI 纵坐标：显示带越过控制条上缘时据此收下界
      */
     public static void draw(GuiGraphicsExtractor g, Minecraft mc, BlockPos screenPos,
-                            int px, int py, int pw, int ph, long currentVideoTimeMs) {
+                            int px, int py, int pw, int ph, long currentVideoTimeMs,
+                            int bottomReservePx, int bottomUiTopY) {
         var config = ClientConfig.CONFIG;
         if (!config.danmakuEnabled.get() || !config.danmakuShowInFullscreen.get()) return;
         installClearHook();
@@ -239,9 +248,11 @@ public final class DanmakuHudLayer {
         List<Active> actives = ACTIVE.computeIfAbsent(screenPos, k -> new ArrayList<>());
         Font font = mc.font;
         float fontScale = config.danmakuFontScale.get().floatValue();
-        // 车道几何随字号缩放：车道高 = 9×1.4×danmakuFontScale，车道数由显示区（画面顶部 ratio 带）推导
-        LaneGeometry lanes = LaneGeometry.of(
-            displayAreaH(ph, config.danmakuAreaRatio.get().floatValue()), fontScale);
+        // 车道几何随字号缩放：车道高 = 9×1.4×danmakuFontScale，车道数由显示区（画面顶部 ratio 带）
+        // 扣除底部 UI 安全区后的可用下界推导（与世界层共用 keepOut 口径）
+        float areaH = displayAreaH(ph, config.danmakuAreaRatio.get().floatValue());
+        LaneGeometry lanes = LaneGeometry.of(areaH, fontScale,
+            LaneGeometry.keepOut(areaH, bottomReservePx, bottomUiTopY - py));
         // 几何每帧由本帧 rect 重算（无按屏几何缓存）；尺寸/字号变化时把越界车道号收进最后一条车道
         Integer lastLanes = LAST_LANES.put(screenPos, lanes.lanes);
         if (lastLanes != null && lastLanes != lanes.lanes) {
@@ -291,13 +302,15 @@ public final class DanmakuHudLayer {
             // 缩放上限取单条车道高度：大字号条目在自己的车道内放大，不压到相邻车道
             float entryScale = Math.min(fontScale * scalePercent, lanes.maxEntryScale());
             float drawWPx = font.width(text) * entryScale;
+            // 字形在车道内垂直居中：与世界层同一口径，缩放后仍不越出本车道与底部 UI 内缩下界
+            float textTop = DanmakuWorldLayer.textTopLocal(entryScale, lanes.laneH);
             int color = entryColor(entry, alphaFactor);
             // 字符槽索引：可见区间裁剪一次建表；超长条目另记一条 DEBUG 便于定位异常弹幕
             DanmakuWorldLayer.CharIndex index = DanmakuWorldLayer.indexChars(font, text);
             DanmakuWorldLayer.logLongEntry(index.chars(), entry.source(), screenPos);
-            Visual visual = new Visual(text, index, drawWPx, entryScale, color, outlineColorBase,
+            Visual visual = new Visual(text, index, drawWPx, entryScale, textTop, color, outlineColorBase,
                 frameColorBase, entry.source() == DanmakuSource.ROOM_CHAT
-                    ? inkBounds(font, text, TEXT_BASELINE_OFFSET_PX, color, !outline) : null);
+                    ? inkBounds(font, text, textTop, color, !outline) : null);
             Admission adm = admit(entry, mode, visual, actives, clocks, travelMs, pw, lanes,
                 allowOverlap);
             if (adm.active() == null) {
@@ -376,15 +389,16 @@ public final class DanmakuHudLayer {
             g.pose().pushMatrix();
             g.pose().translate(px + x + shift, py + y);
             g.pose().scale(visual.scale(), visual.scale());
+            // 字号缩放后行顶仍是浮点，GUI 文本 API 只收整型坐标 → 取整到最近像素
+            int textTopPx = Math.round(visual.textTop());
             if (outline) {
                 int outlineColor = visual.outlineColor();
                 for (int[] offset : OUTLINE_OFFSETS) {
-                    g.text(font, seq, offset[0], TEXT_BASELINE_OFFSET_PX + offset[1],
-                        outlineColor, false);
+                    g.text(font, seq, offset[0], textTopPx + offset[1], outlineColor, false);
                 }
-                g.text(font, seq, 0, TEXT_BASELINE_OFFSET_PX, visual.color(), false);
+                g.text(font, seq, 0, textTopPx, visual.color(), false);
             } else {
-                g.text(font, seq, 0, TEXT_BASELINE_OFFSET_PX, visual.color(), true);
+                g.text(font, seq, 0, textTopPx, visual.color(), true);
             }
             g.pose().popMatrix();
         }
@@ -407,8 +421,10 @@ public final class DanmakuHudLayer {
         int left = Math.max(Math.round(px + x + ink.left() * q - FRAME_PAD), px);
         int top = Math.round(py + yTop + ink.top() * q - FRAME_PAD);
         int right = Math.min(Math.round(px + x + ink.right() * q + FRAME_PAD), px + pw);
-        int bottom = Math.round(py + yTop + ink.bottom() * q + FRAME_PAD);
-        if (right <= left) return;
+        // 文字框同时裁到画面矩形与底部 UI 内缩下界内：控制条区内的框边不再提交
+        int bottom = Math.min(Math.round(py + yTop + ink.bottom() * q + FRAME_PAD),
+            py + Math.round(lanes.bottomLimit));
+        if (right <= left || bottom <= top) return;
         g.fill(left, top, right, top + FRAME_EDGE, color);
         g.fill(left, bottom - FRAME_EDGE, right, bottom, color);
         g.fill(left, top + FRAME_EDGE, left + FRAME_EDGE, bottom - FRAME_EDGE, color);

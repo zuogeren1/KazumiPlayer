@@ -29,6 +29,10 @@ import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
  * 全组即时生效），直播直连屏整体停用；
  * 快捷键：空格暂停/继续、←/→ ±10s、↑/↓ RECORDS 总音量（带瞬时 OSD）；
  * 控制条与右上角「退出」按钮共用鼠标静止 3s 淡出的显隐策略，淡出后不响应命中。
+ *
+ * <p>画面底部恒为控制条预留 {@link #CTL_BAR_H} 像素（视频等比缩放时已扣除，弹幕显示带下界再按同一
+ * 高度内缩）——淡出期间照常保留该预留，故弹幕落点与控件显隐无关（取舍见
+ * plans/f11-danmaku-ui-safe-area.md）。
  */
 public class ClientFullscreenState {
 
@@ -248,8 +252,11 @@ public class ClientFullscreenState {
                 player.getWidth(), player.getHeight(), color);
             // 弹幕层：全屏期由 HUD 独占 Store 出队（防双消费），GUI 按钮与观影器两条进入路径同此绘制；
             // 出队时刻传本屏真实播放位置——暂停期播放器时钟自冻结，片内弹幕随之定格
+            // 底部 UI 安全区恒为控制条几何（条高 + 条上缘）：控制条 3 秒后淡出也照常内缩，
+            // 弹幕落点不随控件显隐跳动
+            int[] ctlBar = controlBarRect();
             me.zuogeren.kazumiplayer.client.danmaku.DanmakuHudLayer.draw(g, mc, screenPos, px, py, pw, ph,
-                hasValidFrame ? currentVideoTimeMs(player) : 0);
+                hasValidFrame ? currentVideoTimeMs(player) : 0, CTL_BAR_H, ctlBar[1]);
         } else {
             g.fill(ax, ay, ax + areaW, ay + areaH, 0xC8101010);
             // 本端为观看者但无信号、且有人上报解析状态：改显组内等待进度；

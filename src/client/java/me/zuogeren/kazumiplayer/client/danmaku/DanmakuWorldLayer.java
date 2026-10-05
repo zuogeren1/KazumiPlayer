@@ -75,7 +75,12 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>显示区坐标：原点为屏幕面中心，显示带高 = danmakuAreaRatio × 屏幕面高（居中，像素域高见 {@link #bandH}）、
  * 宽 = 屏幕面宽，x 向为 SCROLL 的起跑侧、y 向为下缘侧。
- * 车道自显示区上/下缘按 laneHPx 依次铺开，故车道区间恒在显示区内且互不重叠。条目位置一律按实际绘制宽度（textWPx × q）计算，
+ * 显示带下界按屏幕面底部 UI 安全区内缩（进度条高与其上缘，由调用方每帧传入；
+ * 口径见 {@link LaneGeometry#keepOut}）：滚动/顶部带自显示带上缘向下、
+ * 底部带自内缩下界向上铺开，四条带（含文字框与 REVERSE 镜像）连同字形外扩保护都不进入进度条所占区域。
+ * 内缩量只由 UI 几何与字号决定、不随鼠标或 UI 显隐状态变化，故弹幕落点逐帧稳定不跳动；
+ * 内缩后可用高不足一条车道时按 1 条车道处理并整排上移（越出显示带上缘而不是越过进度条）。
+ * 车道自显示区上/下缘按 laneHPx 依次铺开，故车道区间恒在可用区内且互不重叠。条目位置一律按实际绘制宽度（textWPx × q）计算，
  * 位移不随字号缩放；字形按 (laneHPx - 9q)/2 在车道内垂直居中，故缩放后仍不越出本车道；
  * 完全移出显示区的条目不再提交，部分可见的条目只提交可见字符区间（{@link #visibleSlots}），
  * 屏幕外的字形不会进入渲染管线。
@@ -95,8 +100,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class DanmakuWorldLayer {
 
-    /** 字形行高像素（原版字体 9px）与行距系数：车道高 = 9 × 1.4 × danmakuFontScale */
-    private static final float GLYPH_HEIGHT_PX = 9.0f;
+    /** 字形行高像素（原版字体 9px）与行距系数：车道高 = 9 × 1.4 × danmakuFontScale（两层共用） */
+    static final float GLYPH_HEIGHT_PX = 9.0f;
     private static final float LINE_HEIGHT_FACTOR = 1.4f;
     /** 车道数上限：小字号时防显示区内车道过多（48 条足以在常见窗口下铺满显示区） */
     private static final int MAX_LANE_COUNT = 48;
@@ -136,48 +141,75 @@ public final class DanmakuWorldLayer {
 
     /**
      * 车道几何（纯算术，两层共用同一口径）：车道高 = 字形行高 9 × 行距系数 1.4 × danmakuFontScale，
-     * 车道数由显示区高推导 lanes = clamp(floor(显示区高 / 车道高), 1, {@link #MAX_LANE_COUNT})——
-     * 字号越小行距越紧、车道越多（上限 {@link #MAX_LANE_COUNT}，足以铺满显示区）。车道自显示区顶/底缘
-     * 按车道高依次铺开，故车道区间互不重叠、且显示区放得下时都落在显示区内；车道高只由字号决定
-     * （显示区不参与，否则调显示区会连累字号），显示区比一条车道还矮时保留 1 条车道。
-     * {@link DanmakuHudLayer} 以等比画面像素高为显示区高调用同一实现。
+     * 可用下界 {@link #bottomLimit} = {@link #keepOut 可视下缘上限} − 字形外扩保护；车道数
+     * lanes = clamp(floor(可用下界 / 车道高), 1, {@link #MAX_LANE_COUNT})——字号越小行距越紧、车道越多
+     * （上限 {@link #MAX_LANE_COUNT}，足以铺满显示区）。车道高只由字号决定（显示区与底部内缩都不参与，
+     * 否则调显示区会连累字号）。滚动/顶部带自显示区顶部向下、底部带自 {@link #bottomLimit} 向上铺开，
+     * 故车道区间互不重叠；车道堆叠在可用下界之内放不下时整排上移贴住可用下界，越出显示带上缘而不是
+     * 越过底部 UI。{@link DanmakuHudLayer} 以等比画面像素高为显示区高、控制条高为内缩调用同一实现。
      */
     static final class LaneGeometry {
 
         /** 显示区（显示带）高（像素域）：HUD 层=画面高×danmakuAreaRatio，世界层={@link #bandH} */
         final float areaH;
-        /** 单条车道高 = 9 × 1.4 × danmakuFontScale（只随字号，不含显示区因素） */
+        /** 单条车道高 = 9 × 1.4 × danmakuFontScale（只随字号，不含显示区与内缩因素） */
         final float laneH;
-        /** 车道数 = clamp(floor(显示区高 / laneH), 1, {@link #MAX_LANE_COUNT}) */
+        /** 车道数 = clamp(floor(可用下界 / laneH), 1, {@link #MAX_LANE_COUNT}) */
         final int lanes;
+        /** 可用下界（带内坐标：0=显示带上缘、向下为正）= max(0, 可视下缘上限 − 字形外扩保护) */
+        final float bottomLimit;
+        /** 车道堆叠的整体上移量 = max(0, 车道数×车道高 − 可用下界)：只在可用高不足时非 0 */
+        private final float overflow;
 
-        private LaneGeometry(float areaH, float laneH, int lanes) {
+        private LaneGeometry(float areaH, float laneH, int lanes, float bottomLimit, float overflow) {
             this.areaH = areaH;
             this.laneH = laneH;
             this.lanes = lanes;
+            this.bottomLimit = bottomLimit;
+            this.overflow = overflow;
+        }
+
+        /**
+         * 条目可视下缘的上限（显示区像素，带内坐标：0=显示带上缘、向下为正）：
+         * min(显示带下缘, 底部 UI 上缘) − UI 占用。显示带下缘在 UI 上缘之上时（常态）即「按 UI 高度
+         * 自显示带下缘内缩」；显示带越过屏幕面下缘、UI 上缘落进显示带内时（固定字号基准模式下屏幕面
+         * 比基准还小）改为收到 UI 上方——两种情形都不会让弹幕（含文字框与字形外扩）压住 UI。两层共用本式。
+         *
+         * @param areaH       显示区（显示带）高（显示区像素）
+         * @param uiReservePx 底部 UI 占用（显示区像素）：世界层=进度条高+它与屏幕面下缘的间距折算，
+         *                    HUD 层=控制条高；负值与 0 同义
+         * @param uiTopPx     底部 UI 上缘（显示区像素，带内坐标）
+         */
+        static float keepOut(float areaH, float uiReservePx, float uiTopPx) {
+            return Math.min(areaH, uiTopPx) - Math.max(0.0f, uiReservePx);
         }
 
         /**
          * @param areaH     显示区（显示带）高，不含字号因素（HUD 层=画面高×danmakuAreaRatio；世界层={@link #bandH}）
          * @param fontScale danmakuFontScale
+         * @param keepOut   条目可视下缘上限（显示区像素，带内坐标）：见 {@link #keepOut(float, float, float)}
          */
-        static LaneGeometry of(float areaH, float fontScale) {
-            // 车道高只由字号决定（与显示区无关）：显示区比一条车道还矮时也保留 1 条车道
+        static LaneGeometry of(float areaH, float fontScale, float keepOut) {
+            // 车道高只由字号决定（与显示区无关）：可用高不足一条车道时也保留 1 条车道
             float laneH = GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR * fontScale;
-            // 浮点误差兜底：显示区高恰为整数倍车道高时（如 63 / 12.6）仍判为整除
+            // 字形外扩保护：投影/描边在行高之外再外扩 1 个局部像素，按单条最大缩放（车道高/行高）折算
+            float overhang = laneH / GLYPH_HEIGHT_PX;
+            float bottomLimit = Math.max(0.0f, keepOut - overhang);
+            // 浮点误差兜底：可用下界恰为整数倍车道高时（如 63 / 12.6）仍判为整除
             int lanes = Math.max(1, Math.min(MAX_LANE_COUNT,
-                (int) Math.floor(areaH / (double) laneH + 1.0e-5)));
-            return new LaneGeometry(areaH, laneH, lanes);
+                (int) Math.floor(bottomLimit / (double) laneH + 1.0e-5)));
+            return new LaneGeometry(areaH, laneH, lanes, bottomLimit,
+                Math.max(0.0f, lanes * laneH - bottomLimit));
         }
 
         /** 车道自显示区顶部起的上缘（滚动带/顶部带）；底部带用 {@link #bottomOf(int)} */
         float topOf(int lane) {
-            return lane * laneH;
+            return lane * laneH - overflow;
         }
 
-        /** 车道自显示区底部起的上缘（底部带，槽位 0 最靠下） */
+        /** 车道自可用下界起的上缘（底部带，槽位 0 最靠下；可用高不足时整排上移，其下缘恒为 {@link #bottomLimit}） */
         float bottomOf(int lane) {
-            return areaH - (lane + 1) * laneH;
+            return bottomLimit - (lane + 1) * laneH;
         }
 
         /** 单条条目的缩放上限：超出即压到相邻车道（= 车道高 / 字形行高） */
@@ -186,8 +218,8 @@ public final class DanmakuWorldLayer {
         }
 
         /**
-         * 固定槽位数 = 车道数：槽位高即车道高（一行一个固定项），显示带放得下几行就有几个槽位——
-         * 由「显示带高 / 车道高」推导（见 {@link #lanes} 与 {@link DanmakuWorldLayer#bandH(float)}），
+         * 固定槽位数 = 车道数：槽位高即车道高（一行一个固定项），可用区放得下几行就有几个槽位——
+         * 由「可用下界 / 车道高」推导（见 {@link #lanes} 与 {@link #bottomLimit}），
          * 不存在写死的行数上限；用尽后由 {@link DanmakuPinSlots} 轮转分散压叠。
          */
         int pinSlots() {
@@ -525,9 +557,14 @@ public final class DanmakuWorldLayer {
     /**
      * 渲染帧入口：消费到期条目并绘制活动弹幕。
      * 调用方保证已处于屏幕面局部坐标（translate+rotateToFacing 之后、popPose 之前）。
+     *
+     * @param bottomReserveWorld 屏幕面底部 UI 占用（世界单位/格）：进度条高 + 它与屏幕面下缘的间距
+     * @param bottomUiGapWorld   进度条上缘到屏幕面下缘的间距（世界单位/格）：显示带越过面下缘时据此定位
+     *                           进度条上缘（见 {@link LaneGeometry#keepOut}）
      */
     public static void draw(SubmitNodeCollector collector, PoseStack poseStack,
-                            VideoScreenRenderState state, float halfW, float halfH) {
+                            VideoScreenRenderState state, float halfW, float halfH,
+                            float bottomReserveWorld, float bottomUiGapWorld) {
         var config = ClientConfig.CONFIG;
         if (!config.danmakuEnabled.get()) return;
         // 防双消费：全屏激活期由 DanmakuHudLayer 独占 pollDue 出队（coverage<100 时世界画面短暂无弹幕为既定取舍）
@@ -553,11 +590,19 @@ public final class DanmakuWorldLayer {
         List<Active> actives = ACTIVE.computeIfAbsent(pos, k -> new ArrayList<>());
 
         // 车道几何每帧由当前屏幕面尺寸重算（本帧 halfH/halfW），无按屏几何缓存：
-        // 车道高 = 9×1.4×danmakuFontScale（只随字号），车道数由显示带高（danmakuAreaRatio）推导
+        // 车道高 = 9×1.4×danmakuFontScale（只随字号），车道数由显示带高（danmakuAreaRatio）
+        // 扣除底部进度条占用后的可用下界推导
         float baseScale = baseScale(config.danmakuScaleWithScreen.get() ? halfH : FIXED_SCALE_BASIS_HALF_H);
         float halfWPx = halfW / baseScale;
         float fontScale = config.danmakuFontScale.get().floatValue();
-        LaneGeometry lanes = LaneGeometry.of(bandH(config.danmakuAreaRatio.get().floatValue()), fontScale);
+        float areaH = bandH(config.danmakuAreaRatio.get().floatValue());
+        // 底部 UI 安全区：进度条以世界单位绘制，按本层像素↔世界换算因子折算成显示区像素（与字号解耦）；
+        // 带顶在像素域为 0、其世界高度由显示带半高换算，故条上缘 = 半高 + (屏幕面半高 + 间距)/baseScale
+        float uiReservePx = baseScale > 0.0f ? Math.max(0.0f, bottomReserveWorld) / baseScale : 0.0f;
+        float uiTopPx = areaH / 2.0f + (baseScale > 0.0f
+            ? (halfH + Math.max(0.0f, bottomUiGapWorld)) / baseScale : 0.0f);
+        LaneGeometry lanes = LaneGeometry.of(areaH, fontScale,
+            LaneGeometry.keepOut(areaH, uiReservePx, uiTopPx));
         boolean allowOverlap = config.danmakuAllowOverlap.get();
         // 尺寸变化失效：几何无缓存，但准入时定下的车道号可能越界 → 收进最后一条车道并记一条 DEBUG
         Integer lastLanes = LAST_LANES.put(pos, lanes.lanes);
@@ -706,8 +751,8 @@ public final class DanmakuWorldLayer {
                 ? slice(visual.text(), visual.index().positions(), start, end) : visual.text();
             // 子序列左端对齐：局部域起点右移 prefix[start]（未缩放域），使可见首字仍落在原位
             float shift = clipped ? visual.index().prefix()[start] : 0.0f;
-            // 字形在车道内垂直居中：字号缩放后仍不越出本车道与显示区上下缘
-            float localTextTop = textTopInBand(q, lanes.laneH) / q;
+            // 字形在车道内垂直居中：字号缩放后仍不越出本车道与可用区
+            float localTextTop = textTopLocal(q, lanes.laneH);
 
             poseStack.pushPose();
             poseStack.translate(x, yTop, 0.0f);
@@ -715,14 +760,16 @@ public final class DanmakuWorldLayer {
             ScreenRectangle ink = visual.frameInk();
             if (ink != null) {
                 // 缓存外接框以 y=0 为基准：绘制期补上条目垂直偏移，内边距除以 q 后屏幕上恒为 FRAME_PAD；
-                // 文字框同时裁到显示带内，屏幕外的框边不再提交
+                // 文字框同时裁到显示带内与底部 UI 内缩下界内，屏幕外与进度条区内的框边不再提交
                 float pad = FRAME_PAD / q;
                 float frameLeft = Math.max(x + q * (ink.left() - pad), -halfWPx);
                 float frameRight = Math.min(x + q * (ink.right() + pad), halfWPx);
-                if (frameRight > frameLeft) {
+                float frameTop = ink.top() + localTextTop - pad;
+                float frameBottom = Math.min(ink.bottom() + localTextTop + pad,
+                    (-lanes.areaH / 2.0f + lanes.bottomLimit - yTop) / q);
+                if (frameRight > frameLeft && frameBottom > frameTop) {
                     submitFrame(collector, poseStack, (frameLeft - x) / q, (frameRight - x) / q,
-                        ink.top() + localTextTop - pad, ink.bottom() + localTextTop + pad,
-                        FRAME_EDGE / q, visual.frameColor());
+                        frameTop, frameBottom, FRAME_EDGE / q, visual.frameColor());
                 }
             }
             collector.submitText(poseStack, shift, localTextTop, seq,
@@ -760,9 +807,13 @@ public final class DanmakuWorldLayer {
         return (clocks.of(active.entry().source()) - active.startMs()) / (float) travelMs;
     }
 
-    /** 字形在车道内的垂直偏移（显示区像素）：缩放后仍居中于本车道 */
-    private static float textTopInBand(float q, float laneH) {
-        return (laneH - GLYPH_HEIGHT_PX * q) / 2.0f;
+    /**
+     * 字形在车道内的垂直居中偏移（条目局部域，即 {@code submitText}/{@code prepareText} 的行顶 y）：
+     * 行高 9q 与车道高 laneH 的差值取半后折算回局部域，故条目按自身缩放放大后仍居中于本车道、
+     * 不越出车道上下缘。两层共用同一实现（HUD 层的 {@code inkBounds} 与文字绘制同取本值）。
+     */
+    static float textTopLocal(float q, float laneH) {
+        return (laneH - GLYPH_HEIGHT_PX * q) / (2.0f * q);
     }
 
     /** 整条落在显示区之外（横向按屏幕面宽度、纵向按显示带）即不提交：按绘制外接框求交 */

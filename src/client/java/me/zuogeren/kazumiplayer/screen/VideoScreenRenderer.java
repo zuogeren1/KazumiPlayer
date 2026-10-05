@@ -54,6 +54,24 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     private static final Identifier WHITE_TEX = Identifier.fromNamespaceAndPath("kazumiplayer", "progress_bar_white");
     private static boolean whiteTexRegistered;
 
+    /** 进度条高度（世界单位/格）：条自屏幕面下缘之下起，播放中恒显示 */
+    private static final float PROGRESS_BAR_HEIGHT = 0.12f;
+    /** 进度条上缘到屏幕面下缘的间距（世界单位/格） */
+    private static final float PROGRESS_BAR_GAP = 0.05f;
+
+    /**
+     * 屏幕面底部 UI 占用（世界单位/格）= 进度条高 + 它与屏幕面下缘的间距。
+     * 弹幕显示带下界按本值内缩，故弹幕（含文字框与字形外扩）恒不进入进度条所占区域。
+     */
+    public static float bottomUiReserveWorld() {
+        return PROGRESS_BAR_HEIGHT + PROGRESS_BAR_GAP;
+    }
+
+    /** 进度条上缘到屏幕面下缘的间距（世界单位/格）：显示带越过面下缘时据此定位进度条上缘 */
+    public static float bottomUiGapWorld() {
+        return PROGRESS_BAR_GAP;
+    }
+
     private final Map<BlockPos, VideoScreenTexture> screenTextures = new java.util.HashMap<>();
     private final ItemModelResolver itemModelResolver;
 
@@ -287,8 +305,9 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         // 进度条（画面下方）
         drawProgressBar(collector, poseStack, state, halfW, halfH);
 
-        // 弹幕文字层（屏幕面局部坐标内右进左出，z=0.46 位于全部既有元素之前）
-        me.zuogeren.kazumiplayer.client.danmaku.DanmakuWorldLayer.draw(collector, poseStack, state, halfW, halfH);
+        // 弹幕文字层（屏幕面局部坐标内右进左出）：显示带下界按本帧进度条占用内缩，不压住进度条
+        me.zuogeren.kazumiplayer.client.danmaku.DanmakuWorldLayer.draw(collector, poseStack, state, halfW, halfH,
+            bottomUiReserveWorld(), bottomUiGapWorld());
 
         poseStack.popPose();
     }
@@ -311,8 +330,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         long time = state.player.getTimeMs();
         if (duration <= 0) return;
 
-        float barH = 0.12f;
-        float barY = -halfH - barH - 0.05f;
+        float barH = PROGRESS_BAR_HEIGHT;
+        float barY = -halfH - barH - PROGRESS_BAR_GAP;
         float ratio = Math.min(1.0f, (float) time / duration);
         float totalW = halfW * 2;
         float playedW = totalW * ratio;
