@@ -153,9 +153,16 @@ public final class BilibiliApi {
             return CompletableFuture.completedFuture(cached);
         }
         return HttpUtil.fetch(NAV_API, "GET", apiHeaders(), Map.of()).thenApply(body -> {
-            JsonObject data = dataOf(body, "WBI 密钥");
-            JsonObject wbi = data.getAsJsonObject("wbi_img");
-            if (wbi == null) throw new IllegalStateException("nav 接口未返回 wbi_img");
+            // nav 未登录时外层 code = -101，但 data.wbi_img 依然有效（匿名请求同样需要 WBI 签名），
+            // 因此这里不能走 dataOf 的 code 校验，只要求 wbi_img 存在；其余接口仍按 code 判定
+            JsonObject root = (body == null || body.isBlank()) ? null : JsonUtil.GSON.fromJson(body, JsonObject.class);
+            JsonObject data = root == null ? null : root.getAsJsonObject("data");
+            JsonObject wbi = data == null ? null : data.getAsJsonObject("wbi_img");
+            if (wbi == null) {
+                String detail = root != null && root.has("message")
+                    ? root.get("message").getAsString() : "响应缺少 wbi_img";
+                throw new IllegalStateException("nav 接口未返回 WBI 密钥：" + detail);
+            }
             String imgKey = fileKey(wbi.get("img_url").getAsString());
             String subKey = fileKey(wbi.get("sub_url").getAsString());
             String combined = imgKey + subKey;
