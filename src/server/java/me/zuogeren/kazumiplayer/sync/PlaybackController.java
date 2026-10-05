@@ -128,6 +128,8 @@ public final class PlaybackController {
             }
         }
         screen.setPlaybackFull(url, 0, roadIdx, episodeIdx, roadJson);
+        // Road 在队列分支里被整体重建，显示名会退回 BV/av 号：用元数据缓存回填（未取到时是无操作）
+        me.zuogeren.kazumiplayer.network.BilibiliMetaCache.applyTo(screen);
         UUID sid = screen.getScreenId();
         // 换片旧弹幕作废（房间随组走，内容变更接线）
         me.zuogeren.kazumiplayer.server.danmaku.DanmakuRoomManager.get().clear(sid);

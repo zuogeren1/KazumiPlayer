@@ -800,15 +800,18 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             return;
         }
         int cur = Math.max(1, Math.min(screen.getEpisodeIndex(), urls.size()));
+        // 显示名取 BE 里 Road 的 identifier：服务端 B 站元数据补齐的「作者 · 标题」就写在那里，
+        // 直接按 URL 生成只能得到 BV/av 号与直播间房间号
+        var labels = me.zuogeren.kazumiplayer.util.DirectLinkQueue.parseLabels(screen.getEpisodeData());
         // 置顶当前项（金色文字，点击无动作）
-        String curLabel = me.zuogeren.kazumiplayer.util.DirectLinkQueue.makeLabel(urls.get(cur - 1), cur);
+        String curLabel = queueLabel(urls, labels, cur - 1, cur);
         this.queueList.addRowWithTail(
             Component.literal("▶ " + curLabel).withStyle(ChatFormatting.YELLOW), -1, 0, null,
             List.of(), 0);
         int pending = 0;
         for (int i = cur; i < urls.size(); i++) {
             final int index = i + 1;
-            String label = me.zuogeren.kazumiplayer.util.DirectLinkQueue.makeLabel(urls.get(i), index);
+            String label = queueLabel(urls, labels, i, index);
             Runnable onName = () -> this.sendQueueOp(GuiProtocol.ACTION_QUEUE_JUMP, index);
             Runnable onMove = () -> this.sendQueueOp(GuiProtocol.ACTION_QUEUE_MOVE, index);
             Runnable onRemove = () -> this.sendQueueOp(GuiProtocol.ACTION_QUEUE_REMOVE, index);
@@ -819,6 +822,16 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                     new SimpleList.Cell(Component.translatable("kazumiplayer.gui.main.cell_remove").getString(), onRemove)),
                 QUEUE_TAIL_W);
         }
+    }
+
+    /** 队列项显示名：优先用 BE 中服务端写回的语义化名称，缺失时按 URL 生成 */
+    private static String queueLabel(java.util.List<String> urls, java.util.List<String> labels,
+            int idx, int fallbackIdx) {
+        if (labels != null && idx >= 0 && idx < labels.size()) {
+            String label = labels.get(idx);
+            if (label != null && !label.isBlank()) return label;
+        }
+        return me.zuogeren.kazumiplayer.util.DirectLinkQueue.makeLabel(urls.get(idx), fallbackIdx);
     }
 
     private void sendQueueOp(String action, int index) {

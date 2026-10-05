@@ -26,13 +26,6 @@ import java.util.UUID;
  */
 public final class QueueRequestHandlers {
 
-    /** B 站元数据标签缓存：URL → 「UP主 · 标题」/「主播名 · 直播间标题」 */
-    private static final java.util.Map<String, String> BILI_META_LABELS =
-        new java.util.concurrent.ConcurrentHashMap<>();
-    /** 已发起过元数据请求的 URL（失败不重试，避免反复打扰接口） */
-    private static final java.util.Set<String> BILI_META_REQUESTED =
-        java.util.concurrent.ConcurrentHashMap.newKeySet();
-
     private QueueRequestHandlers() {}
 
     /**
@@ -44,11 +37,11 @@ public final class QueueRequestHandlers {
         String cookie = me.zuogeren.kazumiplayer.ServerConfig.CONFIG.bilibiliCookie.get();
         for (String url : urls) {
             if (url == null || !me.zuogeren.kazumiplayer.util.BilibiliUrls.isBilibiliUrl(url)) continue;
-            if (BILI_META_LABELS.containsKey(url) || !BILI_META_REQUESTED.add(url)) continue;
+            if (BilibiliMetaCache.label(url) != null || !BilibiliMetaCache.markRequested(url)) continue;
             me.zuogeren.kazumiplayer.bilibili.BilibiliApi.fetchMeta(url, cookie).thenAccept(meta -> {
                 String label = DirectLinkQueue.metaLabel(meta);
                 if (label == null) return;
-                BILI_META_LABELS.put(url, label);
+                BilibiliMetaCache.put(url, label);
                 var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
                 if (server == null) return;
                 // 元数据在异步线程拿到：回到服务端线程改 BE（markDirty 触发全组同步）
@@ -56,7 +49,7 @@ public final class QueueRequestHandlers {
             }).exceptionally(t -> {
                 // 失败可观测（DEBUG 默认关，这里用 warn 让用户能直接看到原因），并允许重试一次
                 KazumiLog.network.warn("Bilibili meta fetch failed for {}: {}", url, unwrapMetaError(t));
-                BILI_META_REQUESTED.remove(url);
+                BilibiliMetaCache.clearRequested(url);
                 return null;
             });
         }
@@ -71,17 +64,9 @@ public final class QueueRequestHandlers {
         return String.valueOf(t.getMessage());
     }
 
-    /** 用缓存里的元数据标签重写队列显示名（move/remove 等重建 Road 的操作后回填） */
+    /** 用缓存里的元数据标签重写队列显示名（入队/move/remove 等重建 Road 的操作后回填） */
     private static void applyCachedLabels(VideoScreenBlockEntity screen) {
-        List<String> urls = DirectLinkQueue.parseUrls(screen.getEpisodeData());
-        if (urls == null || urls.isEmpty()) return;
-        String json = screen.getEpisodeData();
-        for (String url : urls) {
-            String label = BILI_META_LABELS.get(url);
-            if (label != null) json = DirectLinkQueue.withLabel(json, url, label);
-        }
-        if (!json.equals(screen.getEpisodeData())) {
-            screen.setEpisodeData(json);
+        if (BilibiliMetaCache.applyTo(screen)) {
             KazumiLog.network.debug("Queue labels refreshed from metadata cache at {}",
                 screen.getBlockPos().toShortString());
         }
@@ -149,7 +134,7 @@ public final class QueueRequestHandlers {
         if (urls == null) return GuiPayloads.ErrorPayload.of("kazumiplayer.err.no_queue");
         var err = checkIndex(urls, index);
         if (err != null) return err;
-        String label = labelAt(urls, index);
+        String label = labelAt(screen, urls, index);
         playItemAt(sp, screenPos, screen, urls, index, Component.translatable("kazumiplayer.msg.notify.jumped", label));
         KazumiMessages.sendSuccessKey(sp, "kazumiplayer.msg.now_playing_label", label);
         return null;
@@ -171,7 +156,7 @@ public final class QueueRequestHandlers {
         reordered.add(cur, url);
         screen.setEpisodeData(DirectLinkQueue.buildRoadJson(reordered));
         applyCachedLabels(screen);
-        String label = labelAt(reordered, Math.min(cur + 1, reordered.size()));
+        String label = labelAt(screen, reordered, Math.min(cur + 1, reordered.size()));
         SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, screen.getScreenId(),
             Component.translatable("kazumiplayer.msg.notify.moved", label));
         KazumiMessages.sendSuccessKey(sp, "kazumiplayer.msg.moved", label);
@@ -189,7 +174,7 @@ public final class QueueRequestHandlers {
         int cur = screen.getEpisodeIndex();
         if (index == cur) return GuiPayloads.ErrorPayload.of("kazumiplayer.err.item_playing_remove");
         List<String> remaining = new ArrayList<>(urls);
-        String label = labelAt(remaining, index);
+        String label = labelAt(screen, remaining, index);
         remaining.remove(index - 1);
         if (index < cur) {
             // 当前项序号随删除左移，保持指向同一个 URL
@@ -227,13 +212,13 @@ public final class QueueRequestHandlers {
             KazumiLog.network.info("Queue skip-current (single item) at {}, stopped requester only", screenPos.toShortString());
             return null;
         }
-        String label = labelAt(urls, cur);
+        String label = labelAt(screen, urls, cur);
         List<String> remaining = new ArrayList<>(urls);
         remaining.remove(cur - 1);
         int next = Math.min(cur, remaining.size()); // 原 cur+1 删除后仍在原下标；末项取新末尾
         playItemAt(sp, screenPos, screen, remaining, next,
             Component.translatable("kazumiplayer.msg.notify.skipped_advance", label));
-        KazumiMessages.sendSuccessKey(sp, "kazumiplayer.msg.skipped_now", label, labelAt(remaining, next));
+        KazumiMessages.sendSuccessKey(sp, "kazumiplayer.msg.skipped_now", label, labelAt(screen, remaining, next));
         KazumiLog.network.info("Queue skip-current at {}: auto-advance to #{}",
             screenPos.toShortString(), next);
         return null;
@@ -331,7 +316,13 @@ public final class QueueRequestHandlers {
         return null;
     }
 
-    private static String labelAt(List<String> urls, int index) {
+    /** 队列项显示名：优先 Road 里服务端补齐的语义化名称，缺失时按 URL 生成 */
+    private static String labelAt(VideoScreenBlockEntity screen, List<String> urls, int index) {
+        List<String> labels = DirectLinkQueue.parseLabels(screen.getEpisodeData());
+        if (labels != null && index - 1 >= 0 && index - 1 < labels.size()) {
+            String label = labels.get(index - 1);
+            if (label != null && !label.isBlank()) return label;
+        }
         return DirectLinkQueue.makeLabel(urls.get(index - 1), index);
     }
 }

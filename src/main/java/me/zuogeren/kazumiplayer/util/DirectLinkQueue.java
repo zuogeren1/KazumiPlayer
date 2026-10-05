@@ -39,6 +39,22 @@ public final class DirectLinkQueue {
         return road != null ? road.data() : null;
     }
 
+    /**
+     * 解析队列显示名列表（与 {@link #parseUrls} 同序，取自 Road 的 identifier）。
+     * 服务端 B 站元数据到位后会把 identifier 改写成「作者 · 标题」/「主播名 · 直播间标题」，
+     * 因此展示方一律优先用这里的名称，只有缺失时才回落到 {@link #makeLabel} 按 URL 生成
+     * （否则界面永远显示 BV/av 号与直播间房间号）。
+     *
+     * @return 非队列数据返回 null；identifier 缺失返回空列表
+     */
+    @Nullable
+    public static List<String> parseLabels(String episodeData) {
+        Road road = parseRoad(episodeData);
+        if (road == null) return null;
+        List<String> labels = road.identifier();
+        return labels == null ? List.of() : labels;
+    }
+
     /** 由 URL 列表构造队列 Road JSON，显示名自动生成 */
     public static String buildRoadJson(List<String> urls) {
         List<String> labels = new ArrayList<>(urls.size());

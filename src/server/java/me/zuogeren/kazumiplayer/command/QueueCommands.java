@@ -142,8 +142,9 @@ public class QueueCommands {
             src.sendSystemMessage(KazumiMessages.separator());
             src.sendSystemMessage(Component.translatable("kazumiplayer.cmd.queue.header", cp, totalPages, total));
 
+            List<String> labels = DirectLinkQueue.parseLabels(t.screen().getEpisodeData());
             for (int i = start; i < end; i++) {
-                src.sendSystemMessage(queueRow(urls.get(i), i + 1, cur));
+                src.sendSystemMessage(queueRow(urls.get(i), labels, i + 1, cur));
             }
 
             if (totalPages > 1) {
@@ -167,8 +168,9 @@ public class QueueCommands {
     }
 
     /** 队列行：当前项金色 ▶、已播区灰色、待播区绿色可点击切播 */
-    private static MutableComponent queueRow(String url, int index, int currentIndex) {
-        String label = DirectLinkQueue.makeLabel(url, index);
+    private static MutableComponent queueRow(String url, List<String> labels, int index, int currentIndex) {
+        String label = labels != null && index - 1 < labels.size() ? labels.get(index - 1) : null;
+        if (label == null || label.isBlank()) label = DirectLinkQueue.makeLabel(url, index);
         if (index == currentIndex) {
             return Component.translatable("kazumiplayer.cmd.queue.row_current", index, label)
                 .withStyle(ChatFormatting.GOLD);
