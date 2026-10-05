@@ -47,7 +47,7 @@ side = "CLIENT"
 [[dependencies."kazumiplayer"]]
 modId = "watermedia"
 type = "optional"
-versionRange = "[3.0.0,)"
+versionRange = "[3.0.0.23,)"
 ordering = "AFTER"
 side = "CLIENT"
 

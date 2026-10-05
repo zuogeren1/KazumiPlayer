@@ -42,7 +42,7 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 | 前置 | 用途 |
 |------|------|
 | [Rinku](https://modrinth.com/mod/rinku) 3.0.4（原 MCEF，作者改名） | Chromium 视频嗅探 |
-| WaterMedia 3.0.0.22 | FFmpeg 解码 + GL 纹理 |
+| WaterMedia 3.0.0.23（含 WaterMedia Binaries 3.0.0.6） | FFmpeg 解码 + GL 纹理 |
 | Cloth Config 26.1.154（可选） | 游戏内配置界面，不装不影响功能 |
 
 ## 配置
@@ -130,7 +130,7 @@ Minecraft 视频屏幕 Mod，基于 NeoForge 26.1.2。在游戏世界内创建�
 ```
 
 **服务端**安装 `kazumiplayer-server-0.1-alpha.jar`（无需 MCEF/WaterMedia 前置）；
-**客户端**安装 `kazumiplayer-client-0.1-alpha.jar`（需 Rinku 3.0.4 + WaterMedia 3.0.0.22 前置）。
+**客户端**安装 `kazumiplayer-client-0.1-alpha.jar`（需 Rinku 3.0.4 + WaterMedia 3.0.0.23 前置，WaterMedia 低于 3.0.0.23 会因二进制不兼容在起播时报错）。
 
 ## 免责声明
 
