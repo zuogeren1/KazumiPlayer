@@ -34,9 +34,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 互不改变对方的几何：滚动带起点恒为显示区顶部、TOP 带自顶部向下、BOTTOM 带自底部向上，
  * 三条带重叠时按「滚动 → TOP → BOTTOM」次序提交，固定项自然压在滚动项之上（B 站语义）。
  *
- * <p>车道准入是占用感知的（不再是轮转硬塞）：只有「该车道最后一条的尾端已经让出新条头部空间」
- * 时才准入（按行程比例换算成时间提前量），没有满足条件的车道就丢弃该条并计入 DEBUG 统计；
- * TOP/BOTTOM 槽位同样按驻留时长占位，无空闲槽即丢弃。
+ * <p>车道准入是占用感知的：该车道每条在途弹幕的已推进像素须 ≥ max(新条文本宽, 该条文本宽) +
+ * {@link #MIN_GAP_PX} 才允许新条入轨（按行程比例换算成时间提前量），没有满足条件的车道就丢弃该条
+ * 并计入 DEBUG 统计，不再轮转硬塞；占位宽度取两者的较大值，保证更宽的追随弹幕（行程更快）在最坏
+ * 时刻也不会追上前车。TOP/BOTTOM 槽位同样按驻留时长占位，无空闲槽即丢弃。
  *
  * <p>模式：SCROLL 右进左出、REVERSE 左进右出（镜像）；TOP/BOTTOM 居中驻留 {@link #PIN_HOLD_MS}，
  * 不受 speedMultiplier 影响。行程由本地 MonoClock 驱动：即时项出队即起跑，暂停/seek 不影响
@@ -71,7 +72,7 @@ public final class DanmakuWorldLayer {
     private static final float TEXT_BASELINE_OFFSET_PX = 7.0f;
     /** 顶部/底部项驻留时长（毫秒）：固定模式不受 speedMultiplier 影响 */
     private static final long PIN_HOLD_MS = 4500L;
-    /** 同车道相邻两条之间的最小水平间隔（像素） */
+    /** 车道让位判据的水平间隔（像素）：旧条已推进像素须 ≥ max(新条,旧条)文本宽 + 此值才释放车道 */
     private static final float MIN_GAP_PX = 6.0f;
     /** 房间互发弹幕定色（金色）；alpha 仍由 danmakuOpacity 决定 */
     private static final int ROOM_CHAT_COLOR = 0xFFD700;
@@ -283,10 +284,9 @@ public final class DanmakuWorldLayer {
                     DanmakuMode.BOTTOM, 0, slot, textWPx, entryScale);
             }
             case SCROLL, REVERSE -> {
-                long earliest = earliestFreeStart(actives, entry.mode(), textWPx, halfWPx, now, travelMs);
-                if (earliest < 0) yield null;
-                int lane = pickLane(actives, entry.mode());
-                yield new Active(entry, entryText(entry), Math.max(now, earliest), seq,
+                // 占位宽度按条目实际缩放后的绘制宽度计（与 HUD 侧一致）
+                int lane = freeLane(actives, entry.mode(), textWPx * entryScale, halfWPx, now, travelMs);
+                yield lane < 0 ? null : new Active(entry, entryText(entry), now, seq,
                     entry.mode(), (int) travelMs, lane, textWPx, entryScale);
             }
             default -> null;
@@ -294,36 +294,21 @@ public final class DanmakuWorldLayer {
     }
 
     /**
-     * 该模式全部车道中最早的可用起跑时刻；没有车道能在合理时间内让出空间则返回 -1。
-     * 可用判据：对车道内每一条在途弹幕，其已推进像素需 ≥ 该条文本宽 + 最小间隔；
-     * 换算到时间轴即「新条起跑时刻 ≥ 旧条起跑时刻 + travelMs × (旧条文本宽 + 间隔) / (带宽 + 旧条文本宽)」。
+     * 车道准入判据：该车道每条在途弹幕的已推进像素须 ≥ max(新条绘制宽, 该条绘制宽) + {@link #MIN_GAP_PX}。
+     * 宽度一律按条目实际缩放后的绘制宽度计（textWPx × scalePercent），与 HUD 侧同一口径；
+     * 占位宽度取两者较大值——更宽的弹幕行程更快会追上较窄的前车，只用前车宽度算提前量会在最坏时刻追尾；
+     * 已推进像素按行程比例换算成时间提前量（毫秒向上取整，让位不早于理论时刻），与画面时间无关（本地钟驱动）。
      */
-    private static long earliestFreeStart(List<Active> actives, DanmakuMode mode, float textWPx,
-                                          float halfWPx, long now, long travelMs) {
-        long earliest = -1;
-        for (int lane = 0; lane < LANE_COUNT; lane++) {
-            long release = laneReleaseAt(actives, mode, lane, textWPx, halfWPx, travelMs);
-            if (release < 0) continue;
-            if (earliest < 0 || release < earliest) earliest = release;
-        }
-        return earliest < 0 ? -1 : Math.max(now, earliest);
-    }
-
-    /** 指定车道让出新条头部空间所需时刻；该车道无在途弹幕时返回 0（立即可用） */
-    private static long laneReleaseAt(List<Active> actives, DanmakuMode mode, int lane, float nextTextWPx,
-                                      float halfWPx, long travelMs) {
-        long release = 0;
-        boolean any = false;
+    private static boolean laneReleased(List<Active> actives, DanmakuMode mode, int lane, float newWPx,
+                                        float halfWPx, long now, long travelMs) {
         for (Active active : actives) {
             if (active.mode() != mode || active.lane() != lane) continue;
-            any = true;
-            double span = 2 * halfWPx + active.textWPx();
-            double needed = active.textWPx() + MIN_GAP_PX;
-            long advance = (long) (travelMs * Math.min(1.0, needed / span));
-            release = Math.max(release, active.startMono() + advance);
+            float widest = Math.max(newWPx, active.textWPx() * active.scalePercent());
+            double span = 2 * halfWPx + widest;
+            long advance = (long) Math.ceil(travelMs * Math.min(1.0, (widest + MIN_GAP_PX) / span));
+            if (now - active.startMono() < advance) return false;
         }
-        if (!any && nextTextWPx < 0) return -1;
-        return release;
+        return true;
     }
 
     /** 固定槽位占用感知：驻留未满的槽位不可复用；返回可用槽位下标，无则 -1 */
@@ -343,34 +328,17 @@ public final class DanmakuWorldLayer {
         return -1;
     }
 
-    /** 从轮转游标起取该模式第一条空闲车道（占用判据同 {@link #laneReleaseAt}） */
-    private static int pickLane(List<Active> actives, DanmakuMode mode) {
+    /** 从轮转游标起取第一条已让出空间的车道（newWPx 为新条绘制宽）；全部车道都在占用期返回 -1 */
+    private static int freeLane(List<Active> actives, DanmakuMode mode, float newWPx, float halfWPx,
+                                long now, long travelMs) {
         for (int offset = 0; offset < LANE_COUNT; offset++) {
             int lane = Math.floorMod(laneCursor + offset, LANE_COUNT);
-            boolean used = false;
-            for (Active active : actives) {
-                if (active.mode() == mode && active.lane() == lane) {
-                    used = true;
-                    break;
-                }
-            }
-            if (!used) {
+            if (laneReleased(actives, mode, lane, newWPx, halfWPx, now, travelMs)) {
                 laneCursor = Math.floorMod(lane + 1, LANE_COUNT);
                 return lane;
             }
         }
-        // 全部车道都有在途弹幕：选最早让出空间的车道（earliestFreeStart 已确认可入）
-        int bestLane = 0;
-        long bestStart = Long.MAX_VALUE;
-        for (Active active : actives) {
-            if (active.mode() != mode) continue;
-            long start = active.startMono();
-            if (start < bestStart) {
-                bestStart = start;
-                bestLane = active.lane();
-            }
-        }
-        return bestLane;
+        return -1;
     }
 
     /** 条目寿命：滚动/逆向滚动按行程，固定项按驻留时长 */
