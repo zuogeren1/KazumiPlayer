@@ -137,8 +137,8 @@ dependencies {
     jarJar(implementation("com.google.zxing:core:3.5.3"))
 
     // 客户端专用依赖 (client only)
-    // MCEF - Chromium Embedded Framework for video URL sniffing
-    clientImplementation("de.keksuccino:mcef-neoforge:2.2.0-26.1.1") {
+    // Rinku（原 MCEF）- Chromium Embedded Framework for video URL sniffing
+    clientImplementation("de.keksuccino:rinku-neoforge:3.0.4-26.1.2") {
         exclude group: "net.neoforged", module: "neoforge"
     }
     // WaterMedia - VLC-powered media player (Modrinth)

@@ -41,9 +41,9 @@ ordering = "NONE"
 side = "BOTH"
 
 [[dependencies."${mod_id}"]]
-modId = "mcef"
+modId = "rinku"
 type = "optional"
-versionRange = "[2.2.0,)"
+versionRange = "[3.0.4,)"
 ordering = "AFTER"
 side = "CLIENT"
 

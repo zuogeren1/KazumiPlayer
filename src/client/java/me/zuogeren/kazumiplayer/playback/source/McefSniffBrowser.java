@@ -2,8 +2,8 @@ package me.zuogeren.kazumiplayer.playback.source;
 
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.cinemamod.mcef.MCEF;
-import com.cinemamod.mcef.MCEFBrowser;
+import de.keksuccino.rinku.Rinku;
+import de.keksuccino.rinku.RinkuBrowser;
 import org.cef.CefSettings;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
@@ -35,7 +35,7 @@ import java.util.function.Consumer;
 /**
  * MCEF(CEF) 嗅探浏览器封装——对齐 Kazumi lib/webview/video/impl/video_webview_impl.dart（通用 CEF 实现）。
  *
- * 单实例持有一个常驻 MCEFBrowser，解析任务按实例串行；
+ * 单实例持有一个常驻 RinkuBrowser，解析任务按实例串行；
  * 切集时 {@link #unloadPage()} 导航 about:blank 释放页面资源，{@link #dispose()} 时才真正关闭浏览器。
  *
  * 解析手段与蓝本一致：
@@ -58,7 +58,7 @@ public class McefSniffBrowser {
 
     private final String userAgent = UserAgents.getRandomUa();
 
-    private MCEFBrowser browser;
+    private RinkuBrowser browser;
     private int browserId = -1;
     private boolean hasRegisteredHandlers = false;
 
@@ -106,7 +106,7 @@ public class McefSniffBrowser {
         KazumiLog.sniff.info("[source] load page: {} (legacyParser={})", url, useLegacyParser);
 
         if (browser == null) {
-            browser = MCEF.createBrowser(url, true);
+            browser = Rinku.createBrowser(url, true);
             browserId = browser.getIdentifier();
             KazumiLog.sniff.info("[source] sniff browser created (id={}, ua={})", browserId, userAgent);
         } else {
@@ -117,7 +117,7 @@ public class McefSniffBrowser {
     /** 卸载当前页面释放资源（对齐蓝本 unloadPage：停轮询 + 导航 about:blank，不销毁浏览器） */
     public void unloadPage() {
         cancelVideoParserTimer();
-        MCEFBrowser b = browser;
+        RinkuBrowser b = browser;
         if (b == null) return;
         Runnable navigate = () -> {
             try {
@@ -139,7 +139,7 @@ public class McefSniffBrowser {
     public void dispose() {
         cancelVideoParserTimer();
         ACTIVE_INSTANCES.remove(this);
-        MCEFBrowser b = browser;
+        RinkuBrowser b = browser;
         browser = null;
         if (b != null) {
             try {
@@ -165,7 +165,7 @@ public class McefSniffBrowser {
 
     // ---- CEF handler ----
     // MCEFClient 对 load/display 事件是多播分发器（其自身实现了 CefLoadHandler/CefDisplayHandler
-    // 并占住原生 CefClient 的单槽），必须经 MCEF.getClient().addXxxHandler 注册；
+    // 并占住原生 CefClient 的单槽），必须经 Rinku.getClient().addXxxHandler 注册；
     // 直接 getHandle().addXxxHandler 会顶掉 MCEF 内部管理导致加载事件丢失。
     // CefRequestHandler 无多播封装（原生单槽），因此全局只注册一次，
     // 由 ACTIVE_INSTANCES 按 browserIdentifier 分发到各实例。
@@ -183,7 +183,7 @@ public class McefSniffBrowser {
         globalHandlersRegistered = true;
 
         // 页面加载生命周期：onLoadStart 注入 blob/fetch/XHR hook，onLoadEnd 注入标签解析脚本
-        MCEF.getClient().addLoadHandler(new CefLoadHandlerAdapter() {
+        Rinku.getClient().addLoadHandler(new CefLoadHandlerAdapter() {
             @Override
             public void onLoadStart(CefBrowser b, CefFrame frame, CefRequest.TransitionType transitionType) {
                 for (McefSniffBrowser s : ACTIVE_INSTANCES) s.handleLoadStart(b, frame);
@@ -196,7 +196,7 @@ public class McefSniffBrowser {
         });
 
         // 控制台桥分发：JS 脚本以固定前缀回传日志/命中结果
-        MCEF.getClient().addDisplayHandler(new CefDisplayHandlerAdapter() {
+        Rinku.getClient().addDisplayHandler(new CefDisplayHandlerAdapter() {
             @Override
             public boolean onConsoleMessage(CefBrowser b, CefSettings.LogSeverity level,
                     String message, String source, int line) {
@@ -208,7 +208,7 @@ public class McefSniffBrowser {
         });
 
         // 原生网络层拦截（对齐 shouldInterceptRequest）
-        MCEF.getClient().getHandle().addRequestHandler(new CefRequestHandler() {
+        Rinku.getClient().getHandle().addRequestHandler(new CefRequestHandler() {
             @Override
             public boolean onBeforeBrowse(CefBrowser b, CefFrame frame, CefRequest request,
                     boolean isRedirect, boolean isMainFrame) {
@@ -254,7 +254,8 @@ public class McefSniffBrowser {
             }
 
             @Override
-            public void onRenderProcessTerminated(CefBrowser b, TerminationStatus status) {
+            public void onRenderProcessTerminated(CefBrowser b, TerminationStatus status,
+                    int errorCode, String errorString) {
             }
         });
     }
@@ -393,7 +394,7 @@ public class McefSniffBrowser {
     }
 
     private void pollVideoSource() {
-        MCEFBrowser b = browser;
+        RinkuBrowser b = browser;
         if (b == null) return;
         String script = useLegacyParser ? SniffScripts.POLL_LEGACY_SCRIPT : SniffScripts.POLL_VIDEO_TAG_SCRIPT;
         try {

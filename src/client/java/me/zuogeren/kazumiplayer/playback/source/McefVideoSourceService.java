@@ -2,7 +2,7 @@ package me.zuogeren.kazumiplayer.playback.source;
 
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 
-import com.cinemamod.mcef.MCEF;
+import de.keksuccino.rinku.Rinku;
 import net.minecraft.client.Minecraft;
 
 import java.time.Duration;
@@ -72,8 +72,8 @@ public class McefVideoSourceService implements IVideoSourceService {
         Minecraft.getInstance().execute(() -> {
             try {
                 request.throwIfNotCurrent(activeRequest);
-                if (!MCEF.isInitialized()) {
-                    throw new VideoSourceResolveException.NotFound("MCEF 未初始化，无法进行浏览器嗅探");
+                if (!Rinku.isInitialized()) {
+                    throw new VideoSourceResolveException.NotFound("Rinku（原 MCEF）未初始化，无法进行浏览器嗅探");
                 }
                 if (browser == null) {
                     browser = new McefSniffBrowser();
