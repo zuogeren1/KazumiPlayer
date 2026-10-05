@@ -34,11 +34,11 @@ public abstract class MixinFontTexture {
 
     @ModifyConstant(method = "*", constant = @Constant(intValue = 256), require = 0)
     private int kazumiplayer$fontAtlasSizeInt(int original) {
-        return KazumiTextPerf.fontAtlasSize();
+        return KazumiTextPerf.immediatelyFastLoaded() ? original : KazumiTextPerf.fontAtlasSize();
     }
 
     @ModifyConstant(method = "*", constant = @Constant(floatValue = 256.0F), require = 0)
     private float kazumiplayer$fontAtlasSizeFloat(float original) {
-        return KazumiTextPerf.fontAtlasSize();
+        return KazumiTextPerf.immediatelyFastLoaded() ? original : KazumiTextPerf.fontAtlasSize();
     }
 }

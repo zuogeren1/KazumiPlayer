@@ -46,17 +46,49 @@ public final class KazumiTextPerf {
 
     /** @return true=文本 RenderType 不做 sortOnUpload（半透明排序） */
     public static boolean skipTextSorting() {
-        return !DISABLE_ALL && SKIP_TEXT_SORTING;
+        return !DISABLE_ALL && SKIP_TEXT_SORTING && !immediatelyFastLoaded();
     }
 
     /** @return true=同一 RenderType 的连续字形复用上次取到的 VertexConsumer */
     public static boolean reuseGlyphBuffer() {
-        return !DISABLE_ALL && REUSE_GLYPH_BUFFER;
+        return !DISABLE_ALL && REUSE_GLYPH_BUFFER && !immediatelyFastLoaded();
     }
 
     /** @return 字形图集边长（{@link #VANILLA_FONT_ATLAS_SIZE} 表示原版行为；必须是 2 的幂） */
     public static int fontAtlasSize() {
-        return DISABLE_ALL ? VANILLA_FONT_ATLAS_SIZE : FONT_ATLAS_SIZE;
+        return DISABLE_ALL || immediatelyFastLoaded() ? VANILLA_FONT_ATLAS_SIZE : FONT_ATLAS_SIZE;
+    }
+
+    /** @return true=三项移植优化全部关闭（应急开关，供 mixin 插件读取） */
+    public static boolean disableAll() {
+        return DISABLE_ALL;
+    }
+
+    /** @return true=仅图集扩容一项关闭（{@code -Dkazumiplayer.mixin.fontAtlasSize=256} 时） */
+    public static boolean atlasDisabled() {
+        return DISABLE_ALL || FONT_ATLAS_SIZE == VANILLA_FONT_ATLAS_SIZE;
+    }
+
+    /**
+     * @return true=已安装 ImmediatelyFast：此时本模组的移植项让位（对方注入点相同，避免互相顶掉）
+     */
+    public static boolean immediatelyFastLoaded() {
+        return ImmediatelyFast.DETECTED;
+    }
+
+    /** ImmediatelyFast 存在性检测（只做一次；ModList 未就绪时按未安装处理） */
+    private static final class ImmediatelyFast {
+        private static final boolean DETECTED = detect();
+
+        private static boolean detect() {
+            try {
+                return net.neoforged.fml.ModList.get().isLoaded("immediatelyfast");
+            } catch (Throwable ignored) {
+                return false;
+            }
+        }
+
+        private ImmediatelyFast() {}
     }
 
     private static boolean boolProperty(String key, boolean fallback) {

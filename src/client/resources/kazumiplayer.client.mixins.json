@@ -2,6 +2,7 @@
   "required": true,
   "minVersion": "0.8",
   "package": "me.zuogeren.kazumiplayer.mixin",
+  "plugin": "me.zuogeren.kazumiplayer.client.textperf.KazumiMixinPlugin",
   "compatibilityLevel": "JAVA_25",
   "client": [
     "MixinFontGlyphVisitor",
