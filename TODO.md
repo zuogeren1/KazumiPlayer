@@ -1,5 +1,40 @@
 # TODO
 
+## 前置 Mod 跟进（2026-10-06）
+
+### Rinku 3.0.4：能捡的便宜与两个新坑
+
+> 对照 Rinku 3.0.4（`rinku-neoforge:3.0.4-26.1.2`）sources jar 逐项核过。v3 变更里对我们有直接价值的有 4 项：①`--disable-web-security` 默认开启（legacy 模式往跨域 iframe 注入脚本不再被同源策略挡）——**升级后已自动生效**；②预加载浏览器池（默认透明/不透明各 1，`createBrowser` 直接取预热实例，省掉浏览器冷启动）——**已自动生效**；③Chromium 151（站点 JS/编解码兼容性整体上移）；④逐浏览器 `setAudioMuted` / `setWindowlessFrameRate`——**尚未接线**。仍未解决：`jcef_helper` 僵尸进程（IDE 强杀不跑 shutdown hook）、B 站直链依旧只能走 API 绕过。
+
+- [ ] **嗅探浏览器静音（`setAudioMuted(true)`）**【S】: Rinku 硬编码 `--autoplay-policy=no-user-gesture-required`（`CefUtil.java:105`），而我们嗅探的就是播放页 → 页面 `<video>` 会自动播放；CEF 音频走系统声卡（不经 MC 的 OpenAL），于是解析期可能冒出网站声音，且同一视频被 CEF 与 WaterMedia **各解码一遍**。做法：`Rinku.createBrowser` 之后调 `browser.setAudioMuted(true)`（`org/cef/browser/CefBrowser_N.java:1336`，OSR 可用）。
+- [ ] **嗅探浏览器降帧（`setWindowlessFrameRate(n)` + 配置项）**【S】: 嗅探浏览器**从不显示**（全项目无任何 `getTextureIdentifier`/纹理绘制点），但 OSR 每帧都走 `RinkuBrowser.onPaint`：非渲染线程路径会把整块 dirty buffer `memAlloc+memcpy` 塞进 mailbox（`MAX_PENDING_PAINT_STREAMS=2`）再上传纹理 → v3 默认 60fps（MCEF 时代 30）× 最多 5 个 worker = 每秒最多 300 次「没人看」的拷贝+上传。做法：创建后调 `setWindowlessFrameRate(n)`（`CefBrowser_N.java:1318`，**小于 1 抛 `IllegalArgumentException`**；`CefBrowserSettings` 里的 0 只在创建期表示退回 30fps）。默认值待定（30 保守 / 5 激进）：嗅探的一秒轮询是 Java 侧 `executeJavaScript`，与绘制无关，降帧不影响命中率。
+- [ ] **`onRenderProcessTerminated` 空实现收尾**【S】: 现为空方法（`RinkuSniffBrowser.java:257-259`），渲染进程崩溃后只能白等到解析超时。改为 `parsedFuture.completeExceptionally(...)` + 重建浏览器（v3 的 4 参签名已带 errorCode/errorString）。
+- [ ] **UA 诊断：JS 侧 UA 的 Chrome 记号被换成了 `Rinku/2`**【S】: `CefUtil.java:136-142` 在无自定义 UA 时设 `user_agent_product = "Rinku/2"`，而按 `CefSettings.java:159-165` 该字段**替换 UA 的产品记号**（即 `Chrome/151.x` 的位置）→ `navigator.userAgent` 缺 Chrome 版本号，站点播放器却常靠 UA 判浏览器能力；同时我们在资源层把 HTTP 头改写成 `UserAgents` 池的随机 Chrome UA（`RinkuSniffBrowser.java:232-237`）→ 两侧不一致且可被侦测。先加一行诊断（注入一段打印 `navigator.userAgent` 的脚本，走已有 `KAZUMI_LOG:` console 桥）确认实际值；确认后再定是否在 Rinku 初始化前 `Rinku.getSettings().setUserAgent(...)`（代价：写 Rinku 全局配置、需重启游戏、影响其他用 Rinku 的 mod、且不能再每实例随机 UA）。
+- [ ] **`setWindowVisibility(false)` 省电实测**【S-M】: 注释明说 windowless 浏览器隐藏后**停止渲染与 paint 回调**（`org/cef/browser/CefBrowser.java:432-438`），配合静音通常还能让 Chromium 挂起后台视频解码 → 收益最大。风险：页面 visibility 转 hidden 会节流站点自身定时器（hls.js 类分片加载可能变慢）。做法：加开关，实测命中率与解析耗时后再定默认值。
+
+### WaterMedia 3.0.0.23：影响评估（对照 3.0.0.22 反编译签名逐项核过）
+
+现状：`build.gradle` 钉 `maven.modrinth:G922NeHS:SytIeSKM`（= API 3.0.0.22）+ `4997XcoK:SYiGqsPE`（= binaries 3.0.0.5）。上游已发 **API 3.0.0.23（版本 id `FdCZ5Rxq`，2026-07-27）** 与 **binaries 3.0.0.6（`fYWsOuBz`，同日，changelog：Fixed jar crashes the game asking for multirelease folder）**。
+
+- [ ] **必须：升到 API 3.0.0.23 并重新编译**【S】: `start()` / `startPaused()` 由 `void` 改 `boolean`（`MediaPlayer`：`public abstract void start()` → `public boolean start()`），**二进制不兼容**——编译于 .22 的字节码引用 `MediaPlayer.start()V`，在 .23 上运行即 `NoSuchMethodError`；我们的 `mods.toml` 依赖范围是 `[3.0.0,)`，用户装 .23 就会命中。源码侧无需改动（`player.start();` 照常编译），但**必须重新编译**（全项目唯一 `start()` 调用点＝`WaterMediaPlayer.java:140`）。
+- [ ] **必须：binaries 同批升到 3.0.0.6**【S】: 与 API 同日发布且属崩溃修复；上游 `neoforge.mods.toml` 未声明 API↔binaries 版本约束，不会自动拦住旧 binaries。
+- [ ] **顺手：用上 `start()` 的返回值**【S】: 预热播放器起播失败时可记日志/回退（现在忽略返回值）。
+- [ ] **文档债**：`reference/watermedia-wiki/en-us.md:111` 仍写 `void start(); void startPaused();`，需改为 `boolean`（该文件自称「对照本项目实际构建的产物核实」）。
+- [x] **不需动（签名 diff 已核）**：我们在用的 `MediaAPI.mrl/glEngine/alEngine/createPlayer(mrl,gfx,sfx)`、`MRL`、`MediaPlayer` 的 `volume/width/height/time/duration/ended/isPlaying/mute/seekQuick/stop`、`platform` 包 6 个类（`IPlatform/PlatformAPI/PlatformData/DataSource/PlatformException/DataQuality`）、`util` 包 4 个类（`MediaType/Metadata/RequestHeaders/Slave`）、`WaterMediaConfig` —— **签名全部一致**；新增 API 类只有 `players/sync/*`（`Bridge/Packet/Sync/Config/Watch/Unwatch/Report/Control`）与 `MediaPlayer$Role`、`ServerMediaPlayer$Watcher`，**无任何删除**。CodecsAPI 那批修复（PNG zTXt 死循环、渐进式 JPEG、SVG 二次方、DDS 溢出…）我们不用该 API；`speed(NaN)` 拒绝我们也不调 `speed`。
+- [ ] **机会（暂缓，需单独立项）：用内置同步子系统替换自研同步层**【L】: .23 把联机同步做进了 `MediaPlayer`——`sync.Bridge`（单方法 `send(ByteBuffer)`，可承载任意字节通道，能挂在我们现有包上）、`Config.Capability`（LOCKSTEP / CONTROLS / VOLUME）、`role()/authority()/drift()/tolerance(ms)`、`ServerMediaPlayer`（权威：注册观众 + 变更广播 + 约 5s 心跳 + 处理控制请求 + 清理失联）、revision 单调计数与乱序丢弃、`syncDuration` 首胜、ENDED 态 seek 落 PAUSED。它与我们的 `SyncGroupManager` + `SyncStatePacket` + `ClientClockSync` + 漂移兜底属同一层能力，收益：①LOCKSTEP（有人缓冲时全体冻结、失败者忽略、中途加入不打断他人）正对我们「缓冲饥饿期反复戳播放器」「集间过渡」两个老痛点；②CONTROLS 让控制请求走上行、两侧 API 对称；③省掉自研协议与节流数学。风险：权威侧只有 `ServerMediaPlayer`（无真实媒体）与真实媒体播放器两类，与「每屏一个权威 + 每人本地播放器跟随」的映射需实测；**VOLUME 能力会覆盖我们每屏本端音量 → 不能启用**；`sync()` 解码发生在任意线程、内部 50ms ticker；还要与「线路/清晰度双播放器交接」「直链队列」重新对齐。结论：先记录，等其他批次稳定后再评估。
+
+### 待裁决（拍板后才动）
+
+- [ ] **扫码登录成功后立即同步屏蔽词**: `BilibiliLoginScreen` 登录成功处加一行拉取 `x/dm/filter/user`（一行改动，取舍在「登录即联网」的体验）【S】
+- [ ] **屏蔽用户 uid 规则**: B 站账号屏蔽词实测 429 条里 342 条是 type=2 用户规则（按 uid 屏蔽发送者），当前整体跳过【M】
+- [ ] **高级弹幕完整还原**: 现为降级滚动或直接跳过（mode 7/8 跳过、9 降级），完整还原需实现 B 站高级弹幕脚本语义【L】
+
+### 待实机回归
+
+- [ ] **屏幕前方深度分层**：3 层的方向（`DanmakuDepthLayers.OBSERVER_Z_SIGN` 若相反只翻这一个常量）/层次观感/帧率影响
+- [ ] **全屏描边观感**：改用 `Style` 阴影单次绘制后（原 9 次绘制有重影），实机确认与 B 站观感一致
+- [ ] **全屏弹幕快捷开关**：手感、与进度条的挤压关系、直播屏底条表现
+
 ## 深度审计修复（2026-08-24）
 
 - [x] **P1 RuleManagerScreen 成功回包 NPE**: 服务端 PlayOkPayload 只填 key（title=null），客户端 `Component.literal(null)` 必崩 → 改用 `p.toComponent()`
