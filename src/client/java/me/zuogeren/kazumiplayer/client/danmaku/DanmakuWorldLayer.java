@@ -603,7 +603,9 @@ public final class DanmakuWorldLayer {
             ? (halfH + Math.max(0.0f, bottomUiGapWorld)) / baseScale : 0.0f);
         LaneGeometry lanes = LaneGeometry.of(areaH, fontScale,
             LaneGeometry.keepOut(areaH, uiReservePx, uiTopPx));
-        boolean allowOverlap = config.danmakuAllowOverlap.get();
+        // 允许压叠：开关开启，或密度档位本身就是「重叠」（该档位语义即"不丢视频弹幕"，与开关同义）
+        boolean allowOverlap = config.danmakuAllowOverlap.get()
+            || config.danmakuDensity.get() == ClientConfig.DanmakuDensity.OVERLAP;
         // 尺寸变化失效：几何无缓存，但准入时定下的车道号可能越界 → 收进最后一条车道并记一条 DEBUG
         Integer lastLanes = LAST_LANES.put(pos, lanes.lanes);
         if (lastLanes != null && lastLanes != lanes.lanes) {
@@ -643,7 +645,8 @@ public final class DanmakuWorldLayer {
             }
             if (!isVisible(entry, mode, config)) continue;
             // 容量闸只拦视频片内条目：社交条目不受上限约束（仍计入 actives、仍受车道可用性约束）
-            if (capBlocks(entry.source(), actives.size(), config)) {
+            // 压叠模式下不设上限：上限先于车道准入，若仍生效则压叠兜底永远轮不到
+            if (!allowOverlap && capBlocks(entry.source(), actives.size(), config)) {
                 capped++;
                 continue;
             }

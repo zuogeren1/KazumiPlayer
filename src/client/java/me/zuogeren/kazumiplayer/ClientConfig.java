@@ -191,8 +191,8 @@ public class ClientConfig {
                 .defineEnum("danmakuDensity", DanmakuDensity.NORMAL);
 
         danmakuAllowOverlap = builder
-                .comment("允许弹幕重叠显示：开启后密集弹幕不再因无空闲车道被丢弃，而是允许相互压叠",
-                         "配合「弹幕密度=重叠」使用；关闭时密集弹幕按占用判据丢弃（不重叠）")
+                .comment("允许弹幕重叠显示：开启后密集弹幕不再被丢弃，而是允许相互压叠（同时解除密度上限）",
+                         "弹幕密度=重叠 时自动等同开启；关闭时按占用判据与密度上限丢弃")
                 .define("danmakuAllowOverlap", false);
 
         danmakuScaleWithScreen = builder

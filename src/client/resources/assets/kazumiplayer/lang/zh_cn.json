@@ -80,7 +80,7 @@
   "kazumiplayer.config.danmaku_density": "弹幕密度（同屏上限）",
   "kazumiplayer.config.danmaku_density_tooltip": "正常=60 / 较多=100 / 重叠=不设上限；房间互发与直播弹幕不受此上限约束，始终优先上屏",
   "kazumiplayer.config.danmaku_allow_overlap": "允许弹幕重叠显示",
-  "kazumiplayer.config.danmaku_allow_overlap_tooltip": "开启后密集弹幕不再因无空闲车道被丢弃，而是允许相互压叠（配合「弹幕密度=重叠」使用）",
+  "kazumiplayer.config.danmaku_allow_overlap_tooltip": "开启后密集弹幕不再被丢弃：解除同屏上限并允许相互压叠（弹幕密度选「重叠」时自动等同开启）",
   "kazumiplayer.config.danmaku_show_scroll": "显示滚动弹幕",
   "kazumiplayer.config.danmaku_show_top": "显示顶部固定弹幕",
   "kazumiplayer.config.danmaku_show_bottom": "显示底部固定弹幕",
