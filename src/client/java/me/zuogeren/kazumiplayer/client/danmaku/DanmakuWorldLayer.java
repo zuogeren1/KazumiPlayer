@@ -788,13 +788,15 @@ public final class DanmakuWorldLayer {
                 skipped);
         if (report != null) logAnomalies("World layer", pos, report, activeTotal);
 
-        // 到期清除逐层执行（各层寿命只由条目自身时钟决定，层间无耦合）
+        // 到期清除逐层执行（各层寿命只由条目自身时钟决定，层间无耦合）；
+        // 开关关闭（来源/模式/彩色过滤）同样即时作废，在屏条目不再继续飘到出屏
         boolean anyActive = false;
         for (int layer = 0; layer < depth; layer++) {
             List<Active> actives = scene.layer(layer);
             for (int i = actives.size() - 1; i >= 0; i--) {
                 Active active = actives.get(i);
-                if (clocks.of(active.entry().source()) - active.startMs() >= lifetimeMs(active)) {
+                if (clocks.of(active.entry().source()) - active.startMs() >= lifetimeMs(active)
+                    || !isVisible(active.entry(), active.mode(), config)) {
                     actives.remove(i);
                 }
             }

@@ -67,7 +67,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 见 {@link DanmakuPack}）；可用高不足一条车道时按 1 条车道处理并整排
  * 上移（越出显示带上缘而不是越过控制条）。字号由 danmakuFontScale × 条目 fontSizePercent/100 作为逐条 pose
  * 缩放施加（比例自入场固定，不受在屏集合影响），几何量按该缩放折算成实际像素后参与定位与占位计算；
- * 固定项字形按 {@link DanmakuWorldLayer#textTopLocal} 在槽位内垂直居中、滚动/逆向条目的行顶即落点上缘
+ * 固定项字形按 {@link DanmakuWorldLayer#textTopLocal(float, float)} 在槽位内垂直居中、滚动/逆向条目的行顶即落点上缘
  * （与世界层同一口径）。
  *
  * <p>逐帧成本：视觉序文本（含描边投影样式）、绘制宽、pose 缩放、主色/框色与字形外接框都在准入时
@@ -126,7 +126,7 @@ public final class DanmakuHudLayer {
      * @param index        字符槽索引（前缀推进宽度 + 原始位置）：可见区间二分与子序列撇取都读它
      * @param textWPx      条目文本实际像素宽（基础字宽 × {@code scale}）
      * @param scale        条目 pose 缩放：danmakuFontScale × fontSizePercent/100，上限为单个车道高度
-     * @param textTop      字形在车道内垂直居中的局部行顶 y（{@link DanmakuWorldLayer#textTopLocal}）
+     * @param textTop      字形在车道内垂直居中的局部行顶 y（{@link DanmakuWorldLayer#textTopLocal(float, float)}）
      * @param color        主色（已按 danmakuOpacity 合成 alpha；房间互发恒金）——描边 alpha 亦由它决定
      * @param frameColor   文字框色（已合成 alpha）
      * @param frameInk     房间互发条目的字形外接框（{@code prepareText} 一次，含投影），其余来源为 null
@@ -366,9 +366,11 @@ public final class DanmakuHudLayer {
                 skipped);
         if (report != null) DanmakuWorldLayer.logAnomalies("HUD layer", screenPos, report, actives.size());
 
+        // 到期清除 + 开关关闭即时作废：来源/模式/彩色过滤开关一旦关闭，在屏条目不再继续飘到出屏
         for (int i = actives.size() - 1; i >= 0; i--) {
             Active active = actives.get(i);
-            if (clocks.of(active.entry().source()) - active.startMs() >= lifetimeMs(active)) {
+            if (clocks.of(active.entry().source()) - active.startMs() >= lifetimeMs(active)
+                || !isVisible(active.entry(), active.mode(), config)) {
                 actives.remove(i);
             }
         }
