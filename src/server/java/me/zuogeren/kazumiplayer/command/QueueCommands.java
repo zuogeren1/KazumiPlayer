@@ -170,7 +170,11 @@ public class QueueCommands {
     /** 队列行：当前项金色 ▶、已播区灰色、待播区绿色可点击切播 */
     private static MutableComponent queueRow(String url, List<String> labels, int index, int currentIndex) {
         String label = labels != null && index - 1 < labels.size() ? labels.get(index - 1) : null;
-        if (label == null || label.isBlank()) label = DirectLinkQueue.makeLabel(url, index);
+        if (label == null || label.isBlank()) {
+            label = DirectLinkQueue.makeLabel(url, index); // 已按展示宽度截断
+        } else {
+            label = DirectLinkQueue.truncateLabel(label); // 聊天栏一行放不下完整标题，悬停也无从查看
+        }
         if (index == currentIndex) {
             return Component.translatable("kazumiplayer.cmd.queue.row_current", index, label)
                 .withStyle(ChatFormatting.GOLD);

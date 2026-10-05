@@ -827,7 +827,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     /** 队列项显示名：优先用 BE 中服务端写回的语义化名称，缺失时按 URL 生成 */
     private static String queueLabel(java.util.List<String> urls, java.util.List<String> labels,
             int idx, int fallbackIdx) {
-        if (labels != null && idx >= 0 && idx < labels.size()) {
+        if (idx < 0 || idx >= urls.size()) return "";
+        if (labels != null && idx < labels.size()) {
             String label = labels.get(idx);
             if (label != null && !label.isBlank()) return label;
         }

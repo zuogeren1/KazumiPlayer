@@ -321,7 +321,7 @@ public final class QueueRequestHandlers {
         List<String> labels = DirectLinkQueue.parseLabels(screen.getEpisodeData());
         if (labels != null && index - 1 >= 0 && index - 1 < labels.size()) {
             String label = labels.get(index - 1);
-            if (label != null && !label.isBlank()) return label;
+            if (label != null && !label.isBlank()) return DirectLinkQueue.truncateLabel(label);
         }
         return DirectLinkQueue.makeLabel(urls.get(index - 1), index);
     }

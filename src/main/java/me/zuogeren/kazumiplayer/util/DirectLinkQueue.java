@@ -21,6 +21,8 @@ public final class DirectLinkQueue {
     /** 队列容量上限（含当前播放项） */
     public static final int MAX_SIZE = 100;
     private static final int MAX_LABEL_LEN = 24;
+    /** 语义化名称的存储上限：远大于展示宽度，仅防异常长数据撑大 Road JSON */
+    private static final int MAX_STORED_LABEL_LEN = 120;
 
     private DirectLinkQueue() {}
 
@@ -96,6 +98,9 @@ public final class DirectLinkQueue {
     /**
      * 由 B 站元数据生成队列显示名：「UP主 · 标题」/「主播名 · 直播间标题」；
      * 作者或标题缺失时退化为单项，皆空返回 null（调用方保留原标签）。
+     *
+     * <p>这里**不套 24 字符的展示截断**：队列行内的宽度自适应由列表控件负责，
+     * 存进 BE 的必须是全文，悬停 tooltip 才有完整名称可显示。
      */
     @Nullable
     public static String metaLabel(me.zuogeren.kazumiplayer.bilibili.BilibiliApi.Meta meta) {
@@ -103,9 +108,15 @@ public final class DirectLinkQueue {
         String author = meta.author() == null ? "" : meta.author().trim();
         String title = meta.title() == null ? "" : meta.title().trim();
         if (author.isEmpty() && title.isEmpty()) return null;
-        if (author.isEmpty()) return truncateLabel(title);
-        if (title.isEmpty()) return truncateLabel(author);
-        return truncateLabel(author + " · " + title);
+        if (author.isEmpty()) return truncateStoredLabel(title);
+        if (title.isEmpty()) return truncateStoredLabel(author);
+        return truncateStoredLabel(author + " · " + title);
+    }
+
+    /** 语义化名称的存储上限：只兜底异常长的数据，正常标题原样保留供悬停查看 */
+    private static String truncateStoredLabel(String s) {
+        if (s.length() <= MAX_STORED_LABEL_LEN) return s;
+        return s.substring(0, s.offsetByCodePoints(0, s.codePointCount(0, MAX_STORED_LABEL_LEN - 1))) + "…";
     }
 
     /**
@@ -141,7 +152,12 @@ public final class DirectLinkQueue {
     @Nullable
     private static Road parseRoad(String episodeData) {
         if (episodeData == null || episodeData.isEmpty()) return null;
-        Road road = JsonUtil.parseFirstRoad(episodeData);
-        return road != null && QUEUE_ROAD_NAME.equals(road.name()) ? road : null;
+        try {
+            Road road = JsonUtil.parseFirstRoad(episodeData);
+            return road != null && QUEUE_ROAD_NAME.equals(road.name()) ? road : null;
+        } catch (RuntimeException e) {
+            // 畸形 JSON（存档损坏/跨版本数据）当作非队列数据：队列面板在渲染线程读它，抛出会直接崩客户端
+            return null;
+        }
     }
 }

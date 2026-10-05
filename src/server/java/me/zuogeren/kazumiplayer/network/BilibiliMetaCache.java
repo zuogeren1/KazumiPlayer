@@ -55,6 +55,12 @@ public final class BilibiliMetaCache {
         List<String> urls = DirectLinkQueue.parseUrls(screen.getEpisodeData());
         if (urls == null || urls.isEmpty()) return false;
         String json = screen.getEpisodeData();
+        // identifier 缺失或比 URL 列表短（老存档、跨版本数据）时先按 URL 重建等长名称，
+        // 否则 withLabel 因下标不匹配原样返回，语义化名称永远写不进去
+        List<String> labels = DirectLinkQueue.parseLabels(json);
+        if (labels == null || labels.size() != urls.size()) {
+            json = DirectLinkQueue.buildRoadJson(urls);
+        }
         for (String url : urls) {
             String label = LABELS.get(url);
             if (label != null) json = DirectLinkQueue.withLabel(json, url, label);
