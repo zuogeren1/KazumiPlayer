@@ -65,6 +65,8 @@ public class ClientPacketHandlers implements IClientPacketHandler {
     private static void handleBilibiliCookie(BilibiliCookiePacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             try {
+                // 自研解析（BilibiliApi）读客户端持有者；直播走 WaterMedia 内置平台，同步注入其配置
+                me.zuogeren.kazumiplayer.client.BilibiliCredentials.set(packet.cookie());
                 org.watermedia.WaterMediaConfig.platforms.biliBiliCookie = packet.cookie();
                 KazumiLog.network.debug("Bilibili cookie applied ({} chars)", packet.cookie().length());
             } catch (Throwable t) {

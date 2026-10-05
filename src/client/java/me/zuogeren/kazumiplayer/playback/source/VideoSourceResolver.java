@@ -88,41 +88,71 @@ public final class VideoSourceResolver {
     }
 
     /**
-     * B 站链接起播：短链先跟随重定向展开，再交给 WaterMedia 平台解析
-     * （play 内部异步解析并轮询，视频/直播均由内置 BiliBiliPlatform 产出可播流）。
+     * B 站链接起播：直播间交 WaterMedia 内置平台解析（实测可用）；视频页走自研解析取 html5
+     * 单流 mp4——内置解析产出的 DASH 分离流在播放器侧不可用（音频 slave 建连被 CDN 终止 →
+     * 无音轨且画面卡缓冲）。短链先跟随重定向展开，再按展开结果分流。
      * 直播间置 bypassSync：直播无稳定时间轴，时钟同步与时间轴控制不适用。
      */
     private void resolveBilibili(VideoScreenBlockEntity screen, String episodeUrl,
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
-        if (BilibiliUrls.isLiveRoom(episodeUrl)) {
-            session.bypassSync = true;
-            KazumiLog.sniff.info("[source] bilibili live room, sync bypassed");
-        }
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         if (!BilibiliUrls.isShortLink(episodeUrl)) {
-            // 同步起播（与直链分支同路径）：不可走 startWhenValid——它的会话校验读 session.player，
-            // 而调度器要在 beginPlayback 返回之后才登记本实例，Minecraft.execute 在渲染线程同线程重入，
-            // 校验必然先于登记执行并把整个起播丢弃（表现为永久停在"解析中"）
-            player.play(episodeUrl);
-            screen.setVideoState(VideoState.PLAYING);
-            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
+            // 同步上下文（beginPlayback 调用栈内）：调度器尚未登记 player，直播只能直接起播；
+            // 视频走异步解析，回调时登记已完成，可走受守卫起播
+            if (BilibiliUrls.isLiveRoom(episodeUrl)) {
+                startLiveDirect(screen, session, player, episodeUrl);
+            } else {
+                resolveBilibiliVideo(screen, episodeUrl, player, session);
+            }
             return;
         }
         KazumiLog.sniff.info("[source] expanding bilibili short link: {}", episodeUrl);
         HttpUtil.resolveFinalUrl(episodeUrl)
             .thenAccept(finalUrl -> {
                 KazumiLog.sniff.info("[source] bilibili short link resolved to {}", finalUrl);
-                // 直播标记同样受会话守卫约束：换集/停止后的迟到结果不得污染当前会话
+                // 展开回调晚于调度器登记，可走受守卫起播；直播标记在同一守卫内设置
                 Minecraft.getInstance().execute(() -> {
                     if (session.player != player || screen.isRemoved()) return;
-                    if (BilibiliUrls.isLiveRoom(finalUrl)) session.bypassSync = true;
-                    startWhenValid(screen, session, player, finalUrl);
+                    if (BilibiliUrls.isLiveRoom(finalUrl)) {
+                        session.bypassSync = true;
+                        startWhenValid(screen, session, player, finalUrl);
+                    } else {
+                        resolveBilibiliVideo(screen, finalUrl, player, session);
+                    }
                 });
             })
             .exceptionally(t -> {
                 failPlayback(screen, unwrap(t));
                 return null;
             });
+    }
+
+    /** 直播间同步起播：WaterMedia 内置 BiliBiliPlatform 解析出 m3u8 直播流 */
+    private void startLiveDirect(VideoScreenBlockEntity screen, ScreenPlayerManager.ScreenPlayer session,
+            WaterMediaPlayer player, String liveUrl) {
+        session.bypassSync = true;
+        KazumiLog.sniff.info("[source] bilibili live room, sync bypassed");
+        player.play(liveUrl);
+        screen.setVideoState(VideoState.PLAYING);
+        reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
+    }
+
+    /**
+     * 视频页：自研解析 html5 单流 mp4 直链后起播；解析失败回退内置平台解析
+     * （DASH 分离流可能无声或卡缓冲，但优于整屏停播，且失败原因会进日志）。
+     */
+    private void resolveBilibiliVideo(VideoScreenBlockEntity screen, String pageUrl,
+            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
+        BilibiliApi.resolveVideoMp4(pageUrl).whenComplete((mp4Url, t) -> {
+            if (t != null) {
+                KazumiLog.sniff.warn("[source] bilibili mp4 resolve failed ({}), falling back to platform resolver",
+                    String.valueOf(unwrap(t).getMessage()));
+                startWhenValid(screen, session, player, pageUrl);
+                return;
+            }
+            KazumiLog.sniff.info("[source] bilibili mp4 resolved: {}", mp4Url);
+            startWhenValid(screen, session, player, mp4Url);
+        });
     }
 
     /** 停止/拆屏时取消全部在途解析 */
