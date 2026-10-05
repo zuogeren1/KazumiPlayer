@@ -56,6 +56,12 @@ public class RinkuSniffBrowser {
             return t;
         });
 
+    /**
+     * 嗅探浏览器永不上屏，但 OSR 每帧仍会把 dirty 缓冲拷贝进 mailbox 再上传纹理；
+     * 帧率固化到 30 让这份无人可见的开销减半。嗅探只依赖网络层拦截与 executeJavaScript，与绘制无关。
+     */
+    private static final int SNIFF_FRAME_RATE = 30;
+
     private final String userAgent = UserAgents.getRandomUa();
 
     private RinkuBrowser browser;
@@ -108,7 +114,8 @@ public class RinkuSniffBrowser {
         if (browser == null) {
             browser = Rinku.createBrowser(url, true);
             browserId = browser.getIdentifier();
-            KazumiLog.sniff.info("[source] sniff browser created (id={}, ua={})", browserId, userAgent);
+            browser.setWindowlessFrameRate(SNIFF_FRAME_RATE);
+            KazumiLog.sniff.info("[source] sniff browser created (id={}, fps={}, ua={})", browserId, SNIFF_FRAME_RATE, userAgent);
         } else {
             browser.loadURL(url);
         }
