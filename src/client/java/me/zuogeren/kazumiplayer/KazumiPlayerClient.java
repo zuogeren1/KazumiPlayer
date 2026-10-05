@@ -39,6 +39,22 @@ public class KazumiPlayerClient {
         // 客户端配置
         modContainer.registerConfig(ModConfig.Type.CLIENT, ClientConfig.SPEC);
 
+        // WaterMedia 的 FFmpeg 网络缓存默认"单文件上限 10MB"，超过即 cache bypass；
+        // 实测 bypass 路径下大文件（B 站 720P 长视频约 116MB、DASH m4s 约 49MB）会卡在缓冲无法起播，
+        // 而分片型小文件（直播 m3u8 分片）正常。此处提高上限让其走磁盘缓存路径
+        // （NetworkCache 为磁盘缓存：cacheDir + CachedFile + DISK 模式 + TTL 清理，不占内存）。
+        try {
+            int target = 512 * 1024 * 1024;
+            if (org.watermedia.WaterMediaConfig.media.ffmpeg.cacheMaxSize < target) {
+                org.watermedia.WaterMediaConfig.media.ffmpeg.cacheMaxSize = target;
+                KazumiLog.playback.info("WaterMedia ffmpeg cache limit raised to {} MB",
+                    target / (1024 * 1024));
+            }
+        } catch (Throwable t) {
+            KazumiLog.playback.warn("Raise WaterMedia cache limit failed: {}",
+                String.valueOf(t.getMessage()));
+        }
+
         // Cloth Config 可选：装了才提供配置界面（mods.toml 中声明为 optional 依赖）
         if (ModList.get().isLoaded("cloth_config")) {
             IConfigScreenFactory configScreenFactory = (container, parent) -> KazumiConfigScreen.create(parent);
