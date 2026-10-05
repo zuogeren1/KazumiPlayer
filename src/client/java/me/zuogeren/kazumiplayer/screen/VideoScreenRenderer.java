@@ -110,6 +110,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         state.skinBlock = be.getSkinBlock();
         state.episodeUrl = be.getEpisodeUrl();
         state.resolveStates = be.getResolveStates();
+        state.watchingPlayers = be.getWatchingPlayers();
         // 方块模型：统一走 ItemModelResolver（支持资源包替换纹理）
         String skin = be.getSkinBlock();
         if (!skin.isEmpty()) {
@@ -141,6 +142,10 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         // 方块皮肤渲染
         drawSkin(collector, poseStack, state);
 
+        // 等待提示仅对本端参与的屏幕显示：本端不是观看者（未加入/已离开该屏）时不显示任何提示
+        boolean localWatching = me.zuogeren.kazumiplayer.client.ResolveHint
+            .isLocalWatchingPlayers(state.watchingPlayers);
+
         // 屏幕半宽高 (单位: 方块, 1.0 = 1 block)
         float halfW = state.screenWidth / 2.0f;
         float halfH = state.screenHeight / 2.0f;
@@ -164,7 +169,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
                     (pose, buffer) -> fillBar(buffer, pose, -fw, fw, -fh, fh, 0.49f, COLOR_IDLE_FRAME));
             }
             // 观察者视角等待提示：屏幕已绑定播放但本端无播放器——居中显示组内解析进度
-            if (!state.episodeUrl.isEmpty()) {
+            if (!state.episodeUrl.isEmpty() && localWatching) {
                 drawWaitingHint(collector, poseStack, halfW, halfH, state.resolveStates);
             }
             poseStack.popPose();
@@ -184,9 +189,9 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
             tex.fillPlaceholder(COLOR_LOADING);
         }
 
-        // 起播等待文字提示：屏幕已绑定播放但本端尚未取得任何真实帧（解析/加载期）——
+        // 起播等待文字提示：屏幕已绑定播放、本端为观看者且尚未取得任何真实帧（解析/加载期）——
         // 居中显示组内解析进度（ResolveStates NBT 聚合），出画后自动消失
-        if (!state.episodeUrl.isEmpty() && !tex.hasValidFrame()) {
+        if (!state.episodeUrl.isEmpty() && localWatching && !tex.hasValidFrame()) {
             drawWaitingHint(collector, poseStack, halfW, halfH, state.resolveStates);
         }
 
@@ -331,8 +336,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     }
 
     /**
-     * 等待提示文字：屏幕面居中单行——组内解析进度聚合（ResolveHint），无人上报时兜底
-     * 「正在解析视频源…」。行高按屏幕面高度固定占比，超宽文案按宽度收缩不溢出屏幕面。
+     * 等待提示文字：屏幕面居中单行——组内解析进度聚合（ResolveHint），本端参与该屏且无人上报时
+     * 兜底「正在解析视频源…」。行高按屏幕面高度固定占比，超宽文案按宽度收缩不溢出屏幕面。
      * 坐标系处理与弹幕层一致：scale 后 Z180 真旋转对消视频面的 XY 双反坐标系。
      */
     private static void drawWaitingHint(SubmitNodeCollector collector, PoseStack poseStack,

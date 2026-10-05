@@ -78,7 +78,7 @@
   "kazumiplayer.config.danmaku_bili_live": "自动连接直播间弹幕",
   "kazumiplayer.config.danmaku_room_chat": "显示房间互发弹幕",
   "kazumiplayer.config.danmaku_density": "弹幕密度（同屏上限）",
-  "kazumiplayer.config.danmaku_density_tooltip": "正常=60 / 较多=100 / 重叠=200 条；房间互发与直播弹幕不受此上限约束，始终优先上屏",
+  "kazumiplayer.config.danmaku_density_tooltip": "正常=60 / 较多=100 / 重叠=不设上限；房间互发与直播弹幕不受此上限约束，始终优先上屏",
   "kazumiplayer.config.danmaku_show_scroll": "显示滚动弹幕",
   "kazumiplayer.config.danmaku_show_top": "显示顶部固定弹幕",
   "kazumiplayer.config.danmaku_show_bottom": "显示底部固定弹幕",

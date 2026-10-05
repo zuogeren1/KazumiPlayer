@@ -264,7 +264,7 @@ public final class PlaybackController {
 
     /**
      * 整屏停止的唯一权威实现（自动播完/GUI 停止屏幕/命令 screen stop/队列耗尽共用）：
-     * 保存实时位置 → 清 NBT（含 WatchingPlayers，防止残留陈旧观看者）→ 删组
+     * 保存实时位置 → 清 NBT（含 WatchingPlayers 与解析状态，防止残留陈旧观看者）→ 删组
      * → 向全部在线观看者发 PlayStopPacket（含发起者自身，保证其客户端同步停播）
      * → 向除发起者外的观看者发通知。
      *
@@ -281,6 +281,7 @@ public final class PlaybackController {
         List<UUID> watchers = g != null ? List.copyOf(g.players) : List.of();
 
         screen.clearPlayback();
+        screen.clearResolveStates(); // 解析状态只在播放会话内有意义：与 clearPlayback 的清零点保持同一契约（幂等）
         screen.setWatchingPlayers("");
         SyncGroupManager.get().leaveByScreenId(sid);
 

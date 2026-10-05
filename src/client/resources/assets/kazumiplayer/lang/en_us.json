@@ -78,7 +78,7 @@
   "kazumiplayer.config.danmaku_bili_live": "Auto-connect live room danmaku",
   "kazumiplayer.config.danmaku_room_chat": "Show in-room player danmaku",
   "kazumiplayer.config.danmaku_density": "Danmaku density (on-screen cap)",
-  "kazumiplayer.config.danmaku_density_tooltip": "NORMAL=60 / MORE=100 / OVERLAP=200; in-room and live danmaku ignore this cap and always take priority",
+  "kazumiplayer.config.danmaku_density_tooltip": "NORMAL=60 / MORE=100 / OVERLAP=unlimited; in-room and live danmaku ignore this cap and always take priority",
   "kazumiplayer.config.danmaku_show_scroll": "Show scrolling danmaku",
   "kazumiplayer.config.danmaku_show_top": "Show top-fixed danmaku",
   "kazumiplayer.config.danmaku_show_bottom": "Show bottom-fixed danmaku",

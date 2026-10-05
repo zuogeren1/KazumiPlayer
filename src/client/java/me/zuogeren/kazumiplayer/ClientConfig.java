@@ -98,12 +98,12 @@ public class ClientConfig {
         OVERLAP
     }
 
-    /** 当前密度档位对应的单屏同屏上限（社交来源弹幕不受此上限约束） */
+    /** 当前密度档位对应的单屏同屏上限（社交来源弹幕不受此上限约束；OVERLAP=不设上限） */
     public int danmakuScreenCap() {
         return switch (danmakuDensity.get()) {
             case NORMAL -> 60;
             case MORE -> 100;
-            case OVERLAP -> 200;
+            case OVERLAP -> Integer.MAX_VALUE;
         };
     }
 
@@ -184,7 +184,7 @@ public class ClientConfig {
                 .define("danmakuShowAdvanced", false);
 
         danmakuDensity = builder
-                .comment("弹幕密度：决定单屏同屏最大条数（NORMAL=60 / MORE=100 / OVERLAP=200）",
+                .comment("弹幕密度：决定单屏同屏最大条数（NORMAL=60 / MORE=100 / OVERLAP=不设上限）",
                          "房间互发与直播弹幕不受此上限约束，始终优先上屏")
                 .defineEnum("danmakuDensity", DanmakuDensity.NORMAL);
 

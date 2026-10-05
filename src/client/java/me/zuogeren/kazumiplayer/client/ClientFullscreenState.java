@@ -252,7 +252,8 @@ public class ClientFullscreenState {
                 hasValidFrame ? currentVideoTimeMs(player) : 0);
         } else {
             g.fill(ax, ay, ax + areaW, ay + areaH, 0xC8101010);
-            // 本端无信号但屏幕在播且有人上报解析状态：改显组内等待进度
+            // 本端为观看者但无信号、且有人上报解析状态：改显组内等待进度；
+            // 本端未参与该屏（未加入/已离开）时 of() 返回 null，回落「无信号」
             var waitBe = mc.level != null && mc.level.getBlockEntity(screenPos)
                 instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vs ? vs : null;
             var waiting = me.zuogeren.kazumiplayer.client.ResolveHint.of(waitBe);

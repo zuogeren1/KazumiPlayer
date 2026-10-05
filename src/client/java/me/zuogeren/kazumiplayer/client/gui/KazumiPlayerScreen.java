@@ -538,7 +538,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                         "kazumiplayer.gui.main.fail_banner"), x + areaW / 2, y + areaH / 2 - 4, 0xFFFF8888);
                 return;
             }
-            // 本端未观看（无信号）但屏幕在播且有人上报解析状态：改显组内等待进度
+            // 本端为观看者但尚无有效帧、且有人上报解析状态：改显组内等待进度；
+            // 本端未参与该屏（未加入/已离开）时 of() 返回 null，回落「无信号」
             var waiting = me.zuogeren.kazumiplayer.client.ResolveHint.of(this.boundScreen());
             if (waiting != null) {
                 graphics.centeredText(this.font,
