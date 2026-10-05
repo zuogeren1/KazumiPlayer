@@ -100,7 +100,12 @@ public final class VideoSourceResolver {
         }
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         if (!BilibiliUrls.isShortLink(episodeUrl)) {
-            startWhenValid(screen, session, player, episodeUrl);
+            // 同步起播（与直链分支同路径）：不可走 startWhenValid——它的会话校验读 session.player，
+            // 而调度器要在 beginPlayback 返回之后才登记本实例，Minecraft.execute 在渲染线程同线程重入，
+            // 校验必然先于登记执行并把整个起播丢弃（表现为永久停在"解析中"）
+            player.play(episodeUrl);
+            screen.setVideoState(VideoState.PLAYING);
+            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
             return;
         }
         KazumiLog.sniff.info("[source] expanding bilibili short link: {}", episodeUrl);
@@ -229,7 +234,10 @@ public final class VideoSourceResolver {
     }
 
     /**
-     * 异步解析完成的受守卫起播。解析期间以下任一情况发生即丢弃结果并回收播放器，
+     * 异步解析完成的受守卫起播。调用前提：解析回调晚于调用方登记 player（仅嗅探回调与短链展开
+     * 满足）——同步起播路径禁止调用：彼时 session.player 尚未赋值，而 Minecraft.execute 在渲染
+     * 线程同线程重入执行，校验会先于登记发生并把结果误判为陈旧。
+     * 解析期间以下任一情况发生即丢弃结果并回收播放器，
      * 否则会产生无人引用的孤儿播放器（音频持续外漏，只能重启游戏才能停掉）：
      * <ul>
      *   <li>已离开世界（level==null，退主菜单场景）</li>
