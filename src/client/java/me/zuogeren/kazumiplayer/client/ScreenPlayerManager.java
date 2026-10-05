@@ -49,10 +49,20 @@ public final class ScreenPlayerManager {
         /** 本集是否已触发下一集预解析（每次新起播复位） */
         public boolean nextPrefetched;
         /**
-         * 本端重启播放请求（如 B 站清晰度切换）：调度器停止旧播放器并重新解析起播，
-         * 起播后按 {@link #resumePositionMs} 续播。仅本端生效，不影响其他观看者。
+         * 本端重启播放请求：调度器停止旧播放器并重新解析起播，起播后按 {@link #resumePositionMs} 续播。
+         * 用于"预热失败后的兜底"，常规清晰度切换走下面的无缝交接路径（不退到重启）。
          */
         public boolean restartRequested;
+        /**
+         * 清晰度无缝切换的后台预热播放器：旧播放器继续出画，新档位在后台加载并预置到
+         * {@link #pendingResumeMs}；调度器检测到它出画后与 {@link #player} 交接（那一帧画面才切换）。
+         */
+        public WaterMediaPlayer pendingPlayer;
+        public long pendingResumeMs;
+        public long pendingStartedAt;
+        public int pendingQualityQn;
+        /** 预热播放器是否已按"旧画面当前位置"定位过（加载完成后由调度器执行一次，此后不再 seek） */
+        public boolean pendingSeeked;
         /** 重启后要恢复的播放位置（毫秒，0 表示不续播，回落同步位置） */
         public long resumePositionMs;
 
@@ -100,7 +110,12 @@ public final class ScreenPlayerManager {
 
     public static void remove(BlockPos pos) {
         ScreenPlayer sp = players.remove(pos);
-        if (sp != null && sp.player != null) {
+        if (sp == null) return;
+        if (sp.pendingPlayer != null) {
+            sp.pendingPlayer.stop();
+            sp.pendingPlayer = null;
+        }
+        if (sp.player != null) {
             sp.player.stop();
             sp.player = null;
         }
@@ -109,6 +124,10 @@ public final class ScreenPlayerManager {
     /** 停止所有屏幕的播放并清空注册表（断线/离开世界时调用） */
     public static void stopAll() {
         for (ScreenPlayer sp : players.values()) {
+            if (sp.pendingPlayer != null) {
+                sp.pendingPlayer.stop();
+                sp.pendingPlayer = null;
+            }
             if (sp.player != null) {
                 sp.player.stop();
                 sp.player = null;

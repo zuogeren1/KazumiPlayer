@@ -22,6 +22,9 @@ import java.util.List;
  * 段间存在刻意的顺序约定（详见 tickVideoScreen 内各段注释），修改前先推演时序。
  */
 public class ClientPlaybackScheduler {
+
+    /** 清晰度无缝切换的预热超时：超时未出画则丢弃预热播放器并退到停旧重播 */
+    private static final long PREWARM_SWITCH_TIMEOUT_MS = 15_000L;
     // ---- 调度节奏常量 ----
     private static final int TICKS_PER_SECOND = 20;                 // 播放调度每秒一轮
     private static final long PLAYBACK_START_COOLDOWN_MS = 3000;    // 开播冷却，防同步风暴期反复起播
@@ -128,7 +131,42 @@ public class ClientPlaybackScheduler {
             sp.player = null;
             sp.everPlayed = false;
         }
-        // 本端重启请求（B 站清晰度切换等）：停旧播放器并复位，使下面的新播放分支按新档位重新解析
+        // 清晰度无缝切换：后台预热播放器出画后才交接——旧画面一直播到这一帧，切换过程不黑屏
+        if (sp.pendingPlayer != null) {
+            var pendingPlayer = sp.pendingPlayer;
+            // 定位：加载完成（开始播放）后按已流逝时间追平旧画面——旧播放器在预热期间一直在前进，
+            // 若只 seek 到切换瞬间的位置，交接后会倒退数秒。seek 开销落在后台播放器上，画面不受影响
+            if (!sp.pendingSeeked && pendingPlayer.isPlaying()) {
+                long target = sp.pendingResumeMs + (System.currentTimeMillis() - sp.pendingStartedAt);
+                if (sp.pendingResumeMs > 0) {
+                    pendingPlayer.seek(target);
+                    KazumiLog.playback.info("Prewarm player aligned to {}ms at {}", target, screen.getBlockPos());
+                }
+                sp.pendingSeeked = true;
+            }
+            boolean ready = sp.pendingSeeked && pendingPlayer.isPlaying() && pendingPlayer.getTextureId() != 0
+                && pendingPlayer.getWidth() > 0;
+            if (ready) {
+                var old = sp.player;
+                sp.player = pendingPlayer;
+                sp.pendingPlayer = null;
+                if (old != null) old.stop();
+                // 交接后按本屏音量/暂停态对齐（其余瞬态字段沿用，URL 未变）
+                sp.player.applyVolumeFromOptions(sp.muted ? 0f : sp.volumeScale);
+                if (screen.isPlaybackPaused()) sp.player.pause();
+                KazumiLog.playback.info("Seamless quality switch completed at {} (qn={})",
+                    screen.getBlockPos(), sp.pendingQualityQn);
+            } else if (System.currentTimeMillis() - sp.pendingStartedAt > PREWARM_SWITCH_TIMEOUT_MS) {
+                // 预热迟迟不出画：丢弃它并退到"停旧重播"的兜底路径
+                pendingPlayer.stop();
+                sp.pendingPlayer = null;
+                KazumiLog.playback.warn("Prewarm player timed out at {}, falling back to restart",
+                    screen.getBlockPos());
+                sp.resumePositionMs = sp.pendingResumeMs;
+                sp.restartRequested = true;
+            }
+        }
+        // 本端重启请求（预热兜底路径）：停旧播放器并复位，使下面的新播放分支按新档位重新解析
         if (sp.restartRequested) {
             sp.restartRequested = false;
             if (sp.player != null) {
@@ -236,6 +274,11 @@ public class ClientPlaybackScheduler {
         if (!url.isEmpty() && !url.equals(sp.lastEpisodeUrl)) {
             me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance()
                     .cancelResolve(screen.getBlockPos());
+            // 换片时预热播放器同样作废（它加载的是上一集的档位）
+            if (sp.pendingPlayer != null) {
+                sp.pendingPlayer.stop();
+                sp.pendingPlayer = null;
+            }
             if (sp.player != null) {
                 sp.player.stop();
                 sp.player = null;

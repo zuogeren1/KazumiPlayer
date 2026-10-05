@@ -28,6 +28,8 @@ public class WaterMediaPlayer {
      * 自行放弃——否则会产生无人引用的孤儿播放器（音频持续外泄且无法停止）。
      */
     private volatile boolean closed;
+    /** 预热期静音标志：为 true 时起播后置 0 音量（清晰度无缝切换的后台播放器，交接时由调度器恢复） */
+    private volatile boolean silentStart;
     /** 播放失败回调（MRL 确定失败/加载超时/播放器创建失败）：队列容错自动跳过的信号源 */
     private volatile Runnable playFailureListener;
     private final java.util.concurrent.atomic.AtomicBoolean failureFired =
@@ -65,7 +67,16 @@ public class WaterMediaPlayer {
     }
 
     public void play(String videoUrl) {
+        play(videoUrl, false);
+    }
+
+    /**
+     * @param silent 预热期静音：加载完成即置 0 音量——清晰度无缝切换时新旧播放器会短暂共存，
+     *               新播放器必须静音加载，交接完成后由调度器恢复正常音量
+     */
+    public void play(String videoUrl, boolean silent) {
         closed = false;
+        this.silentStart = silent;
         String url = normalizeUrl(videoUrl);
         KazumiLog.playback.debug("WaterMedia.play() called url={}", url);
         Minecraft mc = Minecraft.getInstance();
@@ -117,7 +128,11 @@ public class WaterMediaPlayer {
                 return;
             }
             player.start();
-            applyVolumeFromOptions();
+            if (silentStart) {
+                player.volume(0); // 预热期静音：不得与仍在出画的旧播放器同时出声
+            } else {
+                applyVolumeFromOptions();
+            }
             // 播放器初始化可能抢走窗口焦点（如引擎/上下文创建），恢复鼠标捕获
             ClientDisconnectHandler.forceRestoreMouseGrab(Minecraft.getInstance());
             // seek 交给外部 tick 延迟执行（此时 demuxer 尚未就绪）

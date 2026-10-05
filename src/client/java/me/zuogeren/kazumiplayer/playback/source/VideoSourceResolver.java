@@ -106,7 +106,7 @@ public final class VideoSourceResolver {
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         if (!BilibiliUrls.isShortLink(episodeUrl)) {
-            requestServerResolve(screen, episodeUrl, player, session);
+            requestServerResolve(screen, episodeUrl, player, session, false, 0);
             return;
         }
         KazumiLog.sniff.info("[source] expanding bilibili short link: {}", episodeUrl);
@@ -116,7 +116,7 @@ public final class VideoSourceResolver {
                 // 展开回调晚于调度器登记，可继续走解析流程
                 Minecraft.getInstance().execute(() -> {
                     if (session.player != player || screen.isRemoved()) return;
-                    requestServerResolve(screen, finalUrl, player, session);
+                    requestServerResolve(screen, finalUrl, player, session, false, 0);
                 });
             })
             .exceptionally(t -> {
@@ -125,10 +125,14 @@ public final class VideoSourceResolver {
             });
     }
 
-    /** 在途的服务端解析请求（每屏唯一：新请求顶替旧请求，迟到结果按 requestId 丢弃） */
+    /**
+     * 在途的服务端解析请求（每屏唯一：新请求顶替旧请求，迟到结果按 requestId 丢弃）。
+     * prewarm=true 表示这是"清晰度无缝切换"：解析完成后把新档位装进后台预热播放器，
+     * 由调度器在它出画那一帧与旧播放器交接（旧画面全程不停）。
+     */
     private record PendingResolve(long requestId, String pageUrl, VideoScreenBlockEntity screen,
                                   WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session,
-                                  boolean live) {}
+                                  boolean live, boolean prewarm, long resumeMs) {}
 
     private final java.util.Map<String, PendingResolve> pendingResolves = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong resolveSeq = new java.util.concurrent.atomic.AtomicLong();
@@ -142,9 +146,31 @@ public final class VideoSourceResolver {
             return t;
         });
 
+    /**
+     * 清晰度无缝切换入口（GUI 调用）：不打断当前画面，先按新档位重新解析，再把结果装进
+     * 后台预热播放器，等它出画后由调度器与旧播放器交接。
+     *
+     * @param resumeMs 交接后新播放器的目标位置（直播传 0：无稳定时间轴，重新拉流即可）
+     */
+    public void beginQualitySwitch(VideoScreenBlockEntity screen, int qn, long resumeMs) {
+        if (screen == null || screen.isRemoved()) return;
+        String pageUrl = screen.getEpisodeUrl();
+        if (pageUrl.isEmpty()) return;
+        net.minecraft.core.BlockPos pos = screen.getBlockPos();
+        ScreenPlayerManager.ScreenPlayer session = ScreenPlayerManager.get(pos);
+        // 已有预热中的播放器：丢弃重来（用户可能连点了几档）
+        if (session.pendingPlayer != null) {
+            session.pendingPlayer.stop();
+            session.pendingPlayer = null;
+        }
+        BilibiliQualityPrefs.setPreferredQn(pos, qn);
+        requestServerResolve(screen, pageUrl, session.player, session, true, Math.max(0, resumeMs));
+    }
+
     /** 发起服务端代理解析；直播链接在此置 bypassSync（早于起播生效） */
     private void requestServerResolve(VideoScreenBlockEntity screen, String pageUrl,
-            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
+            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session,
+            boolean prewarm, long resumeMs) {
         net.minecraft.core.BlockPos pos = screen.getBlockPos();
         boolean live = BilibiliApi.liveRoomId(pageUrl) > 0;
         if (live) {
@@ -153,13 +179,19 @@ public final class VideoSourceResolver {
         }
         int qn = BilibiliQualityPrefs.preferredQn(pos);
         long requestId = resolveSeq.incrementAndGet();
-        PendingResolve pending = new PendingResolve(requestId, pageUrl, screen, player, session, live);
+        PendingResolve pending = new PendingResolve(requestId, pageUrl, screen, player, session, live,
+            prewarm, resumeMs);
         pendingResolves.put(pos.toString(), pending);
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.getConnection() == null) {
             pendingResolves.remove(pos.toString());
-            failPlayback(screen, new IllegalStateException("未连接服务端"));
+            if (prewarm) {
+                // 无缝切换不报错打断画面：直接转本端回落解析
+                fallbackLocalResolve(pending, "未连接服务端");
+            } else {
+                failPlayback(screen, new IllegalStateException("未连接服务端"));
+            }
             return;
         }
         mc.getConnection().send(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
@@ -229,8 +261,38 @@ public final class VideoSourceResolver {
                     "kazumiplayer.msg.bili_quality_fallback", want, got).getString()));
             KazumiLog.sniff.warn("[source] requested quality {} not granted, got {} ({})", requested, currentQn, origin);
         }
+        if (pending.prewarm()) {
+            installPrewarmPlayer(pending, url);
+            return;
+        }
         KazumiLog.sniff.info("[source] bilibili stream resolved via {} (qn={}): {}", origin, currentQn, url);
         startWhenValid(pending.screen(), pending.session(), pending.player(), url);
+    }
+
+    /**
+     * 把解析结果装进后台预热播放器：旧播放器继续在屏上播，新播放器静默加载并预置到目标位置，
+     * 出画后由调度器完成交接（见 ClientPlaybackScheduler 的 pending 交接段）。
+     * 这段时间同时存在两个 FFmpeg 解码实例，属可控的短暂峰值（仅在清晰度切换时发生）。
+     */
+    private void installPrewarmPlayer(PendingResolve pending, String url) {
+        Minecraft.getInstance().execute(() -> {
+            if (Minecraft.getInstance().level == null || pending.screen().isRemoved()) return;
+            ScreenPlayerManager.ScreenPlayer session = pending.session();
+            if (session.pendingPlayer != null) {
+                session.pendingPlayer.stop(); // 连续切换：丢弃上一个预热播放器
+            }
+            WaterMediaPlayer fresh = new WaterMediaPlayer();
+            session.pendingPlayer = fresh;
+            session.pendingResumeMs = pending.resumeMs();
+            session.pendingStartedAt = System.currentTimeMillis();
+            session.pendingQualityQn = BilibiliQualityPrefs.preferredQn(pending.screen().getBlockPos());
+            session.pendingSeeked = false;
+            fresh.play(url, true); // 静默加载：新旧播放器短暂共存，交接后由调度器恢复音量
+            // 定位不在这里做：旧画面在加载期间仍在前进，等加载完成再按已流逝时间追平（见调度器的定位段），
+            // 这样 seek 的缓冲开销落在"尚未上屏"的后台播放器上，用户看不到画面中断
+            KazumiLog.sniff.info("[source] prewarm player loading for seamless quality switch (resume={}ms)",
+                pending.resumeMs());
+        });
     }
 
     /** 档位表里查名字；查不到回落到编号 */

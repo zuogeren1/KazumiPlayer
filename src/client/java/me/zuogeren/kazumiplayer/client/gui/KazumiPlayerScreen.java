@@ -1005,9 +1005,9 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         boolean live = bound != null
             && me.zuogeren.kazumiplayer.util.BilibiliUrls.isLiveRoom(bound.getEpisodeUrl());
         long keepMs = (!live && sp.player != null) ? Math.max(0, sp.player.getTimeMs()) : 0;
-        me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.setPreferredQn(this.screenPos, quality.qn());
-        sp.resumePositionMs = keepMs;
-        sp.restartRequested = true;
+        // 无缝切换：旧画面继续播，新档位在后台解析 + 预热，出画后由调度器交接（切换过程不黑屏）
+        me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.getInstance()
+            .beginQualitySwitch(bound, quality.qn(), keepMs);
         setStatus(Component.translatable("kazumiplayer.gui.main.status_quality_switched", quality.label()));
     }
 
