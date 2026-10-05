@@ -37,6 +37,10 @@ public final class BilibiliApi {
     private static final String PLAYURL_API = "https://api.bilibili.com/x/player/wbi/playurl";
     private static final String LIVE_PLAY_INFO_API =
             "https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo";
+    private static final String LIVE_ROOM_INFO_API =
+            "https://api.live.bilibili.com/room/v1/Room/get_info";
+    private static final String LIVE_ANCHOR_API =
+            "https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room";
     private static final String REFERER = "https://www.bilibili.com";
     private static final String LIVE_REFERER = "https://live.bilibili.com";
 
@@ -77,6 +81,58 @@ public final class BilibiliApi {
 
     /** 解析结果：可播放地址（mp4 直链或直播 m3u8）+ 可用档位 + 实际档位 */
     public record Stream(String url, List<Quality> qualities, int currentQn) {}
+
+    /** 页面元数据（队列显示用）：live 区分直播/视频，author 为 UP主或主播名 */
+    public record Meta(boolean live, String author, String title) {}
+
+    /**
+     * 取页面元数据：视频 = UP主 + 标题（view 接口）；直播 = 主播名 + 直播间标题
+     * （房间信息与主播信息分属两个接口，故并发请求后合并）。失败以异常收尾。
+     */
+    public static CompletableFuture<Meta> fetchMeta(String pageUrl, String cookie) {
+        long roomId = liveRoomId(pageUrl);
+        if (roomId > 0) {
+            var roomFuture = HttpUtil.fetch(LIVE_ROOM_INFO_API + "?room_id=" + roomId, "GET",
+                apiHeaders(LIVE_REFERER, cookie), Map.of());
+            var anchorFuture = HttpUtil.fetch(LIVE_ANCHOR_API + "?roomid=" + roomId, "GET",
+                apiHeaders(LIVE_REFERER, cookie), Map.of());
+            return roomFuture.thenCombine(anchorFuture, (roomBody, anchorBody) -> {
+                JsonObject room = dataOf(roomBody, "直播间信息");
+                String title = room.has("title") ? room.get("title").getAsString() : "";
+                String author = "";
+                try {
+                    JsonObject info = dataOf(anchorBody, "主播信息").getAsJsonObject("info");
+                    if (info != null && info.has("uname")) author = info.get("uname").getAsString();
+                } catch (Exception ignored) {
+                    // 主播信息拿不到不影响标题展示
+                }
+                return new Meta(true, author, title);
+            });
+        }
+
+        String bvid = null;
+        String aid = null;
+        Matcher bv = BV_PATTERN.matcher(pageUrl);
+        if (bv.find()) {
+            bvid = bv.group(1);
+        } else {
+            Matcher av = AV_PATTERN.matcher(pageUrl);
+            if (av.find()) aid = av.group(1);
+        }
+        if (bvid == null && aid == null) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("链接中未找到 BV/av 号"));
+        }
+        String query = bvid != null ? "bvid=" + bvid : "aid=" + aid;
+        return HttpUtil.fetch(VIEW_API + "?" + query, "GET", apiHeaders(REFERER, cookie), Map.of())
+            .thenApply(body -> {
+                JsonObject data = dataOf(body, "视频信息");
+                String title = data.has("title") ? data.get("title").getAsString() : "";
+                String author = "";
+                JsonObject owner = data.has("owner") ? data.getAsJsonObject("owner") : null;
+                if (owner != null && owner.has("name")) author = owner.get("name").getAsString();
+                return new Meta(false, author, title);
+            });
+    }
 
     /** 视频页是否可解析（BV/av） */
     public static boolean isVideoPage(String url) {

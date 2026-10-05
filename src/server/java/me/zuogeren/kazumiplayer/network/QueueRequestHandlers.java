@@ -26,7 +26,55 @@ import java.util.UUID;
  */
 public final class QueueRequestHandlers {
 
+    /** B 站元数据标签缓存：URL → 「UP主 · 标题」/「主播名 · 直播间标题」 */
+    private static final java.util.Map<String, String> BILI_META_LABELS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    /** 已发起过元数据请求的 URL（失败不重试，避免反复打扰接口） */
+    private static final java.util.Set<String> BILI_META_REQUESTED =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     private QueueRequestHandlers() {}
+
+    /**
+     * 补齐 B 站队列项的显示名：入队时先按 URL 规则生成（BV 号/房间号），
+     * 元数据（UP主/主播 + 标题）异步拿到后写缓存并改写 Road 标签——BE markDirty 自动同步给所有客户端。
+     */
+    private static void enrichBilibiliMeta(VideoScreenBlockEntity screen, List<String> urls) {
+        if (urls == null || urls.isEmpty()) return;
+        String cookie = me.zuogeren.kazumiplayer.ServerConfig.CONFIG.bilibiliCookie.get();
+        for (String url : urls) {
+            if (url == null || !me.zuogeren.kazumiplayer.util.BilibiliUrls.isBilibiliUrl(url)) continue;
+            if (BILI_META_LABELS.containsKey(url) || !BILI_META_REQUESTED.add(url)) continue;
+            me.zuogeren.kazumiplayer.bilibili.BilibiliApi.fetchMeta(url, cookie).thenAccept(meta -> {
+                String label = DirectLinkQueue.metaLabel(meta);
+                if (label == null) return;
+                BILI_META_LABELS.put(url, label);
+                var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+                if (server == null) return;
+                // 元数据在异步线程拿到：回到服务端线程改 BE（markDirty 触发全组同步）
+                server.execute(() -> applyCachedLabels(screen));
+            }).exceptionally(t -> {
+                KazumiLog.network.debug("Bilibili meta fetch failed for {}: {}", url, t.getMessage());
+                return null;
+            });
+        }
+    }
+
+    /** 用缓存里的元数据标签重写队列显示名（move/remove 等重建 Road 的操作后回填） */
+    private static void applyCachedLabels(VideoScreenBlockEntity screen) {
+        List<String> urls = DirectLinkQueue.parseUrls(screen.getEpisodeData());
+        if (urls == null || urls.isEmpty()) return;
+        String json = screen.getEpisodeData();
+        for (String url : urls) {
+            String label = BILI_META_LABELS.get(url);
+            if (label != null) json = DirectLinkQueue.withLabel(json, url, label);
+        }
+        if (!json.equals(screen.getEpisodeData())) {
+            screen.setEpisodeData(json);
+            KazumiLog.network.debug("Queue labels refreshed from metadata cache at {}",
+                screen.getBlockPos().toShortString());
+        }
+    }
 
     /**
      * 提交直链：屏幕空闲则以这些 URL 起播（重置队列），队列播放中则追加到队尾，
@@ -69,6 +117,8 @@ public final class QueueRequestHandlers {
         merged.addAll(fresh);
         // 仅改列表不动播放；episodeIndex 不变（追加只在尾部）
         screen.setEpisodeData(DirectLinkQueue.buildRoadJson(merged));
+        applyCachedLabels(screen);
+        enrichBilibiliMeta(screen, fresh);
         int skipped = urls.size() - fresh.size();
         SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid,
             Component.translatable("kazumiplayer.msg.notify.queue_added", fresh.size(), existing.size() + 1));
@@ -109,6 +159,7 @@ public final class QueueRequestHandlers {
         // 移动点在当前项之前时，删除与插入的偏移恰好抵消，当前项序号保持不变
         reordered.add(cur, url);
         screen.setEpisodeData(DirectLinkQueue.buildRoadJson(reordered));
+        applyCachedLabels(screen);
         String label = labelAt(reordered, Math.min(cur + 1, reordered.size()));
         SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, screen.getScreenId(),
             Component.translatable("kazumiplayer.msg.notify.moved", label));
@@ -134,6 +185,7 @@ public final class QueueRequestHandlers {
             screen.setEpisodeIndex(cur - 1);
         }
         screen.setEpisodeData(DirectLinkQueue.buildRoadJson(remaining));
+        applyCachedLabels(screen);
         SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, screen.getScreenId(),
             Component.translatable("kazumiplayer.msg.notify.removed", label));
         KazumiMessages.sendSuccessKey(sp, "kazumiplayer.msg.removed", label);
@@ -259,6 +311,8 @@ public final class QueueRequestHandlers {
         if (g != null) screen.setWatchingPlayers(g.watchingPlayersString());
         SyncGroupManager.get().broadcastSyncState(sid, sp.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(sp, screenPos, sid, notifyText);
+        applyCachedLabels(screen);
+        enrichBilibiliMeta(screen, urls);
     }
 
     private static GuiPayloads.ErrorPayload checkIndex(List<String> urls, int index) {

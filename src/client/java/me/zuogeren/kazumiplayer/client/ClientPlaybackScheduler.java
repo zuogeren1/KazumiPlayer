@@ -23,6 +23,17 @@ import java.util.List;
  */
 public class ClientPlaybackScheduler {
 
+    /** 档位名：优先查该屏的档位表，查不到回落到编号 */
+    private static String qualityLabelOf(VideoScreenBlockEntity screen, int qn) {
+        var info = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(screen.getBlockPos());
+        if (info != null) {
+            for (var q : info.qualities()) {
+                if (q.qn() == qn) return q.label();
+            }
+        }
+        return String.valueOf(qn);
+    }
+
     /** 清晰度无缝切换的预热超时：超时未出画则丢弃预热播放器并退到停旧重播 */
     private static final long PREWARM_SWITCH_TIMEOUT_MS = 15_000L;
     // ---- 调度节奏常量 ----
@@ -156,6 +167,11 @@ public class ClientPlaybackScheduler {
                 if (screen.isPlaybackPaused()) sp.player.pause();
                 KazumiLog.playback.info("Seamless quality switch completed at {} (qn={})",
                     screen.getBlockPos(), sp.pendingQualityQn);
+                // 切换成功给本玩家一条聊天反馈（发起者才知道切换点与结果）
+                me.zuogeren.kazumiplayer.client.KazumiClientMessages.chatInfo(
+                    net.minecraft.network.chat.Component.translatable(
+                        "kazumiplayer.msg.bili_quality_switched",
+                        qualityLabelOf(screen, sp.pendingQualityQn)).getString());
             } else if (System.currentTimeMillis() - sp.pendingStartedAt > PREWARM_SWITCH_TIMEOUT_MS) {
                 // 预热迟迟不出画：丢弃它并退到"停旧重播"的兜底路径
                 pendingPlayer.stop();

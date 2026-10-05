@@ -68,11 +68,45 @@ public final class DirectLinkQueue {
         } catch (IllegalArgumentException ignored) {}
         name = name.trim();
         if (name.isEmpty()) return "视频" + fallbackIdx;
-        if (name.length() > MAX_LABEL_LEN) {
-            // 按 code point 截断，避免切出孤立代理字符
-            name = name.substring(0, name.offsetByCodePoints(0, name.codePointCount(0, MAX_LABEL_LEN - 1))) + "…";
-        }
-        return name;
+        return truncateLabel(name);
+    }
+
+    /** 标签统一截断：超长按 code point 截断（避免切出孤立代理字符） */
+    public static String truncateLabel(String s) {
+        if (s.length() <= MAX_LABEL_LEN) return s;
+        return s.substring(0, s.offsetByCodePoints(0, s.codePointCount(0, MAX_LABEL_LEN - 1))) + "…";
+    }
+
+    /**
+     * 由 B 站元数据生成队列显示名：「UP主 · 标题」/「主播名 · 直播间标题」；
+     * 作者或标题缺失时退化为单项，皆空返回 null（调用方保留原标签）。
+     */
+    @Nullable
+    public static String metaLabel(me.zuogeren.kazumiplayer.bilibili.BilibiliApi.Meta meta) {
+        if (meta == null) return null;
+        String author = meta.author() == null ? "" : meta.author().trim();
+        String title = meta.title() == null ? "" : meta.title().trim();
+        if (author.isEmpty() && title.isEmpty()) return null;
+        if (author.isEmpty()) return truncateLabel(title);
+        if (title.isEmpty()) return truncateLabel(author);
+        return truncateLabel(author + " · " + title);
+    }
+
+    /**
+     * 按 URL 替换队列项的显示名（B 站元数据异步补充用）。
+     *
+     * @return 新的 Road JSON；非队列数据、URL 不在队列中或标签无变化时原样返回
+     */
+    public static String withLabel(String roadJson, String url, String label) {
+        Road road = parseRoad(roadJson);
+        if (road == null || label == null) return roadJson;
+        List<String> urls = road.data();
+        List<String> labels = road.identifier();
+        int idx = urls.indexOf(url);
+        if (idx < 0 || idx >= labels.size() || label.equals(labels.get(idx))) return roadJson;
+        List<String> updated = new ArrayList<>(labels);
+        updated.set(idx, label);
+        return JsonUtil.GSON.toJson(List.of(new Road(road.name(), List.copyOf(urls), List.copyOf(updated))));
     }
 
     /** B 站视频页 URL 中的 BV/av 号；非视频页返回 null（直播/短链沿用末段路径规则） */
