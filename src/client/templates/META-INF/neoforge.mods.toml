@@ -21,6 +21,11 @@ version = "${mod_version}"
 displayName = "KazumiPlayer Client"
 description = '''KazumiPlayer 客户端附加模块：渲染、播放与 S→C 包处理。'''
 
+# 客户端专用 mixin（文本渲染优化，移植自 ImmediatelyFast）：mixin 类与配置文件只在 client source set，
+# 故只在本（客户端 jar）元数据里注册；服务端 jar 的元数据不含本段，也就不会去找这些文件。
+[[mixins]]
+config = "kazumiplayer.client.mixins.json"
+
 [[dependencies."${mod_id}"]]
 modId = "neoforge"
 type = "required"

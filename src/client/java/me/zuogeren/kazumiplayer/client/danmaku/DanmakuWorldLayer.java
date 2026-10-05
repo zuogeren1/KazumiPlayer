@@ -42,7 +42,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>车道准入是占用感知的：该车道每条在途弹幕的已推进像素须 ≥ max(新条绘制宽, 该条绘制宽) +
  * {@link #MIN_GAP_PX} 才允许新条入轨（按行程比例换算成时间提前量），占位宽度取两者的较大值，
- * 保证更宽的追随弹幕（行程更快）在最坏时刻也不会追上前车。TOP/BOTTOM 槽位同样按驻留时长占位。
+ * 保证更宽的追随弹幕（行程更快）在最坏时刻也不会追上前车。TOP/BOTTOM 固定项的槽位数同样由几何推导
+ * （槽位数 = 车道数，见 {@link LaneGeometry#pinSlots()}）：<b>先占满全部可用行，用尽后才压叠</b>，
+ * 压叠槽位按轮转游标在各槽位间分散（{@link DanmakuPinSlots}），不再固定挑「最接近释放」的同一槽。
  *
  * <p>社交优先：出队后按来源优先级（ROOM_CHAT &gt; BILIBILI_LIVE &gt; BILIBILI_VIDEO）稳定排序再准入；
  * {@code config.danmakuScreenCap()} 容量闸只拦视频片内条目，社交条目不受上限约束（仍计入在屏数）；
@@ -93,8 +95,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class DanmakuWorldLayer {
 
-    /** 固定模式（顶部/底部）各自可用的居中槽位上限（实际槽位数再被车道数收口，不越出显示区） */
-    private static final int PIN_SLOT_COUNT = 3;
     /** 字形行高像素（原版字体 9px）与行距系数：车道高 = 9 × 1.4 × danmakuFontScale */
     private static final float GLYPH_HEIGHT_PX = 9.0f;
     private static final float LINE_HEIGHT_FACTOR = 1.4f;
@@ -185,9 +185,13 @@ public final class DanmakuWorldLayer {
             return laneH / GLYPH_HEIGHT_PX;
         }
 
-        /** 固定槽位数：不超过车道数，保证固定项仍落在显示区内 */
+        /**
+         * 固定槽位数 = 车道数：槽位高即车道高（一行一个固定项），显示带放得下几行就有几个槽位——
+         * 由「显示带高 / 车道高」推导（见 {@link #lanes} 与 {@link DanmakuWorldLayer#bandH(float)}），
+         * 不存在写死的行数上限；用尽后由 {@link DanmakuPinSlots} 轮转分散压叠。
+         */
         int pinSlots() {
-            return Math.min(PIN_SLOT_COUNT, lanes);
+            return lanes;
         }
     }
 
@@ -511,6 +515,9 @@ public final class DanmakuWorldLayer {
     private static long seqCursor;
     /** 滚动车道轮转游标：多条同时可入时用于分散到不同车道 */
     private static int laneCursor;
+    /** 固定槽位分配器（TOP/BOTTOM 各一份轮转游标）：有空槽必占空槽，槽位用尽后在各槽位间轮转分散压叠 */
+    private static final DanmakuPinSlots PIN_TOP = new DanmakuPinSlots();
+    private static final DanmakuPinSlots PIN_BOTTOM = new DanmakuPinSlots();
     private static boolean clearHookInstalled;
 
     private DanmakuWorldLayer() {}
@@ -797,10 +804,10 @@ public final class DanmakuWorldLayer {
         long startMs = clocks.of(entry.source());
         int pinSlots = lanes.pinSlots();
         return switch (mode) {
-            case TOP -> pinAdmit(entry, visual, actives, clocks, DanmakuMode.TOP, seq, startMs,
-                pinSlots, allowOverlap);
-            case BOTTOM -> pinAdmit(entry, visual, actives, clocks, DanmakuMode.BOTTOM, seq, startMs,
-                pinSlots, allowOverlap);
+            case TOP -> pinAdmit(entry, visual, actives, DanmakuMode.TOP, seq, startMs, pinSlots,
+                allowOverlap);
+            case BOTTOM -> pinAdmit(entry, visual, actives, DanmakuMode.BOTTOM, seq, startMs, pinSlots,
+                allowOverlap);
             case SCROLL, REVERSE -> {
                 // 占位宽度按条目实际缩放后的绘制宽度计（与 HUD 侧同判据）
                 LanePick pick = pickLane(actives, mode, visual.textWPx() * visual.scalePercent(), halfWPx,
@@ -815,50 +822,40 @@ public final class DanmakuWorldLayer {
     }
 
     /**
-     * 固定项准入：优先空槽；槽位满时社交条目恒占「最接近释放」的槽位压叠（forced），
-     * 视频片内条目仅在 danmakuAllowOverlap 开启时同样压叠，否则丢弃（口径与滚动车道一致）。
+     * 固定项准入：槽位数 = 车道数（由显示带高与车道高推导，见 {@link LaneGeometry#pinSlots()}）。
+     * 有空槽必占空槽；槽位用尽后社交条目恒压叠、视频片内条目仅在 danmakuAllowOverlap 开启时压叠，
+     * 压叠槽位由 {@link DanmakuPinSlots} 按轮转游标在各槽位间分散（不再固定挑「最接近释放」的同一槽），
+     * 口径与滚动车道一致；无槽可用（槽位数为 0）时丢弃。
      */
     private static Admission pinAdmit(DanmakuEntry entry, Visual visual, List<Active> actives,
-                                      Clocks clocks, DanmakuMode pinMode, long seq, long startMs,
-                                      int pinSlots, boolean allowOverlap) {
-        int slot = firstFreePin(actives, pinMode, pinSlots);
-        boolean forced = false;
-        if (slot < 0) {
-            if (isVideoDanmaku(entry.source()) && !allowOverlap) return Admission.DROPPED;
-            slot = oldestPin(actives, pinMode, clocks, pinSlots);
-            if (slot < 0) return Admission.DROPPED;
-            forced = true;
-        }
-        return new Admission(new Active(entry, visual, startMs, seq, pinMode, 0, slot), null, forced);
+                                      DanmakuMode pinMode, long seq, long startMs, int pinSlots,
+                                      boolean allowOverlap) {
+        boolean[] used = pinUsage(actives, pinMode, pinSlots);
+        DanmakuPinSlots.Pick pick = pinAllocator(pinMode).allocate(used);
+        if (pick.slot() < 0) return Admission.DROPPED;
+        if (pick.forced() && isVideoDanmaku(entry.source()) && !allowOverlap) return Admission.DROPPED;
+        return new Admission(new Active(entry, visual, startMs, seq, pinMode, 0, pick.slot()), null,
+            pick.forced());
     }
 
-    /** 固定槽位占用感知：被在途条目占用的槽位不可复用；返回可用槽位下标，无则 -1 */
-    private static int firstFreePin(List<Active> actives, DanmakuMode mode, int pinSlots) {
+    /**
+     * 固定槽位占用情况（长度 = 本帧槽位数）：被在途条目占用的槽位不可复用；
+     * 越界车道号（几何缩水后尚未收口）不计入占用，与 {@link #clampLane} 同口径。
+     */
+    private static boolean[] pinUsage(List<Active> actives, DanmakuMode mode, int pinSlots) {
         boolean[] used = new boolean[pinSlots];
-        for (Active active : actives) {
-            if (active.mode() == mode && active.lane() < pinSlots) {
+        for (int i = 0; i < actives.size(); i++) {
+            Active active = actives.get(i);
+            if (active.mode() == mode && active.lane() >= 0 && active.lane() < pinSlots) {
                 used[active.lane()] = true;
             }
         }
-        for (int i = 0; i < pinSlots; i++) {
-            if (!used[i]) return i;
-        }
-        return -1;
+        return used;
     }
 
-    /** 「最接近释放」的固定槽位：占用者中按各自时钟已驻留最久者；无占用返回 -1 */
-    private static int oldestPin(List<Active> actives, DanmakuMode mode, Clocks clocks, int pinSlots) {
-        int slot = -1;
-        long bestElapsed = Long.MIN_VALUE;
-        for (Active active : actives) {
-            if (active.mode() != mode || active.lane() >= pinSlots) continue;
-            long elapsed = clocks.of(active.entry().source()) - active.startMs();
-            if (elapsed > bestElapsed) {
-                bestElapsed = elapsed;
-                slot = active.lane();
-            }
-        }
-        return slot;
+    /** 固定槽位分配器（TOP/BOTTOM 各一份游标；两层各持自己的实例，故同输入逐帧同输出） */
+    private static DanmakuPinSlots pinAllocator(DanmakuMode mode) {
+        return mode == DanmakuMode.TOP ? PIN_TOP : PIN_BOTTOM;
     }
 
     /**
@@ -1016,6 +1013,8 @@ public final class DanmakuWorldLayer {
         LAST_VIDEO_TIME.clear();
         ANOMALY.clear();
         LAST_LANES.clear();
+        PIN_TOP.reset();
+        PIN_BOTTOM.reset();
     }
 
     /** 安装 Store 清屏回调（懒注册一次）：换集/停止时立即释放该屏在途弹幕与场景态基线 */

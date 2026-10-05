@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "me.zuogeren.kazumiplayer.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "MixinFontGlyphVisitor",
+    "MixinFontTexture",
+    "MixinRenderTypes"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

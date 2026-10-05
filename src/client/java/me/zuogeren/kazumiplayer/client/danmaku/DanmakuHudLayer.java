@@ -34,8 +34,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 不受暂停影响。行程进度、驻留时长与车道让位判据的推进量都取该条自身的时钟。
  *
  * <p>布局按带组织，三条带几何互不影响：滚动带（SCROLL 右进左出 / REVERSE 左进右出，互为镜像）
- * 起点恒为显示区顶部并按车道轮转；TOP 带自顶部向下、BOTTOM 带自底部向上，各至多三槽（再被车道数收口）
- * 居中驻留 {@link #PIN_HOLD_MS}（不受 speedMultiplier 影响）。带间重叠时固定项压在滚动项之上（B 站语义）。
+ * 起点恒为显示区顶部并按车道轮转；TOP 带自顶部向下、BOTTOM 带自底部向上，槽位数 = 车道数
+ * （由显示带高与车道高推导，见 {@link DanmakuWorldLayer.LaneGeometry#pinSlots()}，不写死行数），
+ * <b>先占满全部可用行、用尽后才压叠</b>，压叠槽位按轮转游标分散（{@link DanmakuPinSlots}）；
+ * 固定项居中驻留 {@link #PIN_HOLD_MS}（不受 speedMultiplier 影响）。带间重叠时固定项压在滚动项之上（B 站语义）。
  *
  * <p>车道准入是占用感知的：同车道每条在途弹幕的已推进像素须 ≥ max(新条绘制宽, 该条绘制宽) +
  * {@link #MIN_GAP_PX} 才允许新条入轨；占位宽度取两者的较大值，保证更宽的追随弹幕（行程更快）
@@ -201,6 +203,9 @@ public final class DanmakuHudLayer {
     private static final Map<BlockPos, Integer> LAST_LANES = new ConcurrentHashMap<>();
     /** 滚动车道轮转游标：多条同时可入时用于分散到不同车道 */
     private static int laneCursor;
+    /** 固定槽位分配器（TOP/BOTTOM 各一份轮转游标）：有空槽必占空槽，槽位用尽后在各槽位间轮转分散压叠 */
+    private static final DanmakuPinSlots PIN_TOP = new DanmakuPinSlots();
+    private static final DanmakuPinSlots PIN_BOTTOM = new DanmakuPinSlots();
     private static boolean clearHookInstalled;
 
     private DanmakuHudLayer() {}
@@ -463,9 +468,11 @@ public final class DanmakuHudLayer {
                                    List<Active> actives, Clocks clocks, long travelMs, int pw,
                                    LaneGeometry lanes, boolean allowOverlap) {
         int pinSlots = lanes.pinSlots();
+        long startMs = clocks.of(entry.source());
         return switch (mode) {
-            case TOP -> pinAdmit(entry, visual, actives, clocks, DanmakuMode.TOP, pinSlots, allowOverlap);
-            case BOTTOM -> pinAdmit(entry, visual, actives, clocks, DanmakuMode.BOTTOM, pinSlots,
+            case TOP -> pinAdmit(entry, visual, actives, DanmakuMode.TOP, startMs, pinSlots,
+                allowOverlap);
+            case BOTTOM -> pinAdmit(entry, visual, actives, DanmakuMode.BOTTOM, startMs, pinSlots,
                 allowOverlap);
             case ADVANCED -> Admission.DROPPED;
             case SCROLL, REVERSE -> {
@@ -480,22 +487,20 @@ public final class DanmakuHudLayer {
     }
 
     /**
-     * 固定项准入：优先空槽；槽位满时社交条目恒占「最接近释放」的槽位压叠（forced），
-     * 视频片内条目仅在 danmakuAllowOverlap 开启时同样压叠，否则丢弃（口径与滚动车道一致）。
+     * 固定项准入：槽位数 = 车道数（由显示带高与车道高推导，见 {@link DanmakuWorldLayer.LaneGeometry#pinSlots()}）。
+     * 有空槽必占空槽；槽位用尽后社交条目恒压叠、视频片内条目仅在 danmakuAllowOverlap 开启时压叠，
+     * 压叠槽位由 {@link DanmakuPinSlots} 按轮转游标在各槽位间分散（不再固定挑「最接近释放」的同一槽），
+     * 口径与滚动车道一致；无槽可用（槽位数为 0）时丢弃。
      */
     private static Admission pinAdmit(DanmakuEntry entry, Visual visual, List<Active> actives,
-                                      Clocks clocks, DanmakuMode pinMode, int pinSlots,
+                                      DanmakuMode pinMode, long startMs, int pinSlots,
                                       boolean allowOverlap) {
-        int slot = firstFreePin(actives, pinMode, pinSlots);
-        boolean forced = false;
-        if (slot < 0) {
-            if (isVideoDanmaku(entry.source()) && !allowOverlap) return Admission.DROPPED;
-            slot = oldestPin(actives, pinMode, clocks, pinSlots);
-            if (slot < 0) return Admission.DROPPED;
-            forced = true;
-        }
-        return new Admission(new Active(entry, visual, clocks.of(entry.source()), pinMode, 0, slot),
-            null, forced);
+        boolean[] used = pinUsage(actives, pinMode, pinSlots);
+        DanmakuPinSlots.Pick pick = pinAllocator(pinMode).allocate(used);
+        if (pick.slot() < 0) return Admission.DROPPED;
+        if (pick.forced() && isVideoDanmaku(entry.source()) && !allowOverlap) return Admission.DROPPED;
+        return new Admission(new Active(entry, visual, startMs, pinMode, 0, pick.slot()), null,
+            pick.forced());
     }
 
     /**
@@ -606,33 +611,24 @@ public final class DanmakuHudLayer {
         return true;
     }
 
-    /** 固定槽位占用感知：被在途条目占用的槽位不可复用；返回可用槽位下标，无则 -1 */
-    private static int firstFreePin(List<Active> actives, DanmakuMode mode, int pinSlots) {
+    /**
+     * 固定槽位占用情况（长度 = 本帧槽位数）：被在途条目占用的槽位不可复用；
+     * 越界车道号（几何缩水后尚未收口）不计入占用，与 {@link DanmakuWorldLayer#clampLane} 同口径。
+     */
+    private static boolean[] pinUsage(List<Active> actives, DanmakuMode mode, int pinSlots) {
         boolean[] used = new boolean[pinSlots];
-        for (Active active : actives) {
-            if (active.mode() == mode && active.lane() < pinSlots) {
+        for (int i = 0; i < actives.size(); i++) {
+            Active active = actives.get(i);
+            if (active.mode() == mode && active.lane() >= 0 && active.lane() < pinSlots) {
                 used[active.lane()] = true;
             }
         }
-        for (int i = 0; i < pinSlots; i++) {
-            if (!used[i]) return i;
-        }
-        return -1;
+        return used;
     }
 
-    /** 「最接近释放」的固定槽位：占用者中按各自时钟已驻留最久者；无占用返回 -1 */
-    private static int oldestPin(List<Active> actives, DanmakuMode mode, Clocks clocks, int pinSlots) {
-        int slot = -1;
-        long bestElapsed = Long.MIN_VALUE;
-        for (Active active : actives) {
-            if (active.mode() != mode || active.lane() >= pinSlots) continue;
-            long elapsed = clocks.of(active.entry().source()) - active.startMs();
-            if (elapsed > bestElapsed) {
-                bestElapsed = elapsed;
-                slot = active.lane();
-            }
-        }
-        return slot;
+    /** 固定槽位分配器（TOP/BOTTOM 各一份游标；两层各持自己的实例，故同输入逐帧同输出） */
+    private static DanmakuPinSlots pinAllocator(DanmakuMode mode) {
+        return mode == DanmakuMode.TOP ? PIN_TOP : PIN_BOTTOM;
     }
 
     /** 条目寿命：滚动/逆向滚动按行程，固定项按驻留时长（固定模式不受 speedMultiplier 影响） */
@@ -682,6 +678,8 @@ public final class DanmakuHudLayer {
         LAST_VIDEO_TIME.clear();
         ANOMALY.clear();
         LAST_LANES.clear();
+        PIN_TOP.reset();
+        PIN_BOTTOM.reset();
     }
 
     /** 跳变帧清理：|Δ| 超过 Store 的 seek 阈值即清空该屏活动弹幕（首帧只记基线） */

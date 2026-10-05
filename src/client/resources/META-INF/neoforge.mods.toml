@@ -23,6 +23,12 @@ version = "0.1-alpha"
 displayName = "KazumiPlayer Client"
 description = '''KazumiPlayer 客户端附加模块 (dev)'''
 
+# 客户端专用 mixin（文本渲染优化，移植自 ImmediatelyFast）。开发环境下 classpath 顺序为
+# client classes/resources → main → server，FML 取第一份 mods.toml，故 runClient 读到的是本文件（含本段）；
+# runServer 的 classpath 不含 client source set（读到 main 那份，无本段），服务端不会去找客户端 mixin 配置。
+[[mixins]]
+config = "kazumiplayer.client.mixins.json"
+
 [[dependencies."kazumiplayer"]]
 modId = "neoforge"
 type = "required"
