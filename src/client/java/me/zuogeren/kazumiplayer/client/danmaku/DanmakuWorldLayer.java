@@ -113,7 +113,7 @@ public final class DanmakuWorldLayer {
     /** 车道数上限：小字号时防显示区内车道过多（48 条足以在常见窗口下铺满显示区） */
     private static final int MAX_LANE_COUNT = 48;
     /** 100% 字号下的基准车道数：像素域↔世界域换算的基准显示带高由此定义 */
-    private static final int BASE_LANE_COUNT = 5;
+    private static final int BASE_LANE_COUNT = 13;
     /** 像素域基准显示带高 = 基准车道数 × 基准车道高（9×1.4）：{@link #BASE_AREA_RATIO} 下的显示带像素高 */
     private static final float BASE_BAND_H_PX = BASE_LANE_COUNT * GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR;
     /**
