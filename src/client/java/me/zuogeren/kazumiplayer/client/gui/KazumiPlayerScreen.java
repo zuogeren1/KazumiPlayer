@@ -354,13 +354,14 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         boolean selfWatching = this.isSelfWatching();
         this.joinButton.active = !selfWatching;
         this.leaveButton.active = selfWatching;
-        // B 站清晰度：仅当绑定屏幕正在播 B 站视频且已有实际解析出的档位表时可用（其余解析链路无档位概念）
+        // B 站清晰度：绑定屏幕正在播 B 站链接（视频页或直播间）且已解析出档位表时可用
+        // （其余解析链路无档位概念；直播档位来自 getRoomPlayInfo 的 accept_qn）
         if (this.qualityButton != null) {
             var qualityScreen = this.boundScreen();
             var qualityInfo = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
             boolean qualityAvailable = qualityScreen != null && qualityInfo != null
                 && !qualityInfo.qualities().isEmpty()
-                && me.zuogeren.kazumiplayer.util.BilibiliUrls.isVideoPage(qualityScreen.getEpisodeUrl());
+                && me.zuogeren.kazumiplayer.util.BilibiliUrls.isBilibiliUrl(qualityScreen.getEpisodeUrl());
             this.qualityButton.active = qualityAvailable;
             if (!qualityAvailable) this.qualityDropdownOpen = false;
             this.updateQualityButtonLabel(qualityInfo);
@@ -999,7 +1000,11 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         if (info == null || idx < 0 || idx >= info.qualities().size()) return;
         var quality = info.qualities().get(idx);
         var sp = ScreenPlayerManager.get(this.screenPos);
-        long keepMs = sp.player != null ? Math.max(0, sp.player.getTimeMs()) : 0;
+        // 直播无稳定时间轴：切档后重新拉流即可，不续播位置（对 m3u8 直播 seek 无意义）
+        var bound = this.boundScreen();
+        boolean live = bound != null
+            && me.zuogeren.kazumiplayer.util.BilibiliUrls.isLiveRoom(bound.getEpisodeUrl());
+        long keepMs = (!live && sp.player != null) ? Math.max(0, sp.player.getTimeMs()) : 0;
         me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.setPreferredQn(this.screenPos, quality.qn());
         sp.resumePositionMs = keepMs;
         sp.restartRequested = true;

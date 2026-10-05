@@ -69,6 +69,7 @@
   "kazumiplayer.gui.main.queue_empty": "（队列为空）",
   "kazumiplayer.gui.main.watching_empty": "（暂无观看者）",
   "kazumiplayer.gui.main.tab_quality": "清晰度",
+  "kazumiplayer.msg.bili_quality_fallback": "清晰度「%s」未生效，当前为「%s」——B 站高清晰度（尤其直播原画/蓝光）需要登录，请在服务端配置 B 站 Cookie 或本机扫码登录",
   "kazumiplayer.gui.main.status_quality_switched": "已切换清晰度：%s（仅本端生效）",
   "kazumiplayer.gui.bili_login.title": "B 站扫码登录",
   "kazumiplayer.gui.bili_login.hint": "请使用 B 站手机客户端扫描二维码",

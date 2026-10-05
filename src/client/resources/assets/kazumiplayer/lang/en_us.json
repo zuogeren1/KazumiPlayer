@@ -69,6 +69,7 @@
   "kazumiplayer.gui.main.queue_empty": "(Queue is empty)",
   "kazumiplayer.gui.main.watching_empty": "(Nobody watching)",
   "kazumiplayer.gui.main.tab_quality": "Quality",
+  "kazumiplayer.msg.bili_quality_fallback": "Quality \"%s\" was not granted, playing at \"%s\" - high Bilibili qualities (especially live 原画/蓝光) require login; configure a server-side cookie or log in locally",
   "kazumiplayer.gui.main.status_quality_switched": "Quality switched: %s (this client only)",
   "kazumiplayer.gui.bili_login.title": "Bilibili QR Login",
   "kazumiplayer.gui.bili_login.hint": "Scan the QR code with the Bilibili mobile app",

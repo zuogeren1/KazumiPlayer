@@ -216,10 +216,29 @@ public final class VideoSourceResolver {
     /** 记录档位表并受守卫起播（服务端与本端两条来源共用） */
     private void applyStream(PendingResolve pending, String url, String encodedQualities,
             int currentQn, String origin) {
+        var qualities = BilibiliApi.decodeQualities(encodedQualities);
         BilibiliQualityPrefs.setInfo(pending.screen().getBlockPos(),
-            new BilibiliQualityPrefs.Info(BilibiliApi.decodeQualities(encodedQualities), currentQn));
+            new BilibiliQualityPrefs.Info(qualities, currentQn));
+        // 请求的档位未生效（直播/视频在未登录时会被接口降级）：明确提示原因，避免"切了没反应"
+        int requested = BilibiliQualityPrefs.preferredQn(pending.screen().getBlockPos());
+        if (requested > 0 && currentQn > 0 && requested != currentQn) {
+            String want = qualityLabel(qualities, requested);
+            String got = qualityLabel(qualities, currentQn);
+            Minecraft.getInstance().execute(() -> KazumiClientMessages.chatWarn(
+                net.minecraft.network.chat.Component.translatable(
+                    "kazumiplayer.msg.bili_quality_fallback", want, got).getString()));
+            KazumiLog.sniff.warn("[source] requested quality {} not granted, got {} ({})", requested, currentQn, origin);
+        }
         KazumiLog.sniff.info("[source] bilibili stream resolved via {} (qn={}): {}", origin, currentQn, url);
         startWhenValid(pending.screen(), pending.session(), pending.player(), url);
+    }
+
+    /** 档位表里查名字；查不到回落到编号 */
+    private static String qualityLabel(java.util.List<BilibiliApi.Quality> qualities, int qn) {
+        for (BilibiliApi.Quality q : qualities) {
+            if (q.qn() == qn) return q.label();
+        }
+        return String.valueOf(qn);
     }
 
     /** 停止/拆屏时取消全部在途解析（含服务端代理解析请求） */
