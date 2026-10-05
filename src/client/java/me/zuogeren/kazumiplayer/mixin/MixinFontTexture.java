@@ -6,6 +6,8 @@
  */
 package me.zuogeren.kazumiplayer.mixin;
 
+import me.zuogeren.kazumiplayer.client.textperf.KazumiTextPerf;
+
 import net.minecraft.client.gui.font.FontTexture;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;

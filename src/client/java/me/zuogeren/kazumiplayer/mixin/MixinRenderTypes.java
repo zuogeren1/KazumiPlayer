@@ -6,6 +6,8 @@
  */
 package me.zuogeren.kazumiplayer.mixin;
 
+import me.zuogeren.kazumiplayer.client.textperf.KazumiTextPerf;
+
 import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import org.spongepowered.asm.mixin.Mixin;

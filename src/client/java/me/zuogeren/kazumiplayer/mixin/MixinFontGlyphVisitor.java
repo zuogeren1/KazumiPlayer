@@ -6,6 +6,8 @@
  */
 package me.zuogeren.kazumiplayer.mixin;
 
+import me.zuogeren.kazumiplayer.client.textperf.KazumiTextPerf;
+
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.rendertype.RenderType;

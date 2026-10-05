@@ -1,4 +1,4 @@
-package me.zuogeren.kazumiplayer.mixin;
+package me.zuogeren.kazumiplayer.client.textperf;
 
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 
