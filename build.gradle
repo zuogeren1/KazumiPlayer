@@ -141,10 +141,10 @@ dependencies {
     clientImplementation("de.keksuccino:rinku-neoforge:3.0.4-26.1.2") {
         exclude group: "net.neoforged", module: "neoforge"
     }
-    // WaterMedia - VLC-powered media player (Modrinth)
-    clientImplementation "maven.modrinth:G922NeHS:SytIeSKM"
-    // WaterMedia Binaries - native VLC/FFMPEG (3.0.0.5 matches API 3.0.0.22)
-    clientImplementation "maven.modrinth:4997XcoK:SYiGqsPE"
+    // WaterMedia - VLC-powered media player (Modrinth) - API 3.0.0.23
+    clientImplementation "maven.modrinth:G922NeHS:FdCZ5Rxq"
+    // WaterMedia Binaries - native VLC/FFMPEG (3.0.0.6 matches API 3.0.0.23)
+    clientImplementation "maven.modrinth:4997XcoK:fYWsOuBz"
     // Cloth Config API - 客户端可选配置界面（不装也能运行）
     clientImplementation "maven.modrinth:9s6osm5g:TimoYzse"
 }
