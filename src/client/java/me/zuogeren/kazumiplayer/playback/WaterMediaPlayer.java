@@ -242,20 +242,22 @@ public class WaterMediaPlayer {
             try {
                 dying.mute(true); // 释放期间不得残留声音
             } catch (Throwable ignored) {}
+            // stop 与 release 都在后台串行执行：两者都会等待 FFmpeg 的 demux 线程，
+            // 而缓存模式下 demux 还在把整个媒体文件写入磁盘缓存（实测可达数十秒，且不可中断），
+            // 一旦放回渲染线程就会重新卡死客户端。实测清理动作实际发生在引擎内部 lifecycle 线程，
+            // 调用线程只是等待，故从后台线程调用同样有效。
             STOP_EXECUTOR.execute(() -> {
                 try {
-                    dying.stop(); // 阻塞点（等待 demux 线程退出）：此时已不在渲染线程上
+                    dying.stop();
                 } catch (Throwable t) {
                     KazumiLog.playback.warn("Failed to stop media player cleanly: {}", t.getMessage());
                 }
-                // release 可能触碰 GL 资源：回到渲染线程执行；此时 stop 已完成，不再长阻塞
-                Minecraft.getInstance().execute(() -> {
-                    try {
-                        dying.release();
-                    } catch (Throwable t) {
-                        KazumiLog.playback.warn("Failed to release media player: {}", t.getMessage());
-                    }
-                });
+                try {
+                    dying.release();
+                } catch (Throwable t) {
+                    KazumiLog.playback.warn("Failed to release media player: {}", t.getMessage());
+                }
+                KazumiLog.playback.debug("Media player released in background");
             });
         }
         for (var l : listeners) {
