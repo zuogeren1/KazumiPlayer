@@ -15,9 +15,9 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * WebView(MCEF) 视频源解析服务——对齐 Kazumi lib/services/video_source/webview_video_source_service.dart。
+ * WebView(Rinku) 视频源解析服务——对齐 Kazumi lib/services/video_source/webview_video_source_service.dart。
  *
- * 使用 MCEF 浏览器解析视频页面提取视频源 URL。
+ * 使用 Rinku 浏览器解析视频页面提取视频源 URL。
  * 浏览器实例在服务生命周期内复用，切换集数时调用 unloadPage 释放页面资源，
  * 仅在 {@link #dispose()} 时才真正销毁浏览器。
  *

@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * MCEF(CEF) 嗅探浏览器封装——对齐 Kazumi lib/webview/video/impl/video_webview_impl.dart（通用 CEF 实现）。
+ * Rinku(CEF) 嗅探浏览器封装——对齐 Kazumi lib/webview/video/impl/video_webview_impl.dart（通用 CEF 实现）。
  *
  * 单实例持有一个常驻 RinkuBrowser，解析任务按实例串行；
  * 切集时 {@link #unloadPage()} 导航 about:blank 释放页面资源，{@link #dispose()} 时才真正关闭浏览器。
@@ -164,9 +164,9 @@ public class McefSniffBrowser {
     }
 
     // ---- CEF handler ----
-    // MCEFClient 对 load/display 事件是多播分发器（其自身实现了 CefLoadHandler/CefDisplayHandler
+    // RinkuClient 对 load/display 事件是多播分发器（其自身实现了 CefLoadHandler/CefDisplayHandler
     // 并占住原生 CefClient 的单槽），必须经 Rinku.getClient().addXxxHandler 注册；
-    // 直接 getHandle().addXxxHandler 会顶掉 MCEF 内部管理导致加载事件丢失。
+    // 直接 getHandle().addXxxHandler 会顶掉 Rinku 内部管理导致加载事件丢失。
     // CefRequestHandler 无多播封装（原生单槽），因此全局只注册一次，
     // 由 ACTIVE_INSTANCES 按 browserIdentifier 分发到各实例。
 
@@ -230,7 +230,7 @@ public class McefSniffBrowser {
                         McefSniffBrowser owner = findById(br.getIdentifier());
                         if (owner == null) return false;
                         // 浏览器流量 UA 统一为本实例创建时随机选定的 UA
-                        // （MCEF 无 per-browser CefSettings.userAgent 入口，资源层改写实现同等效果）
+                        // （Rinku 无 per-browser CefSettings.userAgent 入口，资源层改写实现同等效果）
                         String currentUa = req.getHeaderByName("User-Agent");
                         if (!owner.userAgent.equals(currentUa)) {
                             req.setHeaderByName("User-Agent", owner.userAgent, true);

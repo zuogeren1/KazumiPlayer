@@ -25,7 +25,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * 视频源解析与播放编排——对齐 Kazumi lib/pages/video/video_controller.dart 的解析用法。
  *
- * 流程：直链直判 → 租约池获取解析器 → WebView/MCEF 解析 → WaterMedia 播放。
+ * 流程：直链直判 → 租约池获取解析器 → WebView/Rinku 解析 → WaterMedia 播放。
  * 与蓝本的差异仅一处：MC 无"重试"按钮，解析失败自动重试一次。
  */
 public final class VideoSourceResolver {
@@ -57,7 +57,7 @@ public final class VideoSourceResolver {
      * <ol>
      *   <li><b>B 站链接</b>（{@link BilibiliUrls#isBilibiliUrl}）→ 服务端代理解析，失败/超时/未连接本端回落；</li>
      *   <li><b>直链</b>（file://、盘符、视频扩展名）→ 直接播放；m3u8/m3u 播放列表按直播直连（bypassSync）；</li>
-     *   <li><b>其余网页 URL</b> → MCEF 嗅探（租约池 + 失败重试一次）。</li>
+     *   <li><b>其余网页 URL</b> → Rinku 嗅探（租约池 + 失败重试一次）。</li>
      * </ol>
      */
     public WaterMediaPlayer beginPlayback(VideoScreenBlockEntity screen, String episodeUrl) {
@@ -93,7 +93,7 @@ public final class VideoSourceResolver {
             return player;
         }
 
-        // 路 3：其余网页 URL —— MCEF 嗅探（租约池按屏互斥，失败重试一次）
+        // 路 3：其余网页 URL —— Rinku 嗅探（租约池按屏互斥，失败重试一次）
         me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 嗅探路径拿不到 cid/房间号，旧弹幕源作废
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         resolveWithRetry(screen, episodeUrl, player, session, 0);

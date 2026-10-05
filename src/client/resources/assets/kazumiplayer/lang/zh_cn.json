@@ -370,7 +370,6 @@
   "kazumiplayer.config.log.rule": "DEBUG · 规则引擎",
   "kazumiplayer.config.log.http": "DEBUG · HTTP 请求",
   "kazumiplayer.config.log.danmaku": "DEBUG · 弹幕",
-  "kazumiplayer.config.mcef_lifecycle": "浏览器生命周期",
   "kazumiplayer.config.video_volume": "默认音量",
   "kazumiplayer.config.max_sniffs": "最大同时嗅探数",
   "kazumiplayer.config.max_plays": "最大同时播放屏幕数",

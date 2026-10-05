@@ -370,7 +370,6 @@
   "kazumiplayer.config.log.rule": "DEBUG · Rule engine",
   "kazumiplayer.config.log.http": "DEBUG · HTTP requests",
   "kazumiplayer.config.log.danmaku": "DEBUG · Danmaku",
-  "kazumiplayer.config.mcef_lifecycle": "Browser lifecycle",
   "kazumiplayer.config.video_volume": "Default volume",
   "kazumiplayer.config.max_sniffs": "Max concurrent sniffs",
   "kazumiplayer.config.max_plays": "Max concurrently playing screens",

@@ -51,7 +51,7 @@ public class ClientDisconnectHandler {
         boolean windowActive = mc.isWindowActive();
 
         // 防御修复：窗口活跃且无 GUI，但 GLFW 真实光标未捕获
-        // （覆盖：MCEF/WaterMedia 直接释放光标、失焦期间 grabMouse() 静默失败导致内部标志与真实状态不同步）
+        // （覆盖：Rinku/WaterMedia 直接释放光标、失焦期间 grabMouse() 静默失败导致内部标志与真实状态不同步）
         // → 自动重新捕获，避免"鼠标指针出现、需点击窗口才恢复"
         // 全屏观影模式刻意释放光标（画面上有可点击的退出按钮），不参与此防御
         if (windowActive && mc.screen == null && !ClientFullscreenState.isActive()) {
