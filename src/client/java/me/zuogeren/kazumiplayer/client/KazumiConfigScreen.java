@@ -6,6 +6,9 @@ import me.zuogeren.kazumiplayer.LogConfig;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
+import me.zuogeren.kazumiplayer.client.gui.BilibiliLoginScreen;
+import me.zuogeren.kazumiplayer.client.gui.ConfigButtonEntry;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -115,6 +118,49 @@ public final class KazumiConfigScreen {
                 .setTooltip(Component.translatable("kazumiplayer.config.fullscreen_opacity_tooltip"))
                 .setSaveConsumer(value -> ClientConfig.CONFIG.fullscreenOpacity.set(value))
                 .build());
+
+        // ---- B 站（扫码登录 / 手工粘贴凭据；本地优先于服务端下发的共享凭据） ----
+        ConfigCategory biliCategory = builder.getOrCreateCategory(
+                Component.translatable("kazumiplayer.config.category_bilibili"));
+        biliCategory.addEntry(entry.startStrField(
+                        Component.translatable("kazumiplayer.config.bilibili_cookie"),
+                        ClientConfig.CONFIG.bilibiliCookie.get())
+                .setDefaultValue("")
+                .setTooltip(Component.translatable("kazumiplayer.config.bilibili_cookie_tooltip"))
+                .setSaveConsumer(value -> {
+                    ClientConfig.CONFIG.bilibiliCookie.set(value == null ? "" : value.trim());
+                    BilibiliCredentials.applyToWaterMedia();
+                })
+                .build());
+        biliCategory.addEntry(new ConfigButtonEntry(
+                Component.translatable("kazumiplayer.config.bilibili_login"),
+                Component.translatable("kazumiplayer.config.bilibili_login_button"),
+                () -> Minecraft.getInstance().setScreen(
+                        new BilibiliLoginScreen(Minecraft.getInstance().screen))));
+        biliCategory.addEntry(new ConfigButtonEntry(
+                Component.translatable("kazumiplayer.config.bilibili_copy"),
+                Component.translatable("kazumiplayer.config.bilibili_copy_button"),
+                () -> {
+                    String cookie = BilibiliCredentials.get();
+                    if (cookie.isEmpty()) {
+                        KazumiClientMessages.chatWarn(
+                            Component.translatable("kazumiplayer.msg.bili_cookie_empty").getString());
+                        return;
+                    }
+                    Minecraft.getInstance().keyboardHandler.setClipboard(cookie);
+                    KazumiClientMessages.chatSuccess(Component.translatable(
+                            "kazumiplayer.msg.bili_cookie_copied", cookie.length()).getString());
+                }));
+        biliCategory.addEntry(new ConfigButtonEntry(
+                Component.translatable("kazumiplayer.config.bilibili_logout"),
+                Component.translatable("kazumiplayer.config.bilibili_logout_button"),
+                () -> {
+                    ClientConfig.CONFIG.bilibiliCookie.set("");
+                    ClientConfig.SPEC.save();
+                    BilibiliCredentials.applyToWaterMedia();
+                    KazumiClientMessages.chatSuccess(
+                        Component.translatable("kazumiplayer.msg.bili_cookie_cleared").getString());
+                }));
 
         // 保存时：日志级别即时应用 + 显式写盘（ModConfigSpec.set 只改内存，不调 save 重启会重置）
         builder.setSavingRunnable(() -> {

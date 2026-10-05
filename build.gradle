@@ -10,6 +10,8 @@ group = mod_group_id
 
 repositories {
     mavenLocal()
+    // 公共库（gson/jsoup/zxing）与依赖传递解析
+    mavenCentral()
     maven {
         url = "https://keksuccino.github.io/maven/"
     }
@@ -131,6 +133,8 @@ dependencies {
     // 共享依赖 (common)
     implementation "com.google.code.gson:gson:2.11.0"
     jarJar(implementation("org.jsoup:jsoup:1.18.1"))
+    // 二维码生成（B 站扫码登录）：纯 Java 核心库，无 AWT 依赖
+    jarJar(implementation("com.google.zxing:core:3.5.3"))
 
     // 客户端专用依赖 (client only)
     // MCEF - Chromium Embedded Framework for video URL sniffing

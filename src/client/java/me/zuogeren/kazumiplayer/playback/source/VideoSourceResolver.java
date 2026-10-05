@@ -4,6 +4,7 @@ import me.zuogeren.kazumiplayer.client.KazumiClientMessages;
 
 import me.zuogeren.kazumiplayer.ClientConfig;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
+import me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs;
 import me.zuogeren.kazumiplayer.util.BilibiliUrls;
 import me.zuogeren.kazumiplayer.util.HttpUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
@@ -95,6 +96,8 @@ public final class VideoSourceResolver {
      */
     private void resolveBilibili(VideoScreenBlockEntity screen, String episodeUrl,
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
+        // 解析前刷新平台凭据：本地配置可能刚变更（扫码登录/手工编辑），保证两条链路一致
+        me.zuogeren.kazumiplayer.client.BilibiliCredentials.applyToWaterMedia();
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         if (!BilibiliUrls.isShortLink(episodeUrl)) {
             // 同步上下文（beginPlayback 调用栈内）：调度器尚未登记 player，直播只能直接起播；
@@ -143,15 +146,21 @@ public final class VideoSourceResolver {
      */
     private void resolveBilibiliVideo(VideoScreenBlockEntity screen, String pageUrl,
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
-        BilibiliApi.resolveVideoMp4(pageUrl).whenComplete((mp4Url, t) -> {
+        net.minecraft.core.BlockPos pos = screen.getBlockPos();
+        int preferredQn = BilibiliQualityPrefs.preferredQn(pos);
+        BilibiliApi.resolveVideo(pageUrl, preferredQn).whenComplete((stream, t) -> {
             if (t != null) {
                 KazumiLog.sniff.warn("[source] bilibili mp4 resolve failed ({}), falling back to platform resolver",
                     String.valueOf(unwrap(t).getMessage()));
                 startWhenValid(screen, session, player, pageUrl);
                 return;
             }
-            KazumiLog.sniff.info("[source] bilibili mp4 resolved: {}", mp4Url);
-            startWhenValid(screen, session, player, mp4Url);
+            // 档位表供播放器 GUI 的清晰度下拉展示（仅本端）
+            BilibiliQualityPrefs.setInfo(pos,
+                new BilibiliQualityPrefs.Info(stream.qualities(), stream.currentQn()));
+            KazumiLog.sniff.info("[source] bilibili mp4 resolved (qn={}, {} qualities): {}",
+                stream.currentQn(), stream.qualities().size(), stream.url());
+            startWhenValid(screen, session, player, stream.url());
         });
     }
 

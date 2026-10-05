@@ -48,6 +48,13 @@ public final class ScreenPlayerManager {
         public boolean lastAppliedPaused;
         /** 本集是否已触发下一集预解析（每次新起播复位） */
         public boolean nextPrefetched;
+        /**
+         * 本端重启播放请求（如 B 站清晰度切换）：调度器停止旧播放器并重新解析起播，
+         * 起播后按 {@link #resumePositionMs} 续播。仅本端生效，不影响其他观看者。
+         */
+        public boolean restartRequested;
+        /** 重启后要恢复的播放位置（毫秒，0 表示不续播，回落同步位置） */
+        public long resumePositionMs;
 
         /**
          * 重缓冲冻结判定：已出画、播放中，但播放位置停滞超过阈值。

@@ -128,6 +128,15 @@ public class ClientPlaybackScheduler {
             sp.player = null;
             sp.everPlayed = false;
         }
+        // 本端重启请求（B 站清晰度切换等）：停旧播放器并复位，使下面的新播放分支按新档位重新解析
+        if (sp.restartRequested) {
+            sp.restartRequested = false;
+            if (sp.player != null) {
+                sp.player.stop();
+                sp.player = null;
+            }
+            sp.playbackStartedAt = 0;
+        }
         // 新播放：启动播放器并预置 seek
         // 只有 WatchingPlayers 中的玩家才自动播放（手动 join 后才能播）
         if (sp.player == null && !url.isEmpty() && isWatching(screen, mc)
@@ -147,7 +156,9 @@ public class ClientPlaybackScheduler {
             sp.anchorReported = false; // 新集重新做首帧锚定上报
             sp.nextPrefetched = false; // 新集重新评估下一集预解析
             sp.hasPausedState = false; // 新播放器重新建立暂停态基线（首广播必应用）
-            long seekMs = screen.getSyncPositionMs();
+            // 本端重启（清晰度切换）优先恢复重启前的位置，其余沿用同步位置
+            long seekMs = sp.resumePositionMs > 0 ? sp.resumePositionMs : screen.getSyncPositionMs();
+            sp.resumePositionMs = 0;
             if (sp.player != null && seekMs > 0) sp.player.seek(seekMs);
             // 启动快照：屏幕处于暂停时立即暂停（不再依赖每秒轮询）
             if (screen.isPlaybackPaused()) {

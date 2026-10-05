@@ -65,10 +65,11 @@ public class ClientPacketHandlers implements IClientPacketHandler {
     private static void handleBilibiliCookie(BilibiliCookiePacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             try {
-                // 自研解析（BilibiliApi）读客户端持有者；直播走 WaterMedia 内置平台，同步注入其配置
-                me.zuogeren.kazumiplayer.client.BilibiliCredentials.set(packet.cookie());
-                org.watermedia.WaterMediaConfig.platforms.biliBiliCookie = packet.cookie();
-                KazumiLog.network.debug("Bilibili cookie applied ({} chars)", packet.cookie().length());
+                // 服务端凭据只作回落：本地已登录（扫码/手填）时优先级更高
+                me.zuogeren.kazumiplayer.client.BilibiliCredentials.setServer(packet.cookie());
+                me.zuogeren.kazumiplayer.client.BilibiliCredentials.applyToWaterMedia();
+                KazumiLog.network.debug("Bilibili server cookie applied ({} chars, effective {} chars)",
+                    packet.cookie().length(), me.zuogeren.kazumiplayer.client.BilibiliCredentials.get().length());
             } catch (Throwable t) {
                 KazumiLog.network.warn("Bilibili cookie apply failed: {}", String.valueOf(t.getMessage()));
             }
@@ -95,6 +96,8 @@ public class ClientPacketHandlers implements IClientPacketHandler {
     }
 
     private static void handlePlayStop(PlayStopPacket packet, IPayloadContext context) {
+        // 停播即清本端 B 站档位偏好与档位表（下次起播重新解析）——放在最前，避免提前 return 的路径漏清
+        me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.clear(packet.screenPos());
         context.enqueueWork(() -> {
             var mc = Minecraft.getInstance();
             if (mc.level == null) return;

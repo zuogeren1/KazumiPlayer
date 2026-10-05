@@ -189,11 +189,75 @@ public class HttpUtil {
         }
     }
 
+    /** HTTP 响应快照：状态码、响应头（名已小写）与响应体 */
+    public record HttpResult(int status, java.util.Map<String, java.util.List<String>> headers, String body) {}
+
     /**
-     * SSRF 防护: 禁止请求内网地址。
-     * 对 host 的全部解析结果逐一校验（round-robin DNS 可能同时返回公网与内网记录）；
-     * 校验与后续 CLIENT.send 共享同一 JVM DNS 缓存视图，消除多次解析间的选址漂移窗口。
+     * 与 {@link #fetch} 同一套 SSRF 逐跳校验、重定向与超时策略，但保留响应头。
+     * 用于登录轮询这类需要读取 <code>Set-Cookie</code> 的请求；请求体恒为空（GET/POST 无体）。
      */
+    public static CompletableFuture<HttpResult> fetchResult(String urlString, String method,
+            java.util.Map<String, String> headers, java.util.Map<String, String> queryParams) {
+        CompletableFuture<HttpResult> future = new CompletableFuture<>();
+        CompletableFuture.runAsync(() -> {
+            try {
+                String currentUrl = buildUrl(urlString, queryParams);
+                String currentMethod = method;
+                for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+                    URI uri = URI.create(currentUrl);
+                    checkSsrf(uri);
+                    HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                            .uri(uri)
+                            .timeout(Duration.ofSeconds(Math.max(5, Config.CONFIG.searchTimeoutMs.get() / 1000)))
+                            .header("User-Agent", getRandomUserAgent())
+                            .header("Accept-Language", "zh-CN,zh;q=0.9");
+                    headers.forEach(requestBuilder::header);
+                    if ("POST".equalsIgnoreCase(currentMethod)) {
+                        requestBuilder.POST(HttpRequest.BodyPublishers.noBody());
+                    } else {
+                        requestBuilder.GET();
+                    }
+                    HttpResponse<InputStream> response = CLIENT.send(
+                            requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
+                    int status = response.statusCode();
+                    String location = response.headers().firstValue("Location").orElse(null);
+                    boolean redirect = (status == 301 || status == 302 || status == 303
+                            || status == 307 || status == 308) && location != null;
+                    if (!redirect) {
+                        if (status >= 400) {
+                            KazumiLog.http.warn("HTTP {} {} -> {}", currentMethod, currentUrl, status);
+                            future.completeExceptionally(new RuntimeException("站点返回 HTTP " + status));
+                            return;
+                        }
+                        String body = readResponseBody(response, Config.CONFIG.maxSearchResponseBytes.get());
+                        java.util.Map<String, java.util.List<String>> headerMap = new java.util.LinkedHashMap<>();
+                        response.headers().map().forEach(
+                                (k, v) -> headerMap.put(k.toLowerCase(java.util.Locale.ROOT), v));
+                        future.complete(new HttpResult(status, headerMap, body));
+                        return;
+                    }
+                    try (InputStream drain = response.body()) {
+                        drain.readAllBytes();
+                    }
+                    URI target = uri.resolve(location.trim());
+                    if ("POST".equalsIgnoreCase(currentMethod) && status != 307 && status != 308) {
+                        currentMethod = "GET";
+                    }
+                    currentUrl = target.toString();
+                }
+                future.completeExceptionally(new RuntimeException(
+                        "重定向次数超过 " + MAX_REDIRECTS + "，已中止（可疑链路）"));
+            } catch (SsrfBlockedException e) {
+                future.completeExceptionally(e);
+            } catch (Exception e) {
+                KazumiLog.http.warn("HTTP request failed for {}: {} {}", urlString,
+                        e.getClass().getSimpleName(), e.getMessage());
+                future.completeExceptionally(new RuntimeException(e.getMessage(), e));
+            }
+        });
+        return future;
+    }
+
     /**
      * 跟随重定向解析最终 URL（不读取响应体），用于短链展开（如 b23.tv）。
      * 与 {@link #fetch} 共用同一套 SSRF 逐跳校验与跳数上限。
@@ -245,6 +309,11 @@ public class HttpUtil {
         return future;
     }
 
+    /**
+     * SSRF 防护: 禁止请求内网地址。
+     * 对 host 的全部解析结果逐一校验（round-robin DNS 可能同时返回公网与内网记录）；
+     * 校验与后续 CLIENT.send 共享同一 JVM DNS 缓存视图，消除多次解析间的选址漂移窗口。
+     */
     private static void checkSsrf(URI uri) throws SsrfBlockedException {
         String host = uri.getHost();
         if (host == null) {

@@ -37,6 +37,8 @@ public class ClientConfig {
     public final ModConfigSpec.IntValue danmakuMaxOnScreen;
     // 全屏观影时显示弹幕
     public final ModConfigSpec.BooleanValue danmakuShowInFullscreen;
+    // B 站登录 Cookie（本地扫码登录或手动粘贴；本地有值时优先于服务端下发）
+    public final ModConfigSpec.ConfigValue<String> bilibiliCookie;
 
     /** 屏幕为非常规比例时视频画面的适配方式 */
     public enum VideoFit {
@@ -113,6 +115,14 @@ public class ClientConfig {
         danmakuShowInFullscreen = builder
                 .comment("全屏观影时在画面上显示弹幕")
                 .define("danmakuShowInFullscreen", true);
+
+        builder.pop();
+        builder.push("bilibili");
+
+        bilibiliCookie = builder
+                .comment("B 站登录 Cookie：可用配置界面「扫码登录」自动获取，或从浏览器开发者工具复制粘贴",
+                         "本地填写后优先于服务端下发的凭据；留空时回落到服务端配置（未登录清晰度上限 720P）")
+                .define("bilibiliCookie", "");
 
         builder.pop();
     }

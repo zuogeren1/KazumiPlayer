@@ -96,6 +96,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private Button summaryTab;
     private Button roadButton;
     private boolean roadDropdownOpen;
+    private Button qualityButton;      // B 站清晰度下拉（仅 B 站视频解析有档位表时可用）
+    private boolean qualityDropdownOpen;
     private Button playUrlButton;      // 直链提交：空闲时"播放"、播放中变"排队"
     private SimpleList queueList;      // 直链播放队列
     private SimpleList watchList;      // 当前正在观看的玩家
@@ -220,6 +222,14 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.addRenderableWidget(this.episodesTab);
         this.addRenderableWidget(this.summaryTab);
         this.addRenderableWidget(this.roadButton);
+        // 清晰度下拉：紧邻「线路」右侧（仅 B 站视频解析时可用，档位表来自实际解析结果）
+        int roadW = Math.min(72, L.rightW() - 112);
+        int qualityW = Math.max(36, Math.min(120, L.rightW() - 112 - roadW - 4));
+        this.qualityButton = Button.builder(Component.translatable("kazumiplayer.gui.main.tab_quality"),
+                b -> this.qualityDropdownOpen = !this.qualityDropdownOpen)
+            .bounds(L.rightX() + 112 + roadW + 4, L.splitY(), qualityW, 16).build();
+        this.qualityButton.active = false;
+        this.addRenderableWidget(this.qualityButton);
 
         this.episodeList = new SimpleList(this.minecraft, L.rightW(),
             L.listBottom() - L.detailTop(), L.detailTop(), ROW_HEIGHT);
@@ -344,6 +354,17 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         boolean selfWatching = this.isSelfWatching();
         this.joinButton.active = !selfWatching;
         this.leaveButton.active = selfWatching;
+        // B 站清晰度：仅当绑定屏幕正在播 B 站视频且已有实际解析出的档位表时可用（其余解析链路无档位概念）
+        if (this.qualityButton != null) {
+            var qualityScreen = this.boundScreen();
+            var qualityInfo = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
+            boolean qualityAvailable = qualityScreen != null && qualityInfo != null
+                && !qualityInfo.qualities().isEmpty()
+                && me.zuogeren.kazumiplayer.util.BilibiliUrls.isVideoPage(qualityScreen.getEpisodeUrl());
+            this.qualityButton.active = qualityAvailable;
+            if (!qualityAvailable) this.qualityDropdownOpen = false;
+            this.updateQualityButtonLabel(qualityInfo);
+        }
         // 起播等待可视化：取消按钮仅在解析/加载期间可点
         var spState = ScreenPlayerManager.get(this.screenPos);
         this.cancelStartupButton.visible = spState.player != null && !spState.everPlayed;
@@ -385,6 +406,26 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                     hovered ? 0xFF3C3C52 : (i == selectedRoad ? 0xF0252545 : 0xE0000000));
                 String label = (i == selectedRoad ? "> " : "") + this.roadNames.get(i);
                 graphics.text(this.font, Component.literal(label).withStyle(ChatFormatting.GRAY), dx + 4, y0 + 4, -1);
+            }
+        }
+
+        // 清晰度下拉展开层（档位来自 B 站播放接口的 accept_quality/accept_description）
+        if (this.qualityDropdownOpen && this.qualityButton != null) {
+            var qInfo = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
+            if (qInfo != null && !qInfo.qualities().isEmpty()) {
+                int dx = this.qualityButton.getX();
+                int dw = Math.max(this.qualityButton.getWidth(), 110);
+                int dy = this.qualityButton.getY() + 16;
+                for (int i = 0; i < qInfo.qualities().size(); i++) {
+                    int y0 = dy + i * ROW_HEIGHT;
+                    boolean hovered = mouseX >= dx && mouseX < dx + dw && mouseY >= y0 && mouseY < y0 + ROW_HEIGHT;
+                    var option = qInfo.qualities().get(i);
+                    boolean selected = option.qn() == qInfo.currentQn();
+                    graphics.fill(dx, y0, dx + dw, y0 + ROW_HEIGHT,
+                        hovered ? 0xFF3C3C52 : (selected ? 0xF0252545 : 0xE0000000));
+                    String label = (selected ? "> " : "") + option.label();
+                    graphics.text(this.font, Component.literal(label).withStyle(ChatFormatting.GRAY), dx + 4, y0 + 4, -1);
+                }
             }
         }
 
@@ -946,6 +987,40 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             new GuiPayloads.QueryChaptersPayload(this.selectedRule, this.selectedResultId, this.selectedRoad));
     }
 
+    // ---- B 站清晰度下拉（仅本端生效，不影响其他观看者） ----
+
+    /**
+     * 切换本屏清晰度：记录偏好与重启前位置，由调度器停旧播放器按新档位重新解析起播，
+     * 起播后回到原进度。各客户端独立解析，他人画面不受影响。
+     */
+    private void selectQuality(int idx) {
+        this.qualityDropdownOpen = false;
+        var info = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
+        if (info == null || idx < 0 || idx >= info.qualities().size()) return;
+        var quality = info.qualities().get(idx);
+        var sp = ScreenPlayerManager.get(this.screenPos);
+        long keepMs = sp.player != null ? Math.max(0, sp.player.getTimeMs()) : 0;
+        me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.setPreferredQn(this.screenPos, quality.qn());
+        sp.resumePositionMs = keepMs;
+        sp.restartRequested = true;
+        setStatus(Component.translatable("kazumiplayer.gui.main.status_quality_switched", quality.label()));
+    }
+
+    /** 清晰度按钮文案：优先显示当前档位名，无档位表时回落到「清晰度」 */
+    private void updateQualityButtonLabel(me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.Info info) {
+        if (this.qualityButton == null) return;
+        String label = Component.translatable("kazumiplayer.gui.main.tab_quality").getString();
+        if (info != null) {
+            for (var q : info.qualities()) {
+                if (q.qn() == info.currentQn()) {
+                    label = q.label();
+                    break;
+                }
+            }
+        }
+        this.qualityButton.setMessage(Component.literal(label));
+    }
+
     private void updateRoadButtonLabel() {
         if (this.roadButton == null) return;
         String label = this.roadNames.size() > 1
@@ -968,6 +1043,21 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 return true;
             }
             this.sourceDropdownOpen = false;
+        }
+        // 清晰度下拉展开时优先处理：点中档位则切清晰度（本端重启播放并续播）
+        if (this.qualityDropdownOpen && this.qualityButton != null) {
+            var qInfo = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
+            if (qInfo != null && !qInfo.qualities().isEmpty()) {
+                int dx = this.qualityButton.getX();
+                int dw = Math.max(this.qualityButton.getWidth(), 110);
+                int dy = this.qualityButton.getY() + 16;
+                int mx = (int) event.x(), my = (int) event.y();
+                if (mx >= dx && mx < dx + dw && my >= dy && my < dy + qInfo.qualities().size() * ROW_HEIGHT) {
+                    selectQuality((my - dy) / ROW_HEIGHT);
+                    return true;
+                }
+            }
+            this.qualityDropdownOpen = false;
         }
         // 线路下拉展开时优先处理：点中选项则切线；点击下拉区域外则收起
         if (this.roadDropdownOpen && !this.roadNames.isEmpty()) {

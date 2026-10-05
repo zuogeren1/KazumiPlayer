@@ -53,11 +53,18 @@ public final class BilibiliApi {
 
     private BilibiliApi() {}
 
+    /** 清晰度档位：qn 为 B 站画质编号，label 为人读名（如「高清 720P」） */
+    public record Quality(int qn, String label) {}
+
+    /** 解析结果：可播放直链 + 可用档位 + 实际采用档位 */
+    public record VideoStream(String url, java.util.List<Quality> qualities, int currentQn) {}
+
     /**
      * 解析视频页为可直接播放的 mp4 直链（支持 BV/av 与 ?p= 分 P）。
+     * preferredQn &gt; 0 时按指定清晰度请求（越界由 B 站回落），否则用接口默认档。
      * 失败以异常收尾（接口变更/视频下架/区域限制等），调用方自行决定回退策略。
      */
-    public static CompletableFuture<String> resolveVideoMp4(String pageUrl) {
+    public static CompletableFuture<VideoStream> resolveVideo(String pageUrl, int preferredQn) {
         String bvid = null;
         String aid = null;
         Matcher bv = BV_PATTERN.matcher(pageUrl);
@@ -87,7 +94,8 @@ public final class BilibiliApi {
                 .thenCompose(body -> {
                     JsonObject data = dataOf(body, "视频信息");
                     long cid = cidOf(data, finalPage);
-                    return HttpUtil.fetch(playUrlApi(finalBvid, finalAid, cid, key), "GET", apiHeaders(), Map.of());
+                    return HttpUtil.fetch(playUrlApi(finalBvid, finalAid, cid, key, preferredQn),
+                        "GET", apiHeaders(), Map.of());
                 });
         }).thenApply(body -> {
             JsonObject data = dataOf(body, "播放地址");
@@ -99,7 +107,7 @@ public final class BilibiliApi {
             if (url == null || url.isBlank()) {
                 throw new IllegalStateException("播放接口返回空地址");
             }
-            return url;
+            return new VideoStream(url, qualitiesOf(data), data.has("quality") ? data.get("quality").getAsInt() : 0);
         });
     }
 
@@ -115,13 +123,27 @@ public final class BilibiliApi {
         throw new IllegalStateException("视频信息缺少 cid");
     }
 
+    /** 解析可用档位：accept_quality 与 accept_description 按下标对应 */
+    private static java.util.List<Quality> qualitiesOf(JsonObject data) {
+        java.util.List<Quality> list = new java.util.ArrayList<>();
+        JsonArray qn = data.getAsJsonArray("accept_quality");
+        JsonArray desc = data.getAsJsonArray("accept_description");
+        if (qn == null) return list;
+        for (int i = 0; i < qn.size(); i++) {
+            int code = qn.get(i).getAsInt();
+            String label = desc != null && i < desc.size() ? desc.get(i).getAsString() : String.valueOf(code);
+            list.add(new Quality(code, label));
+        }
+        return list;
+    }
+
     /** html5 播放接口（单流 mp4）：platform=html5 + high_quality=1 才会返回 durl */
-    private static String playUrlApi(String bvid, String aid, long cid, String key) {
+    private static String playUrlApi(String bvid, String aid, long cid, String key, int preferredQn) {
         Map<String, String> params = new LinkedHashMap<>();
         if (bvid != null) params.put("bvid", bvid);
         if (aid != null) params.put("avid", aid);
         params.put("cid", String.valueOf(cid));
-        params.put("qn", "127");
+        params.put("qn", String.valueOf(preferredQn > 0 ? preferredQn : 127));
         params.put("fnval", "0");
         params.put("fnver", "0");
         params.put("fourk", "1");
