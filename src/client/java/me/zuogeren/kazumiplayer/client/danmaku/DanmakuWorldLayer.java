@@ -62,19 +62,21 @@ import java.util.concurrent.ConcurrentHashMap;
  * 文字框矩形由字形实际绘制外接框（{@code Font#prepareText} 的 bounds）四边各外扩 {@link #FRAME_PAD}
  * 像素推导，文字在框内水平与垂直都居中。文字框与描边的 alpha 一律由 danmakuOpacity 控制。
  *
- * <p>字号→世界换算：车道几何随 danmakuFontScale 缩放——车道高 laneHPx = 9（字形行高）× 1.4（行距系数）
- * × danmakuFontScale，车道数 = clamp(floor(显示区基准高 / laneHPx), 1, {@link #MAX_LANE_COUNT})，
- * 故字号缩小即行距收紧、车道变多且铺满显示区；
+ * <p>字号→世界换算：车道高 laneHPx = 9（字形行高）× 1.4（行距系数）× danmakuFontScale，只由「屏幕面高度
+ * × 基准比例 × danmakuFontScale」决定（{@link #BASE_AREA_RATIO} 是像素域↔世界域的唯一锚点），
+ * 与 danmakuAreaRatio 完全解耦——调显示区不再连累字号。车道数 = clamp(floor(显示带高 / laneHPx), 1,
+ * {@link #MAX_LANE_COUNT})，故字号缩小即行距收紧、车道变多且铺满显示区；
  * 字号百分比只作用于条目自身的 pose 缩放 q_i = danmakuFontScale × fontSizePercent/100，故任一条目上下场
  * 都不会改变他人的位置与大小；q_i 会被钳制到单条车道高以内，避免超高条目溢出到相邻车道。基准换算因子
  * {@link #baseScale} 按 danmakuScaleWithScreen 取屏幕实际尺寸或固定基准半高——关闭缩放时字号
  * 在世界中恒为默认屏幕（3×2 格）折算的大小，不随屏幕方块尺寸变化（全屏 HUD 层不受该开关影响）。
  *
- * <p>显示区坐标：原点为屏幕面中心，显示带高恒为 danmakuAreaRatio 指定的居中显示区（像素域基准
- * {@link #BASE_BAND_H_PX}，不随字号变化）、宽 = 屏幕面宽，x 向为 SCROLL 的起跑侧、y 向为下缘侧。
+ * <p>显示区坐标：原点为屏幕面中心，显示带高 = danmakuAreaRatio × 屏幕面高（居中，像素域高见 {@link #bandH}）、
+ * 宽 = 屏幕面宽，x 向为 SCROLL 的起跑侧、y 向为下缘侧。
  * 车道自显示区上/下缘按 laneHPx 依次铺开，故车道区间恒在显示区内且互不重叠。条目位置一律按实际绘制宽度（textWPx × q）计算，
  * 位移不随字号缩放；字形按 (laneHPx - 9q)/2 在车道内垂直居中，故缩放后仍不越出本车道；
- * 整条移出显示区（按绘制外接框与显示区求交，含纵向）即不提交，文字不会飘到屏幕面之外。
+ * 完全移出显示区的条目不再提交，部分可见的条目只提交可见字符区间（{@link #visibleSlots}），
+ * 屏幕外的字形不会进入渲染管线。
  *
  * <p>描边走 {@code SubmitNodeCollector.submitText} 的 outlineColor 参数（26.1.2 mojmap
  * SubmitNodeStorage L58-L72 十参签名，末位 outlineColor）；文字框走
@@ -98,10 +100,18 @@ public final class DanmakuWorldLayer {
     private static final float LINE_HEIGHT_FACTOR = 1.4f;
     /** 车道数上限：小字号时防显示区内车道过多（48 条足以在常见窗口下铺满显示区） */
     private static final int MAX_LANE_COUNT = 48;
-    /** 100% 字号下的基准车道数：danmakuAreaRatio 所指定显示区的像素域基准高由此定义 */
+    /** 100% 字号下的基准车道数：像素域↔世界域换算的基准显示带高由此定义 */
     private static final int BASE_LANE_COUNT = 5;
-    /** 显示区像素域基准高 = 基准车道数 × 基准车道高（9×1.4）：显示区本身不随字号变化 */
+    /** 像素域基准显示带高 = 基准车道数 × 基准车道高（9×1.4）：{@link #BASE_AREA_RATIO} 下的显示带像素高 */
     private static final float BASE_BAND_H_PX = BASE_LANE_COUNT * GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR;
+    /**
+     * 显示区基准比例：像素域↔世界域换算的唯一锚点（取 danmakuAreaRatio 的默认值）。
+     * 字号只由「屏幕面高度 × 本比例 × danmakuFontScale」决定，故 danmakuAreaRatio 只改变显示带高度
+     * （进而改变可见车道数），不会连带缩放字号。
+     */
+    private static final float BASE_AREA_RATIO = 0.5f;
+    /** 超长条目 DEBUG 阈值（字符槽数）：超过即准入时记一条（含字符数与来源），便于定位异常弹幕 */
+    static final int LONG_ENTRY_CHARS = 512;
     /** 顶部/底部项驻留时长（毫秒）：固定模式不受 speedMultiplier 影响 */
     private static final long PIN_HOLD_MS = 4500L;
     /** 车道让位判据的水平间隔（像素）：旧条已推进像素须 ≥ max(新条,旧条)文本宽 + 此值才释放车道 */
@@ -128,15 +138,15 @@ public final class DanmakuWorldLayer {
      * 车道几何（纯算术，两层共用同一口径）：车道高 = 字形行高 9 × 行距系数 1.4 × danmakuFontScale，
      * 车道数由显示区高推导 lanes = clamp(floor(显示区高 / 车道高), 1, {@link #MAX_LANE_COUNT})——
      * 字号越小行距越紧、车道越多（上限 {@link #MAX_LANE_COUNT}，足以铺满显示区）。车道自显示区顶/底缘
-     * 按车道高依次铺开，故任意车道区间都落在显示区内且互不重叠；车道高以显示区高为上限收口，
-     * 显示区比单条车道还矮时只剩一条车道，区间仍不越界。
+     * 按车道高依次铺开，故车道区间互不重叠、且显示区放得下时都落在显示区内；车道高只由字号决定
+     * （显示区不参与，否则调显示区会连累字号），显示区比一条车道还矮时保留 1 条车道。
      * {@link DanmakuHudLayer} 以等比画面像素高为显示区高调用同一实现。
      */
     static final class LaneGeometry {
 
-        /** 显示区高（像素域）：HUD 层=等比画面像素高，世界层=显示区基准高 */
+        /** 显示区（显示带）高（像素域）：HUD 层=画面高×danmakuAreaRatio，世界层={@link #bandH} */
         final float areaH;
-        /** 单条车道高 = 9 × 1.4 × danmakuFontScale（不超过显示区高） */
+        /** 单条车道高 = 9 × 1.4 × danmakuFontScale（只随字号，不含显示区因素） */
         final float laneH;
         /** 车道数 = clamp(floor(显示区高 / laneH), 1, {@link #MAX_LANE_COUNT}) */
         final int lanes;
@@ -148,11 +158,12 @@ public final class DanmakuWorldLayer {
         }
 
         /**
-         * @param areaH     显示区高（HUD 层=等比画面像素高；世界层={@link #BASE_BAND_H_PX}）
+         * @param areaH     显示区（显示带）高，不含字号因素（HUD 层=画面高×danmakuAreaRatio；世界层={@link #bandH}）
          * @param fontScale danmakuFontScale
          */
         static LaneGeometry of(float areaH, float fontScale) {
-            float laneH = Math.min(GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR * fontScale, areaH);
+            // 车道高只由字号决定（与显示区无关）：显示区比一条车道还矮时也保留 1 条车道
+            float laneH = GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR * fontScale;
             // 浮点误差兜底：显示区高恰为整数倍车道高时（如 63 / 12.6）仍判为整除
             int lanes = Math.max(1, Math.min(MAX_LANE_COUNT,
                 (int) Math.floor(areaH / (double) laneH + 1.0e-5)));
@@ -200,9 +211,13 @@ public final class DanmakuWorldLayer {
         private int capped;
         private int evicted;
         private int forced;
+        private int forcedVideo;
         private int skipped;
 
-        /** 本帧是否出现异常计数（无异常即完全静默） */
+        /**
+         * 本帧是否出现异常计数（无异常即完全静默）。forced-overlap-video 不计入：开启
+         * danmakuAllowOverlap 后视频条目压叠是预期行为，不该刷异常行。
+         */
         static boolean isAnomaly(int noLane, int capped, int evicted, int forced, int skipped) {
             return noLane > 0 || capped > 0 || evicted > 0 || forced > 0 || skipped > 0;
         }
@@ -213,7 +228,7 @@ public final class DanmakuWorldLayer {
          * @return null=静默（本帧无异常，或异常仍在聚合窗口内）；否则为应打印的内容
          */
         Report submit(long nowMs, int dueCount, int admittedCount, int noLaneCount, int cappedCount,
-                      int evictedCount, int forcedCount, int skippedCount) {
+                      int evictedCount, int forcedCount, int forcedVideoCount, int skippedCount) {
             if (!isAnomaly(noLaneCount, cappedCount, evictedCount, forcedCount, skippedCount)) return null;
             frames++;
             due += dueCount;
@@ -223,10 +238,11 @@ public final class DanmakuWorldLayer {
             capped += cappedCount;
             evicted += evictedCount;
             forced += forcedCount;
+            forcedVideo += forcedVideoCount;
             skipped += skippedCount;
             if (reported && nowMs - lastEmitMs < WINDOW_MS) return null;
             Report report = new Report(frames > 1, frames, due, admitted, dropped, noLane, capped,
-                evicted, forced, skipped);
+                evicted, forced, forcedVideo, skipped);
             reported = true;
             lastEmitMs = nowMs;
             frames = 0;
@@ -237,6 +253,7 @@ public final class DanmakuWorldLayer {
             capped = 0;
             evicted = 0;
             forced = 0;
+            forcedVideo = 0;
             skipped = 0;
             return report;
         }
@@ -247,23 +264,25 @@ public final class DanmakuWorldLayer {
          * @param aggregate true=窗口累计行（frames&gt;1，标明为聚合）；false=首个异常帧的明细行
          */
         record Report(boolean aggregate, int frames, int due, int admitted, int dropped, int noLane,
-                      int capped, int evicted, int forced, int skipped) {}
+                      int capped, int evicted, int forced, int forcedVideo, int skipped) {}
     }
 
     /** 异常日志行的统一格式（两层同口径）：aggregate 标记窗口累计行 */
     static void logAnomalies(String layer, BlockPos pos, AnomalyLog.Report report, int activeCount) {
         KazumiLog.danmaku.debug(
             "{} danmaku anomalies{} at {} (frames {}, due {}, admitted {}, dropped {}, no-free-lane {}, "
-                + "capped-video {}, evicted-for-social {}, forced-overlap {}, advanced-skipped {}, active {})",
+                + "capped-video {}, evicted-for-social {}, forced-overlap {}, forced-overlap-video {}, "
+                + "advanced-skipped {}, active {})",
             layer, report.aggregate() ? " aggregated" : "", pos, report.frames(), report.due(),
             report.admitted(), report.dropped(), report.noLane(), report.capped(), report.evicted(),
-            report.forced(), report.skipped(), activeCount);
+            report.forced(), report.forcedVideo(), report.skipped(), activeCount);
     }
 
     /**
      * 准入时一次算好的绘制参数（绘制循环逐帧只读，零重算、零分配）。
      *
      * @param text         视觉序文本（入场时 {@code getVisualOrderText()} 一次，此后不再重排）
+     * @param index        字符槽索引（前缀推进宽度 + 原始位置）：可见区间二分与子序列撇取都读它
      * @param textWPx      条目文本基础像素宽（未乘 {@code scalePercent}）
      * @param scalePercent 条目 pose 缩放（danmakuFontScale × fontSizePercent/100，钳制到车道高以内）
      * @param color        主色（已按 danmakuOpacity 合成 alpha；房间互发恒金）
@@ -271,8 +290,141 @@ public final class DanmakuWorldLayer {
      * @param frameColor   文字框色（已合成 alpha）
      * @param frameInk     房间互发弹幕的字形外接框（{@code prepareText} 一次，以 y=0 为基准），其余来源为 null
      */
-    private record Visual(FormattedCharSequence text, float textWPx, float scalePercent, int color,
-                          int outlineColor, int frameColor, ScreenRectangle frameInk) {}
+    private record Visual(FormattedCharSequence text, CharIndex index, float textWPx, float scalePercent,
+                          int color, int outlineColor, int frameColor, ScreenRectangle frameInk) {
+        /** 字符槽数 */
+        int chars() {
+            return index.chars();
+        }
+    }
+
+    /**
+     * 视觉序文本的字符槽索引（准入时一次，随 {@link Visual} 缓存）：可见区间裁剪靠它二分，
+     * 绘制期不再重排文本、也不再重算全串宽度。
+     *
+     * @param positions positions[i] = 第 i 个字符槽在视觉序序列中的原始位置，末位为结束位置（供撇取子序列用）
+     * @param prefix    prefix[i] = 前 i 个字符槽的推进宽度（未缩放域，升序；末位为整串宽度）
+     */
+    record CharIndex(int[] positions, float[] prefix) {
+        int chars() {
+            return prefix.length - 1;
+        }
+    }
+
+    /**
+     * 建立字符槽索引：两遍 {@code accept}（先计数再填表），逐码点用 {@code Font#width} 取单字符推进宽度
+     * （与 {@code Font#width(FormattedCharSequence)} 同一口径，仅逐字符向上取整）。整体 O(字符数)，
+     * 只在准入时调用一次。
+     */
+    static CharIndex indexChars(Font font, FormattedCharSequence text) {
+        int[] count = new int[1];
+        text.accept((position, style, codepoint) -> {
+            count[0]++;
+            return true;
+        });
+        int chars = count[0];
+        int[] positions = new int[chars + 1];
+        float[] prefix = new float[chars + 1];
+        int[] cursor = new int[1];
+        int[] tail = new int[2];
+        text.accept((position, style, codepoint) -> {
+            int i = cursor[0]++;
+            positions[i] = position;
+            prefix[i + 1] = prefix[i] + font.width(FormattedCharSequence.codepoint(codepoint, style));
+            tail[0] = position;
+            tail[1] = Character.charCount(codepoint);
+            return true;
+        });
+        positions[chars] = chars == 0 ? 0 : tail[0] + tail[1];
+        return new CharIndex(positions, prefix);
+    }
+
+    /** 可见字符槽区间打包：高 32 位=起点，低 32 位=终点（不含） */
+    static long packRange(int start, int end) {
+        return ((long) start << 32) | (end & 0xFFFFFFFFL);
+    }
+
+    /** 打包区间的起点 */
+    static int rangeStart(long range) {
+        return (int) (range >> 32);
+    }
+
+    /** 打包区间的终点（不含） */
+    static int rangeEnd(long range) {
+        return (int) range;
+    }
+
+    /**
+     * 可见字符槽区间：在前缀推进宽度数组上二分，求与视图可见跨度 [visStart, visEnd)（已缩放域，相对文字起点）
+     * 相交的字符槽 [start, end)——跨界的那一个字符槽算可见，故提交数最多比严格可见槽数多 1。
+     * 完全不可见返回空区间（start == end）。
+     *
+     * @param prefix   前缀推进宽度（未缩放域，升序）
+     * @param scale    条目 pose 缩放
+     * @param visStart 可见跨度起点（已缩放域，为负按 0 处理）
+     * @param visEnd   可见跨度终点（已缩放域）
+     */
+    static long visibleSlots(float[] prefix, float scale, float visStart, float visEnd) {
+        int chars = prefix.length - 1;
+        if (chars <= 0 || visEnd <= visStart || scale <= 0.0f) return packRange(0, 0);
+        float lo = Math.max(0.0f, visStart) / scale;
+        float hi = visEnd / scale;
+        if (hi <= 0.0f || lo >= prefix[chars]) return packRange(0, 0);
+        int start = Math.min(chars - 1, Math.max(0, firstAbove(prefix, lo) - 1));
+        int end = Math.min(chars, firstAtLeast(prefix, hi));
+        return packRange(start, Math.max(start, end));
+    }
+
+    /** 二分：首个 prefix[i] &gt; value 的下标 */
+    private static int firstAbove(float[] prefix, float value) {
+        int low = 0;
+        int high = prefix.length;
+        while (low < high) {
+            int mid = (low + high) >>> 1;
+            if (prefix[mid] <= value) low = mid + 1;
+            else high = mid;
+        }
+        return low;
+    }
+
+    /** 二分：首个 prefix[i] &gt;= value 的下标 */
+    private static int firstAtLeast(float[] prefix, float value) {
+        int low = 0;
+        int high = prefix.length;
+        while (low < high) {
+            int mid = (low + high) >>> 1;
+            if (prefix[mid] < value) low = mid + 1;
+            else high = mid;
+        }
+        return low;
+    }
+
+    /**
+     * 可见区间过滤器（每帧每个被裁剪条目 1 个小对象）：保留原始位置落在
+     * [positions[start], positions[end]) 的字符，位置与样式原样透传，故子序列相对整串的偏移可由
+     * {@code prefix[start]} 还原。
+     */
+    static FormattedCharSequence slice(FormattedCharSequence text, int[] positions, int start, int end) {
+        int from = positions[start];
+        int to = positions[end];
+        return output -> text.accept((position, style, codepoint) ->
+            position < from || (position < to && output.accept(position, style, codepoint)));
+    }
+
+    /**
+     * 车道号收口（纯函数）：屏幕面尺寸/显示区/字号变化后，把在屏条目已缓存的越界车道号收进
+     * [0, laneCount-1]，避免它们停在显示带之外（几何其余部分每帧重算，无尺寸相关缓存）。
+     */
+    static int clampLane(int lane, int laneCount) {
+        return Math.max(0, Math.min(laneCount - 1, lane));
+    }
+
+    /** 超长条目 DEBUG（准入时一条，含字符数与来源）：不影响 displayAt 与车道准入语义 */
+    static void logLongEntry(int chars, DanmakuSource source, BlockPos pos) {
+        if (chars > LONG_ENTRY_CHARS) {
+            KazumiLog.danmaku.debug("Danmaku long entry: {} chars from {} at {}", chars, source, pos);
+        }
+    }
 
     /**
      * 在屏条目。
@@ -354,6 +506,8 @@ public final class DanmakuWorldLayer {
     private static final Map<BlockPos, Long> LAST_VIDEO_TIME = new ConcurrentHashMap<>();
     /** 每屏一份异常日志聚合器（无异常帧不产出日志；随清屏/断线重置） */
     private static final Map<BlockPos, AnomalyLog> ANOMALY = new ConcurrentHashMap<>();
+    /** 每屏上次见到的车道数：车道数变化（屏幕面尺寸/显示区/字号变化）即收口在屏条目的车道号 */
+    private static final Map<BlockPos, Integer> LAST_LANES = new ConcurrentHashMap<>();
     private static long seqCursor;
     /** 滚动车道轮转游标：多条同时可入时用于分散到不同车道 */
     private static int laneCursor;
@@ -391,11 +545,28 @@ public final class DanmakuWorldLayer {
         }
         List<Active> actives = ACTIVE.computeIfAbsent(pos, k -> new ArrayList<>());
 
-        // 车道几何随字号缩放：车道高 = 9×1.4×danmakuFontScale，车道数由显示区高推导（1..12）
-        float baseScale = baseScale(halfH, config);
+        // 车道几何每帧由当前屏幕面尺寸重算（本帧 halfH/halfW），无按屏几何缓存：
+        // 车道高 = 9×1.4×danmakuFontScale（只随字号），车道数由显示带高（danmakuAreaRatio）推导
+        float baseScale = baseScale(config.danmakuScaleWithScreen.get() ? halfH : FIXED_SCALE_BASIS_HALF_H);
         float halfWPx = halfW / baseScale;
         float fontScale = config.danmakuFontScale.get().floatValue();
-        LaneGeometry lanes = LaneGeometry.of(BASE_BAND_H_PX, fontScale);
+        LaneGeometry lanes = LaneGeometry.of(bandH(config.danmakuAreaRatio.get().floatValue()), fontScale);
+        boolean allowOverlap = config.danmakuAllowOverlap.get();
+        // 尺寸变化失效：几何无缓存，但准入时定下的车道号可能越界 → 收进最后一条车道并记一条 DEBUG
+        Integer lastLanes = LAST_LANES.put(pos, lanes.lanes);
+        if (lastLanes != null && lastLanes != lanes.lanes) {
+            int moved = 0;
+            for (int i = 0; i < actives.size(); i++) {
+                Active active = actives.get(i);
+                int clamped = clampLane(active.lane(), lanes.lanes);
+                if (clamped == active.lane()) continue;
+                actives.set(i, new Active(active.entry(), active.visual(), active.startMs(), active.seq(),
+                    active.mode(), active.travelMs(), clamped));
+                moved++;
+            }
+            KazumiLog.danmaku.debug("World layer geometry changed at {}: lanes {} -> {}, reclamped {} of {}",
+                pos, lastLanes, lanes.lanes, moved, actives.size());
+        }
         Font font = Minecraft.getInstance().font;
         // 颜色与文字框几何都在准入时一次算好（每帧只读缓存值，不再逐帧合成 ARGB）
         float alphaFactor = config.danmakuOpacity.get().floatValue();
@@ -409,6 +580,7 @@ public final class DanmakuWorldLayer {
         int capped = 0;
         int evicted = 0;
         int forced = 0;
+        int forcedVideo = 0;
         int skipped = 0;
         for (DanmakuEntry entry : due) {
             // 高级弹幕降级为普通滚动（关闭时跳过），降级后与普通条目同样参与车道准入
@@ -430,22 +602,30 @@ public final class DanmakuWorldLayer {
             float entryScale = Math.min(fontScale * scalePercent, lanes.maxEntryScale());
             float textWPx = font.width(text);
             int color = entryColor(entry, alphaFactor);
-            Visual visual = new Visual(text, textWPx, entryScale, color, outlineColorBase,
+            // 字符槽索引：可见区间裁剪一次建表；超长条目另记一条 DEBUG 便于定位异常弹幕
+            CharIndex index = indexChars(font, text);
+            logLongEntry(index.chars(), entry.source(), pos);
+            Visual visual = new Visual(text, index, textWPx, entryScale, color, outlineColorBase,
                 frameColorBase, entry.source() == DanmakuSource.ROOM_CHAT
                     ? inkBounds(font, text, 0.0f, color, !outline) : null);
-            Admission adm = admit(entry, mode, visual, actives, clocks, travelMs, halfWPx, lanes);
+            Admission adm = admit(entry, mode, visual, actives, clocks, travelMs, halfWPx, lanes,
+                allowOverlap);
             if (adm.active() == null) {
                 noLane++;
                 continue;
             }
             if (adm.evicted() != null) evicted++;
-            if (adm.forced()) forced++;
+            if (adm.forced()) {
+                if (isVideoDanmaku(entry.source())) forcedVideo++;
+                else forced++;
+            }
             actives.add(adm.active());
             accepted++;
         }
         // 每帧异常才输出：首个异常帧一条明细，其后每 5 秒至多一条累计行；无异常帧完全静默
         AnomalyLog.Report report = ANOMALY.computeIfAbsent(pos, k -> new AnomalyLog())
-            .submit(clocks.monoMs(), due.size(), accepted, noLane, capped, evicted, forced, skipped);
+            .submit(clocks.monoMs(), due.size(), accepted, noLane, capped, evicted, forced, forcedVideo,
+                skipped);
         if (report != null) logAnomalies("World layer", pos, report, actives.size());
 
         for (int i = actives.size() - 1; i >= 0; i--) {
@@ -474,17 +654,23 @@ public final class DanmakuWorldLayer {
     }
 
     /**
-     * 像素域→世界域的基准缩放：显示区高（世界单位）= 屏幕面高 × danmakuAreaRatio，除以显示区
-     * 像素域基准高 {@link #BASE_BAND_H_PX}（= 基准车道数 × 基准车道高 9×1.4），故字号缩放只改变
-     * 车道高与车道数、不改变显示区大小。danmakuScaleWithScreen=false 时改用固定基准半高
-     * {@link #FIXED_SCALE_BASIS_HALF_H}（默认屏幕尺寸），字号不再随屏幕方块尺寸缩放。
+     * 像素域→世界域的基准缩放（纯函数）：只由「换算基准半高 × {@link #BASE_AREA_RATIO}」决定，与
+     * danmakuAreaRatio 完全无关——改显示区只改变可见车道数，不会连带缩放字号。调用方按
+     * danmakuScaleWithScreen 决定传屏幕面半高还是固定基准半高 {@link #FIXED_SCALE_BASIS_HALF_H}
+     * （默认屏幕尺寸），关闭缩放时字号不随屏幕方块尺寸变化。
      *
-     * @param halfH 屏幕面半高（世界单位/格）
+     * @param basisHalfH 换算基准半高（世界单位/格）
      */
-    static float baseScale(float halfH, ClientConfig config) {
-        float basisHalfH = config.danmakuScaleWithScreen.get() ? halfH : FIXED_SCALE_BASIS_HALF_H;
-        float bandWorldH = 2 * basisHalfH * config.danmakuAreaRatio.get().floatValue();
-        return bandWorldH / BASE_BAND_H_PX;
+    static float baseScale(float basisHalfH) {
+        return (2 * basisHalfH * BASE_AREA_RATIO) / BASE_BAND_H_PX;
+    }
+
+    /**
+     * 显示带高（像素域）：danmakuAreaRatio 只决定显示区大小（世界层以 {@link #BASE_AREA_RATIO} 为
+     * 像素域↔世界域锚点），字号不参与——车道数 = clamp(floor(本值 / 车道高), 1, 48)。
+     */
+    static float bandH(float areaRatio) {
+        return BASE_BAND_H_PX * areaRatio / BASE_AREA_RATIO;
     }
 
     /** 单条带的提交：滚动带起点恒为显示区顶部；TOP 自顶部向下、BOTTOM 自底部向上（slot 0 最靠下） */
@@ -500,7 +686,19 @@ public final class DanmakuWorldLayer {
             float x = placementX(active, clocks, halfWPx, drawnWPx);
             float yTop = placementYTop(active, lanes);
             // 整条移出显示区即不再提交（按实际绘制外接框求交，避免文字飘到屏幕面之外）
-            if (outsideDisplay(x, yTop, drawnWPx, lanes.laneH, halfWPx)) continue;
+            if (outsideDisplay(x, yTop, drawnWPx, lanes, halfWPx)) continue;
+            // 部分可见：只提交可见字符槽区间（前缀宽度二分，绘制期不重算全串宽度）
+            float half = lanes.areaH / 2.0f;
+            long range = visibleSlots(visual.index().prefix(), q, Math.max(0.0f, -halfWPx - x),
+                Math.min(drawnWPx, halfWPx - x));
+            int start = rangeStart(range);
+            int end = rangeEnd(range);
+            if (start >= end) continue;
+            boolean clipped = start > 0 || end < visual.chars();
+            FormattedCharSequence seq = clipped
+                ? slice(visual.text(), visual.index().positions(), start, end) : visual.text();
+            // 子序列左端对齐：局部域起点右移 prefix[start]（未缩放域），使可见首字仍落在原位
+            float shift = clipped ? visual.index().prefix()[start] : 0.0f;
             // 字形在车道内垂直居中：字号缩放后仍不越出本车道与显示区上下缘
             float localTextTop = textTopInBand(q, lanes.laneH) / q;
 
@@ -509,23 +707,23 @@ public final class DanmakuWorldLayer {
             poseStack.scale(q, q, 1.0f);
             ScreenRectangle ink = visual.frameInk();
             if (ink != null) {
-                // 缓存外接框以 y=0 为基准：绘制期补上条目垂直偏移，内边距除以 q 后屏幕上恒为 FRAME_PAD
+                // 缓存外接框以 y=0 为基准：绘制期补上条目垂直偏移，内边距除以 q 后屏幕上恒为 FRAME_PAD；
+                // 文字框同时裁到显示带内，屏幕外的框边不再提交
                 float pad = FRAME_PAD / q;
-                submitFrame(collector, poseStack, ink.left() - pad, ink.right() + pad,
-                    ink.top() + localTextTop - pad, ink.bottom() + localTextTop + pad,
-                    FRAME_EDGE / q, visual.frameColor());
+                float frameLeft = Math.max(x + q * (ink.left() - pad), -halfWPx);
+                float frameRight = Math.min(x + q * (ink.right() + pad), halfWPx);
+                if (frameRight > frameLeft) {
+                    submitFrame(collector, poseStack, (frameLeft - x) / q, (frameRight - x) / q,
+                        ink.top() + localTextTop - pad, ink.bottom() + localTextTop + pad,
+                        FRAME_EDGE / q, visual.frameColor());
+                }
             }
-            collector.submitText(poseStack, 0.0f, localTextTop, visual.text(),
+            collector.submitText(poseStack, shift, localTextTop, seq,
                 !outline, Font.DisplayMode.POLYGON_OFFSET,
                 LightCoordsUtil.FULL_BRIGHT, visual.color(), 0,
                 outline ? visual.outlineColor() : 0);
             poseStack.popPose();
         }
-    }
-
-    /** 显示带半高（像素）：danmakuAreaRatio 指定的显示区居中于屏幕面，恒为 {@link #BASE_BAND_H_PX}/2，不随字号变化 */
-    private static float halfBand() {
-        return BASE_BAND_H_PX / 2.0f;
     }
 
     /** 条目落点横坐标（屏幕面局部像素坐标：原点为面中心，x 向为 SCROLL 起跑侧） */
@@ -542,9 +740,9 @@ public final class DanmakuWorldLayer {
             : halfWPx - progress * travel;
     }
 
-    /** 条目落点纵坐标（y 向为下缘侧）：车道自显示区上/下缘按车道高铺开，底部带槽位 0 最靠下 */
+    /** 条目落点纵坐标（y 向为下缘侧）：车道自显示带（居中于屏幕面）上/下缘按车道高铺开 */
     private static float placementYTop(Active active, LaneGeometry lanes) {
-        return -halfBand() + (active.mode() == DanmakuMode.BOTTOM
+        return -lanes.areaH / 2.0f + (active.mode() == DanmakuMode.BOTTOM
             ? lanes.bottomOf(active.lane()) : lanes.topOf(active.lane()));
     }
 
@@ -561,10 +759,11 @@ public final class DanmakuWorldLayer {
     }
 
     /** 整条落在显示区之外（横向按屏幕面宽度、纵向按显示带）即不提交：按绘制外接框求交 */
-    private static boolean outsideDisplay(float x, float yTop, float drawnWPx, float laneH, float halfWPx) {
-        float half = halfBand();
+    private static boolean outsideDisplay(float x, float yTop, float drawnWPx, LaneGeometry lanes,
+                                          float halfWPx) {
+        float half = lanes.areaH / 2.0f;
         return x >= halfWPx || x + drawnWPx <= -halfWPx
-            || yTop >= half || yTop + laneH <= -half;
+            || yTop >= half || yTop + lanes.laneH <= -half;
     }
 
     /** 文字实际绘制外接框（条目局部域，以 y=0 为基准）：取字形四边形真实边界，空文本返回 null */
@@ -586,23 +785,26 @@ public final class DanmakuWorldLayer {
      *
      * <p>社交条目永不丢弃：抢占腾位时会从 actives 就地移除被抢占条目，仍无空位则被迫重叠入轨。
      *
-     * @param visual 准入时算好的绘制参数（文本/基础宽度/缩放/配色/文字框外接框）
-     * @param lanes  本帧车道几何（车道高与车道数随字号缩放）
+     * @param visual       准入时算好的绘制参数（文本/基础宽度/缩放/配色/文字框外接框）
+     * @param lanes        本帧车道几何（车道高与车道数随字号缩放）
+     * @param allowOverlap danmakuAllowOverlap：开启后视频片内条目无空车道时压叠上屏而非丢弃
      * @return 准入结果；active 为 null 表示丢弃该条
      */
     private static Admission admit(DanmakuEntry entry, DanmakuMode mode, Visual visual,
                                    List<Active> actives, Clocks clocks, long travelMs, float halfWPx,
-                                   LaneGeometry lanes) {
+                                   LaneGeometry lanes, boolean allowOverlap) {
         long seq = seqCursor++;
         long startMs = clocks.of(entry.source());
         int pinSlots = lanes.pinSlots();
         return switch (mode) {
-            case TOP -> pinAdmit(entry, visual, actives, clocks, DanmakuMode.TOP, seq, startMs, pinSlots);
-            case BOTTOM -> pinAdmit(entry, visual, actives, clocks, DanmakuMode.BOTTOM, seq, startMs, pinSlots);
+            case TOP -> pinAdmit(entry, visual, actives, clocks, DanmakuMode.TOP, seq, startMs,
+                pinSlots, allowOverlap);
+            case BOTTOM -> pinAdmit(entry, visual, actives, clocks, DanmakuMode.BOTTOM, seq, startMs,
+                pinSlots, allowOverlap);
             case SCROLL, REVERSE -> {
                 // 占位宽度按条目实际缩放后的绘制宽度计（与 HUD 侧同判据）
                 LanePick pick = pickLane(actives, mode, visual.textWPx() * visual.scalePercent(), halfWPx,
-                    clocks, travelMs, !isVideoDanmaku(entry.source()), lanes.lanes);
+                    clocks, travelMs, !isVideoDanmaku(entry.source()), allowOverlap, lanes.lanes);
                 if (pick.lane() < 0) yield Admission.DROPPED;
                 Active victim = pick.evictIndex() >= 0 ? actives.remove(pick.evictIndex()) : null;
                 yield new Admission(new Active(entry, visual, startMs, seq, mode, (int) travelMs,
@@ -612,14 +814,17 @@ public final class DanmakuWorldLayer {
         };
     }
 
-    /** 固定项准入：优先空槽；社交条目无空槽时占「最接近释放」的槽位（被迫重叠并计入 forced） */
+    /**
+     * 固定项准入：优先空槽；槽位满时社交条目恒占「最接近释放」的槽位压叠（forced），
+     * 视频片内条目仅在 danmakuAllowOverlap 开启时同样压叠，否则丢弃（口径与滚动车道一致）。
+     */
     private static Admission pinAdmit(DanmakuEntry entry, Visual visual, List<Active> actives,
                                       Clocks clocks, DanmakuMode pinMode, long seq, long startMs,
-                                      int pinSlots) {
+                                      int pinSlots, boolean allowOverlap) {
         int slot = firstFreePin(actives, pinMode, pinSlots);
         boolean forced = false;
         if (slot < 0) {
-            if (isVideoDanmaku(entry.source())) return Admission.DROPPED;
+            if (isVideoDanmaku(entry.source()) && !allowOverlap) return Admission.DROPPED;
             slot = oldestPin(actives, pinMode, clocks, pinSlots);
             if (slot < 0) return Admission.DROPPED;
             forced = true;
@@ -662,11 +867,13 @@ public final class DanmakuWorldLayer {
      * 3) 社交条目仍无位时放进「最空」的车道（该车道最后一条已推进像素最多者，重叠量最小）并标记被迫重叠。
      * 视频片内条目只走第一遍，无位即丢弃。
      *
-     * @param social    该条是否为社交条目（房间互发/直播）：可抢占、可被迫重叠
-     * @param laneCount 本帧车道数（随字号缩放）
+     * @param social       该条是否为社交条目（房间互发/直播）：可抢占、恒可压叠
+     * @param allowOverlap danmakuAllowOverlap：视频片内条目是否允许压叠上屏（社交条目不受该开关影响）
+     * @param laneCount    本帧车道数（随字号缩放）
      */
     private static LanePick pickLane(List<Active> actives, DanmakuMode mode, float newWPx, float halfWPx,
-                                     Clocks clocks, long travelMs, boolean social, int laneCount) {
+                                     Clocks clocks, long travelMs, boolean social, boolean allowOverlap,
+                                     int laneCount) {
         for (int offset = 0; offset < laneCount; offset++) {
             int lane = Math.floorMod(laneCursor + offset, laneCount);
             if (laneReleased(actives, mode, lane, newWPx, halfWPx, clocks, travelMs)) {
@@ -674,15 +881,19 @@ public final class DanmakuWorldLayer {
                 return new LanePick(lane, -1, false);
             }
         }
-        if (!social) return new LanePick(-1, -1, false);
-        for (int offset = 0; offset < laneCount; offset++) {
-            int lane = Math.floorMod(laneCursor + offset, laneCount);
-            int victim = evictCandidate(actives, mode, lane, clocks);
-            if (victim < 0) continue;
-            if (!laneReleased(actives, mode, lane, newWPx, halfWPx, clocks, travelMs, victim)) continue;
-            laneCursor = Math.floorMod(lane + 1, laneCount);
-            return new LanePick(lane, victim, false);
+        // 抢占腾位是社交条目特权（视频条目不允许挤掉别人）
+        if (social) {
+            for (int offset = 0; offset < laneCount; offset++) {
+                int lane = Math.floorMod(laneCursor + offset, laneCount);
+                int victim = evictCandidate(actives, mode, lane, clocks);
+                if (victim < 0) continue;
+                if (!laneReleased(actives, mode, lane, newWPx, halfWPx, clocks, travelMs, victim)) continue;
+                laneCursor = Math.floorMod(lane + 1, laneCount);
+                return new LanePick(lane, victim, false);
+            }
         }
+        // 压叠兜底：社交条目恒定可用；视频片内条目仅在 danmakuAllowOverlap 开启时可用
+        if (!social && !allowOverlap) return new LanePick(-1, -1, false);
         int bestLane = -1;
         float mostAdvance = -1.0f;
         for (int lane = 0; lane < laneCount; lane++) {
@@ -804,6 +1015,7 @@ public final class DanmakuWorldLayer {
         ACTIVE.clear();
         LAST_VIDEO_TIME.clear();
         ANOMALY.clear();
+        LAST_LANES.clear();
     }
 
     /** 安装 Store 清屏回调（懒注册一次）：换集/停止时立即释放该屏在途弹幕与场景态基线 */
@@ -814,6 +1026,7 @@ public final class DanmakuWorldLayer {
             ACTIVE.remove(pos);
             LAST_VIDEO_TIME.remove(pos);
             ANOMALY.remove(pos);
+            LAST_LANES.remove(pos);
         });
     }
 

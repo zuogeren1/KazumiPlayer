@@ -41,6 +41,8 @@ public class ClientConfig {
     public final ModConfigSpec.BooleanValue danmakuShowAdvanced;
     // 弹幕密度档位（决定同屏上限）
     public final ModConfigSpec.EnumValue<DanmakuDensity> danmakuDensity;
+    // 允许弹幕重叠显示（密集时不再因无空闲车道被丢弃）
+    public final ModConfigSpec.BooleanValue danmakuAllowOverlap;
     // 世界内屏幕的弹幕字号随屏幕尺寸缩放
     public final ModConfigSpec.BooleanValue danmakuScaleWithScreen;
     // 弹幕屏蔽词（换行或逗号分隔）
@@ -187,6 +189,11 @@ public class ClientConfig {
                 .comment("弹幕密度：决定单屏同屏最大条数（NORMAL=60 / MORE=100 / OVERLAP=不设上限）",
                          "房间互发与直播弹幕不受此上限约束，始终优先上屏")
                 .defineEnum("danmakuDensity", DanmakuDensity.NORMAL);
+
+        danmakuAllowOverlap = builder
+                .comment("允许弹幕重叠显示：开启后密集弹幕不再因无空闲车道被丢弃，而是允许相互压叠",
+                         "配合「弹幕密度=重叠」使用；关闭时密集弹幕按占用判据丢弃（不重叠）")
+                .define("danmakuAllowOverlap", false);
 
         danmakuScaleWithScreen = builder
                 .comment("世界内屏幕的弹幕字号随屏幕方块尺寸缩放（关闭后使用固定世界字号）")

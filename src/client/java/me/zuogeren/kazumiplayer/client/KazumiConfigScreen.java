@@ -174,6 +174,13 @@ public final class KazumiConfigScreen {
                 .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuDensity.set(value))
                 .build());
         danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_allow_overlap"),
+                        ClientConfig.CONFIG.danmakuAllowOverlap.get())
+                .setDefaultValue(false)
+                .setTooltip(Component.translatable("kazumiplayer.config.danmaku_allow_overlap_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuAllowOverlap.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
                         Component.translatable("kazumiplayer.config.danmaku_show_scroll"),
                         ClientConfig.CONFIG.danmakuShowScroll.get())
                 .setDefaultValue(true)

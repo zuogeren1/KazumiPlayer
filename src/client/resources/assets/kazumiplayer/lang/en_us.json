@@ -79,6 +79,8 @@
   "kazumiplayer.config.danmaku_room_chat": "Show in-room player danmaku",
   "kazumiplayer.config.danmaku_density": "Danmaku density (on-screen cap)",
   "kazumiplayer.config.danmaku_density_tooltip": "NORMAL=60 / MORE=100 / OVERLAP=unlimited; in-room and live danmaku ignore this cap and always take priority",
+  "kazumiplayer.config.danmaku_allow_overlap": "Allow danmaku to overlap",
+  "kazumiplayer.config.danmaku_allow_overlap_tooltip": "When on, dense danmaku are no longer dropped when no lane is free; they are allowed to overlap instead (pairs with density = OVERLAP)",
   "kazumiplayer.config.danmaku_show_scroll": "Show scrolling danmaku",
   "kazumiplayer.config.danmaku_show_top": "Show top-fixed danmaku",
   "kazumiplayer.config.danmaku_show_bottom": "Show bottom-fixed danmaku",
