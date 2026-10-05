@@ -138,6 +138,151 @@ public final class KazumiConfigScreen {
                 .setSaveConsumer(value -> ClientConfig.CONFIG.fullscreenOpacity.set(value))
                 .build());
 
+        // ---- 弹幕（B 站片内/直播 + 房间互发共池；R 站面板同口径） ----
+        ConfigCategory danmakuCategory = builder.getOrCreateCategory(
+                Component.translatable("kazumiplayer.config.category_danmaku"));
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_enabled"),
+                        ClientConfig.CONFIG.danmakuEnabled.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuEnabled.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_bili_video"),
+                        ClientConfig.CONFIG.danmakuBilibiliVideo.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuBilibiliVideo.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_bili_live"),
+                        ClientConfig.CONFIG.danmakuBilibiliLive.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuBilibiliLive.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_room_chat"),
+                        ClientConfig.CONFIG.danmakuRoomChat.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuRoomChat.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startEnumSelector(
+                        Component.translatable("kazumiplayer.config.danmaku_density"),
+                        ClientConfig.DanmakuDensity.class,
+                        ClientConfig.CONFIG.danmakuDensity.get())
+                .setDefaultValue(ClientConfig.DanmakuDensity.NORMAL)
+                .setTooltip(Component.translatable("kazumiplayer.config.danmaku_density_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuDensity.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_show_scroll"),
+                        ClientConfig.CONFIG.danmakuShowScroll.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuShowScroll.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_show_top"),
+                        ClientConfig.CONFIG.danmakuShowTop.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuShowTop.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_show_bottom"),
+                        ClientConfig.CONFIG.danmakuShowBottom.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuShowBottom.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_show_colored"),
+                        ClientConfig.CONFIG.danmakuShowColored.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuShowColored.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_show_advanced"),
+                        ClientConfig.CONFIG.danmakuShowAdvanced.get())
+                .setDefaultValue(false)
+                .setTooltip(Component.translatable("kazumiplayer.config.danmaku_show_advanced_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuShowAdvanced.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_outline"),
+                        ClientConfig.CONFIG.danmakuOutline.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuOutline.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startIntSlider(
+                        Component.translatable("kazumiplayer.config.danmaku_opacity"),
+                        (int) Math.round(ClientConfig.CONFIG.danmakuOpacity.get() * 100.0),
+                        10, 100)
+                .setDefaultValue(90)
+                .setTextGetter(percent -> Component.translatable(
+                        "kazumiplayer.config.danmaku_opacity_value", percent))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuOpacity.set(value / 100.0))
+                .build());
+        danmakuCategory.addEntry(entry.startIntSlider(
+                        Component.translatable("kazumiplayer.config.danmaku_font_scale"),
+                        (int) Math.round(ClientConfig.CONFIG.danmakuFontScale.get() * 100.0),
+                        50, 300)
+                .setDefaultValue(100)
+                .setTextGetter(percent -> Component.translatable(
+                        "kazumiplayer.config.danmaku_font_scale_value", percent))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuFontScale.set(value / 100.0))
+                .build());
+        danmakuCategory.addEntry(entry.startIntSlider(
+                        Component.translatable("kazumiplayer.config.danmaku_speed"),
+                        (int) Math.round(ClientConfig.CONFIG.danmakuSpeedMultiplier.get() * 100.0),
+                        25, 400)
+                .setDefaultValue(100)
+                .setTextGetter(percent -> Component.translatable(
+                        "kazumiplayer.config.danmaku_speed_value", percent))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuSpeedMultiplier.set(value / 100.0))
+                .build());
+        danmakuCategory.addEntry(entry.startIntSlider(
+                        Component.translatable("kazumiplayer.config.danmaku_area_ratio"),
+                        (int) Math.round(ClientConfig.CONFIG.danmakuAreaRatio.get() * 100.0),
+                        10, 100)
+                .setDefaultValue(50)
+                .setTextGetter(percent -> Component.translatable(
+                        "kazumiplayer.config.danmaku_area_ratio_value", percent))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuAreaRatio.set(value / 100.0))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_scale_with_screen"),
+                        ClientConfig.CONFIG.danmakuScaleWithScreen.get())
+                .setDefaultValue(true)
+                .setTooltip(Component.translatable("kazumiplayer.config.danmaku_scale_with_screen_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuScaleWithScreen.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startIntField(
+                        Component.translatable("kazumiplayer.config.danmaku_time_offset"),
+                        ClientConfig.CONFIG.danmakuTimeOffsetMs.get())
+                .setDefaultValue(0).setMin(-60000).setMax(60000)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuTimeOffsetMs.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_fullscreen"),
+                        ClientConfig.CONFIG.danmakuShowInFullscreen.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuShowInFullscreen.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startStrField(
+                        Component.translatable("kazumiplayer.config.danmaku_block_words"),
+                        ClientConfig.CONFIG.danmakuBlockWords.get())
+                .setDefaultValue("")
+                .setTooltip(Component.translatable("kazumiplayer.config.danmaku_block_words_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuBlockWords.set(value == null ? "" : value))
+                .build());
+        danmakuCategory.addEntry(entry.startBooleanToggle(
+                        Component.translatable("kazumiplayer.config.danmaku_auto_sync_block_words"),
+                        ClientConfig.CONFIG.danmakuAutoSyncBlockWords.get())
+                .setDefaultValue(true)
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuAutoSyncBlockWords.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startTextDescription(
+                Component.translatable("kazumiplayer.config.danmaku_account_words_status",
+                        accountBlockWordCount()))
+            .build());
+
         // ---- B 站（扫码登录 / 手工粘贴凭据；本地优先于服务端下发的共享凭据） ----
         ConfigCategory biliCategory = builder.getOrCreateCategory(
                 Component.translatable("kazumiplayer.config.category_bilibili"));
@@ -193,5 +338,16 @@ public final class KazumiConfigScreen {
         });
 
         return builder.build();
+    }
+
+    /** 账号同步下来的屏蔽词条数（换行分隔，空行不计） */
+    private static int accountBlockWordCount() {
+        String raw = ClientConfig.CONFIG.danmakuAccountBlockWords.get();
+        if (raw == null || raw.isBlank()) return 0;
+        int count = 0;
+        for (String line : raw.split("\\R")) {
+            if (!line.isBlank()) count++;
+        }
+        return count;
     }
 }
