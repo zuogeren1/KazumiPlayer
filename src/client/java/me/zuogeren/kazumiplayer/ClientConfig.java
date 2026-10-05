@@ -43,6 +43,10 @@ public class ClientConfig {
     public final ModConfigSpec.EnumValue<DanmakuDensity> danmakuDensity;
     // 允许弹幕重叠显示（密集时不再因无空闲车道被丢弃）
     public final ModConfigSpec.BooleanValue danmakuAllowOverlap;
+    // 屏幕前方弹幕深度层数（1=仅画面内单层）
+    public final ModConfigSpec.IntValue danmakuDepthLayers;
+    // 深度层间距（格）
+    public final ModConfigSpec.DoubleValue danmakuDepthSpacing;
     // 世界内屏幕的弹幕字号随屏幕尺寸缩放
     public final ModConfigSpec.BooleanValue danmakuScaleWithScreen;
     // 弹幕屏蔽词（换行或逗号分隔）
@@ -194,6 +198,16 @@ public class ClientConfig {
                 .comment("允许弹幕重叠显示：开启后密集弹幕不再被丢弃，而是允许相互压叠（同时解除密度上限）",
                          "弹幕密度=重叠 时自动等同开启；关闭时按占用判据与密度上限丢弃")
                 .define("danmakuAllowOverlap", false);
+
+        danmakuDepthLayers = builder
+                .comment("屏幕前方弹幕层数：沿屏幕法线在屏幕前方分层绘制（1=单层，弹幕只在画面内）",
+                         "近层因透视显得更大，层数越多同屏可见条数越多（同屏上限按层数等比放大），侧看时层次感明显",
+                         "代价：绘制成本随层数线性上升，且弹幕会飘在屏幕方块前方的空中")
+                .defineInRange("danmakuDepthLayers", 1, 1, 4);
+
+        danmakuDepthSpacing = builder
+                .comment("深度层间距（格，层数>1 时生效）")
+                .defineInRange("danmakuDepthSpacing", 0.25, 0.05, 2.0);
 
         danmakuScaleWithScreen = builder
                 .comment("世界内屏幕的弹幕字号随屏幕方块尺寸缩放（关闭后使用固定世界字号）")

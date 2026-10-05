@@ -430,21 +430,21 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
      * 渲染包围盒必须包含伸出方块上方的屏幕面，否则玩家视角看不到方块本体
      * AABB 时整个 BE 被 frustum 剔除，屏幕面消失（方块本体由 chunk 渲染所以正常）。
      * 需计入用户设置的 XYZ 偏移，否则偏移后的屏幕面会被剔除。
+     * 弹幕深度分层的层平面在屏幕面之外另占 {@code danmakuDepthSpacing × (层数−1)} 格的进深，
+     * 故一并计入（层数=1 时展开量为 0），否则最深的几层会被视锥剔除；
+     * 算式见 {@link me.zuogeren.kazumiplayer.client.danmaku.DanmakuDepthLayers#renderBounds}。
      */
     @Override
     public AABB getRenderBoundingBox(VideoScreenBlockEntity blockEntity) {
         BlockPos pos = blockEntity.getBlockPos();
-        float halfW = blockEntity.getScreenWidth() / 2.0f;
-        float halfH = blockEntity.getScreenHeight() / 2.0f;
-        // 屏幕面：默认中心在方块上方 1.5+halfH，半宽 halfW，半高 halfH；水平方向按最大半径覆盖
-        double r = Math.max(1.0, halfW) + 0.5;
-        double cx = pos.getX() + 0.5 + blockEntity.getOffsetX();
-        double cy = pos.getY() + 1.5 + blockEntity.getOffsetY() + halfH;
-        double cz = pos.getZ() + 0.5 + blockEntity.getOffsetZ();
-        return new AABB(
-                Math.min(pos.getX() + 0.5 - r, cx - r), Math.min(pos.getY(), cy - halfH - 1.0),
-                Math.min(pos.getZ() + 0.5 - r, cz - r),
-                Math.max(pos.getX() + 0.5 + r, cx + r), Math.max(pos.getY() + 1.5 + halfH * 2 + 1.0, cy + halfH + 1.0),
-                Math.max(pos.getZ() + 0.5 + r, cz + r));
+        var clientConfig = me.zuogeren.kazumiplayer.ClientConfig.CONFIG;
+        var bounds = me.zuogeren.kazumiplayer.client.danmaku.DanmakuDepthLayers.renderBounds(
+                pos.getX(), pos.getY(), pos.getZ(),
+                blockEntity.getScreenWidth() / 2.0f, blockEntity.getScreenHeight() / 2.0f,
+                blockEntity.getOffsetX(), blockEntity.getOffsetY(), blockEntity.getOffsetZ(),
+                blockEntity.getFacing().getStepX(), blockEntity.getFacing().getStepZ(),
+                clientConfig.danmakuDepthLayers.get(), clientConfig.danmakuDepthSpacing.get());
+        return new AABB(bounds.minX(), bounds.minY(), bounds.minZ(),
+                bounds.maxX(), bounds.maxY(), bounds.maxZ());
     }
 }

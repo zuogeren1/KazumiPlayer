@@ -244,6 +244,20 @@ public final class KazumiConfigScreen {
                         "kazumiplayer.config.danmaku_speed_value", percent))
                 .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuSpeedMultiplier.set(value / 100.0))
                 .build());
+        danmakuCategory.addEntry(entry.startIntField(
+                        Component.translatable("kazumiplayer.config.danmaku_depth_layers"),
+                        ClientConfig.CONFIG.danmakuDepthLayers.get())
+                .setDefaultValue(1).setMin(1).setMax(4)
+                .setTooltip(Component.translatable("kazumiplayer.config.danmaku_depth_layers_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuDepthLayers.set(value))
+                .build());
+        danmakuCategory.addEntry(entry.startDoubleField(
+                        Component.translatable("kazumiplayer.config.danmaku_depth_spacing"),
+                        ClientConfig.CONFIG.danmakuDepthSpacing.get())
+                .setDefaultValue(0.25).setMin(0.05).setMax(2.0)
+                .setTooltip(Component.translatable("kazumiplayer.config.danmaku_depth_spacing_tooltip"))
+                .setSaveConsumer(value -> ClientConfig.CONFIG.danmakuDepthSpacing.set(value))
+                .build());
         danmakuCategory.addEntry(entry.startIntSlider(
                         Component.translatable("kazumiplayer.config.danmaku_area_ratio"),
                         (int) Math.round(ClientConfig.CONFIG.danmakuAreaRatio.get() * 100.0),

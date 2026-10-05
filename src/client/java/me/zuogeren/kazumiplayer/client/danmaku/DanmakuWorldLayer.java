@@ -101,6 +101,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * （原 {@code Placement} 中间记录改成两个标量落点方法；文字框四条边合并为一次
  * {@code submitCustomGeometry}——该捕获式 lambda 是延迟提交管线的固有分配，仅房间互发条目每帧一次）。
  *
+ * <p>深度分层（{@link DanmakuDepthLayers}）：屏幕面前方沿法线分出若干平行层来提高同屏可见条数——
+ * 新条目按轮转落到各层，每层各持一份打包器与固定槽位游标，<b>层内</b>仍执行上面全部纵向打包与碰撞
+ * 判据（同层零相交不变量不变），<b>层间</b>不做相交判定（层间距 0.05–2.0 格远大于文本框厚度）；
+ * 同屏上限按层数等比放大（见 {@link DanmakuDepthLayers#effectiveScreenCap}），否则层数只会让每层变稀；
+ * 绘制时逐层沿屏幕面法线朝观察者平移 {@code layerIndex × danmakuDepthSpacing} 格（世界单位、
+ * 在像素域缩放之前施加），层序即远→近；层数=1 时不产生任何平移，绘制路径与单层实现逐位一致。
+ * 全屏 HUD 层（{@link DanmakuHudLayer}）为二维画面，不做深度分层、不受本功能影响。
+ *
  * <p>场景态清理（f10 裁定 A 的渲染侧责任）：Store 内部只压缩过期条目，跳变后的活动弹幕由本层
  * 按「上帧视频时间」自检清理——|Δ| > {@link ClientDanmakuStore#SEEK_DETECT_MS} 时清空该屏 ACTIVE，
  * 避免 seek 后旧弹幕继续飘完行程。
@@ -538,9 +546,13 @@ public final class DanmakuWorldLayer {
         return source == DanmakuSource.BILIBILI_VIDEO;
     }
 
-    /** 容量闸：只拦视频片内条目（社交条目不受 danmakuScreenCap 上限约束，始终优先上屏） */
-    static boolean capBlocks(DanmakuSource source, int activeCount, ClientConfig config) {
-        return isVideoDanmaku(source) && activeCount >= config.danmakuScreenCap();
+    /**
+     * 容量闸：只拦视频片内条目（社交条目不受上限约束，始终优先上屏）。
+     *
+     * @param screenCap 有效同屏上限 = danmakuScreenCap() × 层数（见 {@link DanmakuDepthLayers#effectiveScreenCap}）
+     */
+    static boolean capBlocks(DanmakuSource source, int activeCount, int screenCap) {
+        return isVideoDanmaku(source) && activeCount >= screenCap;
     }
 
     /** B 站来源（片内/直播）：白色过滤开关只作用于这两类来源 */
@@ -564,7 +576,8 @@ public final class DanmakuWorldLayer {
         return showAdvanced ? DanmakuMode.SCROLL : null;
     }
 
-    private static final Map<BlockPos, List<Active>> ACTIVE = new ConcurrentHashMap<>();
+    /** 每屏场景态：各深度层一份在屏条目列表 + 轮转分配游标 */
+    private static final Map<BlockPos, DepthScene> ACTIVE = new ConcurrentHashMap<>();
     /** 该屏上一帧用于到期判定的视频时间（场景态清理基线） */
     private static final Map<BlockPos, Long> LAST_VIDEO_TIME = new ConcurrentHashMap<>();
     /** 每屏一份异常日志聚合器（无异常帧不产出日志；随清屏/断线重置） */
@@ -572,18 +585,73 @@ public final class DanmakuWorldLayer {
     /** 每屏上次见到的车道数：仅在变化时记一条几何收口 DEBUG（收口本身每帧按当前几何做） */
     private static final Map<BlockPos, Integer> LAST_LANES = new ConcurrentHashMap<>();
     private static long seqCursor;
-    /** 滚动/逆向条目的连续纵向打包器（每层一份实例：暂存数组独立，互不影响） */
-    private static final DanmakuPack PACK = new DanmakuPack();
-    /** 固定槽位分配器（TOP/BOTTOM 各一份轮转游标）：有空槽必占空槽，槽位用尽后在各槽位间轮转分散压叠 */
-    private static final DanmakuPinSlots PIN_TOP = new DanmakuPinSlots();
-    private static final DanmakuPinSlots PIN_BOTTOM = new DanmakuPinSlots();
+    /**
+     * 滚动/逆向条目的连续纵向打包器（深度层各一份实例：暂存数组独立，层间互不影响）；
+     * 层数=1 时只用第 0 份，单层路径即该实例。
+     */
+    private static final DanmakuPack[] PACKS = new DanmakuPack[DanmakuDepthLayers.MAX_LAYERS];
+    /**
+     * 固定槽位分配器（深度层 × TOP/BOTTOM 各一份轮转游标）：有空槽必占空槽，
+     * 槽位用尽后在各槽位间轮转分散压叠。
+     */
+    private static final DanmakuPinSlots[] PIN_TOPS = new DanmakuPinSlots[DanmakuDepthLayers.MAX_LAYERS];
+    private static final DanmakuPinSlots[] PIN_BOTTOMS = new DanmakuPinSlots[DanmakuDepthLayers.MAX_LAYERS];
     private static boolean clearHookInstalled;
+
+    static {
+        for (int layer = 0; layer < DanmakuDepthLayers.MAX_LAYERS; layer++) {
+            PACKS[layer] = new DanmakuPack();
+            PIN_TOPS[layer] = new DanmakuPinSlots();
+            PIN_BOTTOMS[layer] = new DanmakuPinSlots();
+        }
+    }
+
+    /**
+     * 每屏场景态：各深度层一份在屏条目列表 + 轮转分配游标。
+     * 层列表按深度层号索引、按需增长；层数下调时超出层的条目随列表一起丢弃（不再绘制也不计入容量闸）。
+     */
+    private static final class DepthScene {
+
+        private final List<List<Active>> layers = new ArrayList<>();
+        /** 轮转分配游标：第 n 个新条目落到第 (n mod 层数) 层 */
+        private long cursor;
+
+        /** 指定深度层的在屏条目列表（不存在则新建） */
+        List<Active> layer(int index) {
+            while (layers.size() <= index) layers.add(new ArrayList<>());
+            return layers.get(index);
+        }
+
+        /** 层数收口：丢弃超出当前层数的在屏条目 */
+        void truncate(int depth) {
+            while (layers.size() > depth) layers.remove(layers.size() - 1);
+        }
+
+        /** 全部深度层的在屏条目总数（容量闸与异常日志口径） */
+        int total() {
+            int sum = 0;
+            for (List<Active> list : layers) sum += list.size();
+            return sum;
+        }
+
+        boolean isEmpty() {
+            for (List<Active> list : layers) {
+                if (!list.isEmpty()) return false;
+            }
+            return true;
+        }
+    }
 
     private DanmakuWorldLayer() {}
 
     /**
-     * 渲染帧入口：消费到期条目并绘制活动弹幕。
+     * 渲染帧入口：消费到期条目，按深度层轮转分配后逐层绘制活动弹幕。
      * 调用方保证已处于屏幕面局部坐标（translate+rotateToFacing 之后、popPose 之前）。
+     *
+     * <p>深度分层（{@link DanmakuDepthLayers}）：新条目按轮转落到各层，每层各自持打包器与固定槽位
+     * 分配器、各自执行原有的连续纵向打包与碰撞判据（同层零相交不变量不变）；同屏上限按层数等比放大；
+     * 绘制时逐层沿屏幕面法线朝观察者平移 {@code layerIndex × danmakuDepthSpacing} 格
+     * （{@link DanmakuDepthLayers#OBSERVER_Z_SIGN}），层数=1 时不产生任何平移。
      *
      * @param bottomReserveWorld 屏幕面底部 UI 占用（世界单位/格）：进度条高 + 它与屏幕面下缘的间距
      * @param bottomUiGapWorld   进度条上缘到屏幕面下缘的间距（世界单位/格）：显示带越过面下缘时据此定位
@@ -602,6 +670,9 @@ public final class DanmakuWorldLayer {
         long travelMs = scrollTravelMs();
         long videoTimeMs = state.player != null ? state.player.getTimeMs() : 0;
         Clocks clocks = new Clocks(MonoClock.millis(), videoTimeMs);
+        // 深度分层参数（层数=1 时恒第 0 层且平移量为 0）
+        int depth = DanmakuDepthLayers.layers(config.danmakuDepthLayers.get());
+        double depthSpacing = DanmakuDepthLayers.spacing(config.danmakuDepthSpacing.get());
 
         // 场景态清理先于出队：跳变帧的旧弹幕整批作废
         if (clearOnSeek(pos, videoTimeMs)) {
@@ -614,7 +685,9 @@ public final class DanmakuWorldLayer {
         if (due.size() > 1) {
             due.sort((a, b) -> Integer.compare(sourcePriority(a.source()), sourcePriority(b.source())));
         }
-        List<Active> actives = ACTIVE.computeIfAbsent(pos, k -> new ArrayList<>());
+        DepthScene scene = ACTIVE.computeIfAbsent(pos, k -> new DepthScene());
+        // 层数下调时丢弃超出层的在屏条目（不再绘制，也不计入容量闸）
+        scene.truncate(depth);
 
         // 车道几何每帧由当前屏幕面尺寸重算（本帧 halfH/halfW），无按屏几何缓存：
         // 车道高 = 9×1.4×danmakuFontScale（只随字号），车道数由显示带高（danmakuAreaRatio）
@@ -635,12 +708,15 @@ public final class DanmakuWorldLayer {
             || config.danmakuDensity.get() == ClientConfig.DanmakuDensity.OVERLAP;
         // 尺寸变化失效：几何每帧重算（无按屏缓存），在屏条目的纵向坐标按本帧几何收口——
         // 滚动/逆向的落点收进 [0, 可用下界 − 条目高]、固定项的槽位收进 [0, 车道数−1]
-        int moved = refitActives(actives, lanes);
+        int moved = 0;
+        for (int layer = 0; layer < depth; layer++) {
+            moved += refitActives(scene.layer(layer), lanes);
+        }
         Integer lastLanes = LAST_LANES.put(pos, lanes.lanes);
         if (moved > 0 || (lastLanes != null && lastLanes != lanes.lanes)) {
             KazumiLog.danmaku.debug(
                 "World layer geometry refit at {}: lanes {} -> {}, bottomLimit {}, clamped {} of {}",
-                pos, lastLanes, lanes.lanes, lanes.bottomLimit, moved, actives.size());
+                pos, lastLanes, lanes.lanes, lanes.bottomLimit, moved, scene.total());
         }
         Font font = Minecraft.getInstance().font;
         // 颜色与文字框几何都在准入时一次算好（每帧只读缓存值，不再逐帧合成 ARGB）
@@ -650,6 +726,9 @@ public final class DanmakuWorldLayer {
         int outlineColorBase = ARGB.black(alpha);
         int frameColorBase = ARGB.color(alpha, ROOM_CHAT_COLOR);
 
+        // 容量闸：有效上限 = danmakuScreenCap() × 层数（层数放大的收益靠同步放大上限才落到同屏条数上）
+        int screenCap = DanmakuDepthLayers.effectiveScreenCap(config.danmakuScreenCap(), depth);
+        int activeTotal = scene.total();
         int accepted = 0;
         int noLane = 0;
         int capped = 0;
@@ -665,9 +744,13 @@ public final class DanmakuWorldLayer {
                 continue;
             }
             if (!isVisible(entry, mode, config)) continue;
-            // 容量闸只拦视频片内条目：社交条目不受上限约束（仍计入 actives、仍受落点可用性约束）
+            // 轮转分配：本条落到第 (n mod 层数) 层（层数=1 时恒第 0 层），游标按候选条目推进使各层均匀
+            int layer = DanmakuDepthLayers.layerFor(scene.cursor, depth);
+            scene.cursor++;
+            List<Active> actives = scene.layer(layer);
+            // 容量闸只拦视频片内条目：社交条目不受上限约束（仍计入在屏数、仍受落点可用性约束）
             // 压叠模式下不设上限：上限先于落点准入，若仍生效则压叠兜底永远轮不到
-            if (!allowOverlap && capBlocks(entry.source(), actives.size(), config)) {
+            if (!allowOverlap && capBlocks(entry.source(), activeTotal, screenCap)) {
                 capped++;
                 continue;
             }
@@ -685,7 +768,7 @@ public final class DanmakuWorldLayer {
                 frameColorBase, entry.source() == DanmakuSource.ROOM_CHAT
                     ? inkBounds(font, text, 0.0f, color, !outline) : null);
             Admission adm = admit(entry, mode, visual, actives, clocks, travelMs, halfWPx, lanes,
-                allowOverlap);
+                allowOverlap, layer);
             if (adm.active() == null) {
                 noLane++;
                 continue;
@@ -696,37 +779,55 @@ public final class DanmakuWorldLayer {
                 else forced++;
             }
             actives.add(adm.active());
+            activeTotal++;
             accepted++;
         }
         // 每帧异常才输出：首个异常帧一条明细，其后每 5 秒至多一条累计行；无异常帧完全静默
         AnomalyLog.Report report = ANOMALY.computeIfAbsent(pos, k -> new AnomalyLog())
             .submit(clocks.monoMs(), due.size(), accepted, noLane, capped, evicted, forced, forcedVideo,
                 skipped);
-        if (report != null) logAnomalies("World layer", pos, report, actives.size());
+        if (report != null) logAnomalies("World layer", pos, report, activeTotal);
 
-        for (int i = actives.size() - 1; i >= 0; i--) {
-            Active active = actives.get(i);
-            if (clocks.of(active.entry().source()) - active.startMs() >= lifetimeMs(active)) {
-                actives.remove(i);
+        // 到期清除逐层执行（各层寿命只由条目自身时钟决定，层间无耦合）
+        boolean anyActive = false;
+        for (int layer = 0; layer < depth; layer++) {
+            List<Active> actives = scene.layer(layer);
+            for (int i = actives.size() - 1; i >= 0; i--) {
+                Active active = actives.get(i);
+                if (clocks.of(active.entry().source()) - active.startMs() >= lifetimeMs(active)) {
+                    actives.remove(i);
+                }
             }
+            anyActive |= !actives.isEmpty();
         }
-        if (actives.isEmpty()) {
+        if (!anyActive) {
             ACTIVE.remove(pos);
             return;
         }
 
-        poseStack.pushPose();
-        poseStack.scale(baseScale, baseScale, baseScale);
-        // 屏幕面局部坐标系相对观察者为 XY 双反（视频 quad 以 U/V 双翻转补偿，见 VideoScreenRenderer UV 注释），
-        // 文字层叠加同轴 Z180 真旋转对消——修正水平反向与上下倒置；det=+1 不触发背面剔除
-        poseStack.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(180.0F));
+        // 逐层绘制：层序即远→近，同层内仍是「滚动带 → 固定带」的提交序
+        for (int layer = 0; layer < depth; layer++) {
+            List<Active> actives = scene.layer(layer);
+            if (actives.isEmpty()) continue;
+            poseStack.pushPose();
+            // 深度平移取世界单位（在 scale 之前施加，否则会被像素域↔世界域换算因子缩放）：
+            // 沿屏幕面法线朝观察者 = 本地 −z（见 DanmakuDepthLayers.OBSERVER_Z_SIGN）
+            float layerZ = DanmakuDepthLayers.layerOffsetZ(layer, depthSpacing);
+            if (layerZ != 0.0f) {
+                poseStack.translate(0.0f, 0.0f, layerZ);
+            }
+            poseStack.scale(baseScale, baseScale, baseScale);
+            // 屏幕面局部坐标系相对观察者为 XY 双反（视频 quad 以 U/V 双翻转补偿，见 VideoScreenRenderer UV 注释），
+            // 文字层叠加同轴 Z180 真旋转对消——修正水平反向与上下倒置；det=+1 不触发背面剔除
+            poseStack.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(180.0F));
 
-        // 分带提交：滚动带先画，TOP/BOTTOM 后画 → 三条带重叠处固定项压在上层
-        drawBand(collector, poseStack, actives, DanmakuMode.SCROLL, clocks, halfWPx, lanes, outline);
-        drawBand(collector, poseStack, actives, DanmakuMode.REVERSE, clocks, halfWPx, lanes, outline);
-        drawBand(collector, poseStack, actives, DanmakuMode.TOP, clocks, halfWPx, lanes, outline);
-        drawBand(collector, poseStack, actives, DanmakuMode.BOTTOM, clocks, halfWPx, lanes, outline);
-        poseStack.popPose();
+            // 分带提交：滚动带先画，TOP/BOTTOM 后画 → 三条带重叠处固定项压在上层
+            drawBand(collector, poseStack, actives, DanmakuMode.SCROLL, clocks, halfWPx, lanes, outline);
+            drawBand(collector, poseStack, actives, DanmakuMode.REVERSE, clocks, halfWPx, lanes, outline);
+            drawBand(collector, poseStack, actives, DanmakuMode.TOP, clocks, halfWPx, lanes, outline);
+            drawBand(collector, poseStack, actives, DanmakuMode.BOTTOM, clocks, halfWPx, lanes, outline);
+            poseStack.popPose();
+        }
     }
 
     /**
@@ -909,12 +1010,13 @@ public final class DanmakuWorldLayer {
         return font.prepareText(text, 0.0f, localTextTop, color, dropShadow, false, 0).bounds();
     }
 
-    /** 跳变帧清理：|Δ| 超过 Store 的 seek 阈值即清空该屏活动弹幕（首帧只记基线） */
+    /** 跳变帧清理：|Δ| 超过 Store 的 seek 阈值即清空该屏全部深度层的活动弹幕（首帧只记基线） */
     public static boolean clearOnSeek(BlockPos pos, long currentVideoTimeMs) {
         Long previous = LAST_VIDEO_TIME.put(pos, currentVideoTimeMs);
         if (previous == null) return false;
         if (Math.abs(currentVideoTimeMs - previous) <= ClientDanmakuStore.SEEK_DETECT_MS) return false;
-        return ACTIVE.remove(pos) != null;
+        DepthScene removed = ACTIVE.remove(pos);
+        return removed != null && !removed.isEmpty();
     }
 
     /**
@@ -923,28 +1025,30 @@ public final class DanmakuWorldLayer {
      * <p>社交条目永不丢弃：抢占腾位时会从 actives 就地移除被抢占条目，仍无落点则被迫纵向压叠入屏。
      *
      * @param visual       准入时算好的绘制参数（文本/基础宽度/缩放/配色/文字框外接框）
+     * @param actives      本条所属深度层的在屏条目（层间互不参与对方的碰撞判据）
      * @param lanes        本帧车道几何（车道高与车道数随字号缩放，可用下界随底部 UI 安全区）
      * @param allowOverlap danmakuAllowOverlap：开启后视频片内条目无落点时压叠上屏而非丢弃
+     * @param layer        本条所属深度层号（取该层自己的打包器与固定槽位游标）
      * @return 准入结果；active 为 null 表示丢弃该条
      */
     private static Admission admit(DanmakuEntry entry, DanmakuMode mode, Visual visual,
                                    List<Active> actives, Clocks clocks, long travelMs, float halfWPx,
-                                   LaneGeometry lanes, boolean allowOverlap) {
+                                   LaneGeometry lanes, boolean allowOverlap, int layer) {
         long seq = seqCursor++;
         long startMs = clocks.of(entry.source());
         int pinSlots = lanes.pinSlots();
         return switch (mode) {
             case TOP -> pinAdmit(entry, visual, actives, DanmakuMode.TOP, seq, startMs, pinSlots,
-                allowOverlap);
+                allowOverlap, layer);
             case BOTTOM -> pinAdmit(entry, visual, actives, DanmakuMode.BOTTOM, seq, startMs, pinSlots,
-                allowOverlap);
+                allowOverlap, layer);
             case SCROLL, REVERSE -> {
                 // 占位宽度与文本框高都按条目实际缩放折算（与 HUD 侧同一口径）
                 float drawnWPx = visual.textWPx() * visual.scalePercent();
                 float height = GLYPH_HEIGHT_PX * visual.scalePercent();
-                DanmakuPack.Pick pick = PACK.place(actives, mode, entry.source(), drawnWPx, height,
-                    visual.scalePercent(), 2 * halfWPx, lanes.bottomLimit, travelMs, clocks.monoMs(),
-                    clocks.videoMs(), allowOverlap);
+                DanmakuPack.Pick pick = PACKS[layer].place(actives, mode, entry.source(), drawnWPx,
+                    height, visual.scalePercent(), 2 * halfWPx, lanes.bottomLimit, travelMs,
+                    clocks.monoMs(), clocks.videoMs(), allowOverlap);
                 if (pick.top() < 0.0f) yield Admission.DROPPED;
                 Active victim = pick.evictIndex() >= 0 ? actives.remove(pick.evictIndex()) : null;
                 yield new Admission(new Active(entry, visual, startMs, seq, mode, (int) travelMs, -1,
@@ -962,9 +1066,9 @@ public final class DanmakuWorldLayer {
      */
     private static Admission pinAdmit(DanmakuEntry entry, Visual visual, List<Active> actives,
                                       DanmakuMode pinMode, long seq, long startMs, int pinSlots,
-                                      boolean allowOverlap) {
+                                      boolean allowOverlap, int layer) {
         boolean[] used = pinUsage(actives, pinMode, pinSlots);
-        DanmakuPinSlots.Pick pick = pinAllocator(pinMode).allocate(used);
+        DanmakuPinSlots.Pick pick = pinAllocator(pinMode, layer).allocate(used);
         if (pick.slot() < 0) return Admission.DROPPED;
         if (pick.forced() && isVideoDanmaku(entry.source()) && !allowOverlap) return Admission.DROPPED;
         return new Admission(new Active(entry, visual, startMs, seq, pinMode, 0, pick.slot(), 0.0f,
@@ -986,9 +1090,12 @@ public final class DanmakuWorldLayer {
         return used;
     }
 
-    /** 固定槽位分配器（TOP/BOTTOM 各一份游标；两层各持自己的实例，故同输入逐帧同输出） */
-    private static DanmakuPinSlots pinAllocator(DanmakuMode mode) {
-        return mode == DanmakuMode.TOP ? PIN_TOP : PIN_BOTTOM;
+    /**
+     * 固定槽位分配器（TOP/BOTTOM × 深度层各一份游标；各渲染层与各深度层各持自己的实例，
+     * 故同输入逐帧同输出）
+     */
+    private static DanmakuPinSlots pinAllocator(DanmakuMode mode, int layer) {
+        return mode == DanmakuMode.TOP ? PIN_TOPS[layer] : PIN_BOTTOMS[layer];
     }
 
 
@@ -1038,11 +1145,13 @@ public final class DanmakuWorldLayer {
         LAST_VIDEO_TIME.clear();
         ANOMALY.clear();
         LAST_LANES.clear();
-        PIN_TOP.reset();
-        PIN_BOTTOM.reset();
+        for (int layer = 0; layer < DanmakuDepthLayers.MAX_LAYERS; layer++) {
+            PIN_TOPS[layer].reset();
+            PIN_BOTTOMS[layer].reset();
+        }
     }
 
-    /** 安装 Store 清屏回调（懒注册一次）：换集/停止时立即释放该屏在途弹幕与场景态基线 */
+    /** 安装 Store 清屏回调（懒注册一次）：换集/停止时立即释放该屏全部深度层的在途弹幕与场景态基线 */
     private static void installClearHook() {
         if (clearHookInstalled) return;
         clearHookInstalled = true;
