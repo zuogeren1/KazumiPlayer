@@ -205,10 +205,11 @@ public final class DanmakuHudLayer {
                 yield slot < 0 ? null : new Active(entry, entryText(entry), now, seq,
                     DanmakuMode.BOTTOM, 0, slot);
             }
-            case SCROLL -> {
+            case ADVANCED -> null;
+            case SCROLL, REVERSE -> {
                 int lane = pickLane(actives);
                 yield lane < 0 ? null : new Active(entry, entryText(entry), now, seq,
-                    DanmakuMode.SCROLL, (int) travelMs, lane);
+                    entry.mode(), (int) travelMs, lane);
             }
         };
     }
@@ -301,7 +302,8 @@ public final class DanmakuHudLayer {
             case ROOM_CHAT -> config.danmakuRoomChat.get();
         };
         boolean modeOn = switch (entry.mode()) {
-            case SCROLL -> config.danmakuShowScroll.get();
+            case SCROLL, REVERSE -> config.danmakuShowScroll.get();
+            case ADVANCED -> false;
             case TOP -> config.danmakuShowTop.get();
             case BOTTOM -> config.danmakuShowBottom.get();
         };
