@@ -468,7 +468,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         if (tex == null || !tex.hasValidFrame() || player == null
                 || player.getWidth() <= 0 || player.getHeight() <= 0) {
             if (starting) {
-                // 起播等待：已耗时秒数 + 阶段说明（取消按钮由 tick 控制可见性）
+                // 起播等待：已耗时秒数 + 阶段说明 + 组内解析进度（取消按钮由 tick 控制可见性）
                 long sec = Math.max(0, (now - sp.playbackStartedAt) / 1000);
                 graphics.centeredText(this.font, Component.translatable(
                         "kazumiplayer.gui.main.startup_status", String.valueOf(sec)),
@@ -481,11 +481,26 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                         String.valueOf(be.getEpisodeIndex()))
                     : Component.translatable("kazumiplayer.gui.main.startup_hint");
                 graphics.centeredText(this.font, detail, x + areaW / 2, y + areaH / 2 + 6, 0xFF667788);
+                // 第三行：其他观看者的解析进度（有人上报时才显示，播放前确认其他人是否解析完成）
+                var others = me.zuogeren.kazumiplayer.client.ResolveHint.of(be);
+                if (others != null) {
+                    graphics.centeredText(this.font,
+                        me.zuogeren.kazumiplayer.client.ResolveHint.line(others),
+                        x + areaW / 2, y + areaH / 2 + 22, 0xFF88AACC);
+                }
                 return;
             }
             if (failed) {
                 graphics.centeredText(this.font, Component.translatable(
                         "kazumiplayer.gui.main.fail_banner"), x + areaW / 2, y + areaH / 2 - 4, 0xFFFF8888);
+                return;
+            }
+            // 本端未观看（无信号）但屏幕在播且有人上报解析状态：改显组内等待进度
+            var waiting = me.zuogeren.kazumiplayer.client.ResolveHint.of(this.boundScreen());
+            if (waiting != null) {
+                graphics.centeredText(this.font,
+                    me.zuogeren.kazumiplayer.client.ResolveHint.line(waiting),
+                    x + areaW / 2, y + areaH / 2 - 4, 0xFFCCCCCC);
                 return;
             }
             graphics.centeredText(this.font, Component.translatable("kazumiplayer.gui.main.preview_no_signal"), x + areaW / 2, y + areaH / 2 - 4, 0xFF888888);
@@ -767,7 +782,11 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.sendAction(action, new GuiPayloads.QueueIndexPayload(index));
     }
 
-    /** 观看者列表：BE 同步的 WatchingPlayers UUID 经客户端 TabList 解析为玩家名 */
+    /**
+     * 观看者列表：BE 同步的 WatchingPlayers UUID 经客户端 TabList 解析为玩家名。
+     * 有解析上报时在名字后追加状态后缀（灰=解析中/绿=已就绪/红=失败），
+     * 数据源为服务端聚合的 ResolveStates NBT（C→S 上报 → BE markDirty 自动同步）
+     */
     private void rebuildWatchList() {
         this.watchList.clearEntries();
         Minecraft mc = Minecraft.getInstance();
@@ -777,19 +796,39 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 Component.translatable("kazumiplayer.gui.main.watching_empty").withStyle(ChatFormatting.DARK_GRAY), -1, null);
             return;
         }
+        var resolveStates = me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity
+            .parseResolveStates(screen.getResolveStates());
         for (String u : screen.getWatchingPlayers().split(",")) {
             String name;
+            java.util.UUID id;
             try {
-                var info = mc.getConnection() != null
-                    ? mc.getConnection().getPlayerInfo(java.util.UUID.fromString(u.trim())) : null;
+                id = java.util.UUID.fromString(u.trim());
+                var info = mc.getConnection() != null ? mc.getConnection().getPlayerInfo(id) : null;
                 name = info != null && !info.getProfile().name().isEmpty()
                     ? info.getProfile().name() : u.substring(0, Math.min(8, u.length())) + "…";
             } catch (Exception e) {
                 continue;
             }
             boolean self = mc.player != null && name.equals(mc.player.getGameProfile().name());
-            this.watchList.addRow(Component.literal(self ? "▶ " + name : name), -1, null);
+            net.minecraft.network.chat.MutableComponent row =
+                Component.literal(self ? "▶ " + name : name);
+            Integer st = resolveStates.get(id);
+            if (st != null) row.append(resolveStatusSuffix(st));
+            this.watchList.addRow(row, -1, null);
         }
+    }
+
+    /** 解析状态后缀：着色短文案，行宽不足时由 SimpleList 悬停 tooltip 展示全文 */
+    private static Component resolveStatusSuffix(int status) {
+        return switch (status) {
+            case me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING ->
+                Component.translatable("kazumiplayer.gui.main.watcher_resolving").withStyle(ChatFormatting.GRAY);
+            case me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY ->
+                Component.translatable("kazumiplayer.gui.main.watcher_ready").withStyle(ChatFormatting.GREEN);
+            case me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_FAILED ->
+                Component.translatable("kazumiplayer.gui.main.watcher_failed").withStyle(ChatFormatting.RED);
+            default -> Component.empty();
+        };
     }
 
     // ---- 操作 ----

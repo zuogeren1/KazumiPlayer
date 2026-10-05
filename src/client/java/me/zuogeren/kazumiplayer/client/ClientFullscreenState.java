@@ -249,7 +249,16 @@ public class ClientFullscreenState {
             me.zuogeren.kazumiplayer.client.danmaku.DanmakuHudLayer.draw(g, mc, screenPos, px, py, pw, ph);
         } else {
             g.fill(ax, ay, ax + areaW, ay + areaH, 0xC8101010);
-            g.centeredText(mc.font, Component.translatable("kazumiplayer.gui.full.no_signal"), ax + areaW / 2, ay + areaH / 2 - 4, 0xFF888888);
+            // 本端无信号但屏幕在播且有人上报解析状态：改显组内等待进度
+            var waitBe = mc.level != null && mc.level.getBlockEntity(screenPos)
+                instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vs ? vs : null;
+            var waiting = me.zuogeren.kazumiplayer.client.ResolveHint.of(waitBe);
+            if (waiting != null) {
+                g.centeredText(mc.font, me.zuogeren.kazumiplayer.client.ResolveHint.line(waiting),
+                    ax + areaW / 2, ay + areaH / 2 - 4, 0xFFCCCCCC);
+            } else {
+                g.centeredText(mc.font, Component.translatable("kazumiplayer.gui.full.no_signal"), ax + areaW / 2, ay + areaH / 2 - 4, 0xFF888888);
+            }
         }
 
         // 控制条：仅正常媒体显示（直播直连无稳定时间轴，暂停/seek 无意义）
@@ -281,6 +290,12 @@ public class ClientFullscreenState {
                     String.valueOf(be.getEpisodeIndex())).getString();
                 g.text(mc.font, Component.literal(ep),
                     a[0] + (a[2] - mc.font.width(ep)) / 2, a[1] + a[3] / 2, 0xFF667788);
+            }
+            // 第三行：其他观看者的解析进度（有人上报时才显示，播放前确认其他人是否解析完成）
+            var others = me.zuogeren.kazumiplayer.client.ResolveHint.of(be);
+            if (others != null) {
+                g.centeredText(mc.font, me.zuogeren.kazumiplayer.client.ResolveHint.line(others),
+                    a[0] + a[2] / 2, a[1] + a[3] / 2 + 16, 0xFF88AACC);
             }
         } else if (!sp.bypassSync && sp.player == null && sp.lastFailedAt > 0
                 && now - sp.lastFailedAt < 20000) {

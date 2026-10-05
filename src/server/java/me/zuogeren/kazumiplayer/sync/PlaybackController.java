@@ -75,6 +75,7 @@ public final class PlaybackController {
         // 换片旧弹幕作废（房间随组走，内容变更接线）
         me.zuogeren.kazumiplayer.server.danmaku.DanmakuRoomManager.get().clear(sid);
         screen.setPlaybackFull(url, 0, roadIdx, episodeIdx, JsonUtil.GSON.toJson(roads));
+        screen.clearResolveStates(); // 新集起播：旧解析状态作废，观看者重新上报
         SyncGroupManager.get().onPlayStart(actor, sid, screenPos, url);
         syncWatchingPlayers(screen);
         screen.setPlayingTitle(title);
@@ -132,6 +133,7 @@ public final class PlaybackController {
         me.zuogeren.kazumiplayer.server.danmaku.DanmakuRoomManager.get().clear(sid);
         // 组重置不可省略：缺失时周期广播携带旧集 URL，客户端换片保护会吞掉后续所有暂停/seek
         SyncGroupManager.get().onPlayStart(actor, sid, screenPos, url);
+        screen.clearResolveStates(); // 新集起播：旧解析状态作废，观看者重新上报
         syncWatchingPlayers(screen);
         SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
     }
@@ -219,6 +221,7 @@ public final class PlaybackController {
         long resumePos = Math.max(0, screen.getSyncPositionMs());
         SyncGroupManager.get().onPlayStart(actor, sid, screenPos, url);
         screen.setPlayback(url, resumePos);
+        screen.clearResolveStates(); // 重建组=重新起播：清残留的陈旧解析状态
         syncWatchingPlayers(screen);
         SyncGroupManager.get().broadcastSyncState(sid, actor.level().getServer());
         SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid,
@@ -241,6 +244,7 @@ public final class PlaybackController {
             SyncNotificationUtil.notifyOtherWatchers(actor, screenPos, sid, notifyText);
         }
         SyncGroupManager.get().leave(actor.getUUID());
+        screen.removeResolveState(actor.getUUID()); // 离开者不再是观看者，同步移除其解析状态
         me.zuogeren.kazumiplayer.network.packet.PlayStopPacket pkt =
             new me.zuogeren.kazumiplayer.network.packet.PlayStopPacket(screenPos);
         PacketDistributor.sendToPlayer(actor, pkt);

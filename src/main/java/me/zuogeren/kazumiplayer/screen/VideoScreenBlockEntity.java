@@ -38,6 +38,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private static final String KEY_OFFSET_Y = "OffsetY";
     private static final String KEY_OFFSET_Z = "OffsetZ";
     private static final String KEY_CONNECTED_SPEAKERS = "ConnectedSpeakers";
+    private static final String KEY_RESOLVE_STATES = "ResolveStates";
 
     private float screenWidth = 3.0f;
     private float screenHeight = 2.0f;
@@ -61,6 +62,10 @@ public class VideoScreenBlockEntity extends BlockEntity {
     private float offsetY;
     private float offsetZ;
     private final List<BlockPos> connectedSpeakers = new ArrayList<>(); // 已连接音响列表
+    /** 观看者视频源解析状态（"uuid:code;uuid:code"，code 见 ResolveStatusPacket 常量）。
+     * 瞬态字段：只由 getUpdateTag 下发（saveAdditional 不写 → 不入存档）；
+     * 读取复用 loadAdditional——该入口同时服务磁盘加载与客户端同步包，二者无法分离 */
+    private String resolveStates = "";
 
     public VideoScreenBlockEntity(BlockPos pos, BlockState blockState) {
         super(VideoScreenRegistration.VIDEO_SCREEN_BLOCK_ENTITY.get(), pos, blockState);
@@ -89,6 +94,37 @@ public class VideoScreenBlockEntity extends BlockEntity {
     }
     public void removeConnectedSpeaker(BlockPos pos) {
         connectedSpeakers.remove(pos); markDirty();
+    }
+
+    public String getResolveStates() { return resolveStates; }
+
+    /** 更新某观看者的解析状态；@return 值有变化才 true（调用方据此决定是否值得同步） */
+    public boolean updateResolveState(UUID playerId, int status) {
+        if (status < me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING
+                || status > me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_FAILED) {
+            return false;
+        }
+        var map = parseResolveStates(resolveStates);
+        Integer old = map.get(playerId);
+        if (old != null && old == status) return false;
+        map.put(playerId, status);
+        this.resolveStates = encodeResolveStates(map);
+        markDirty();
+        return true;
+    }
+
+    public void removeResolveState(UUID playerId) {
+        var map = parseResolveStates(resolveStates);
+        if (map.remove(playerId) == null) return;
+        this.resolveStates = encodeResolveStates(map);
+        markDirty();
+    }
+
+    /** 清空全部解析状态（新集起播/整屏停止：所有观看者将重新上报） */
+    public void clearResolveStates() {
+        if (resolveStates.isEmpty()) return;
+        this.resolveStates = "";
+        markDirty();
     }
     /**
      * 屏幕唯一标识。首次访问时 lazy 生成并 markDirty 持久化（历史行为，全部服务端操作路径
@@ -174,6 +210,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.episodeData = "";
         this.playingTitle = "";
         this.videoState = VideoState.IDLE;
+        this.resolveStates = ""; // 停止即清：解析状态只在播放会话内有意义
         markDirty();
         KazumiLog.screen.info("clearPlayback side={}",
             level != null && level.isClientSide() ? "client" : "server");
@@ -249,6 +286,9 @@ public class VideoScreenBlockEntity extends BlockEntity {
         this.offsetZ = input.getFloatOr(KEY_OFFSET_Z, 0.0f);
         this.connectedSpeakers.clear();
         decodeConnectedSpeakers(input.getString(KEY_CONNECTED_SPEAKERS).orElse(""), connectedSpeakers);
+        // 瞬态字段读取入口：磁盘 NBT 无此键（saveAdditional 不写）→ 落盘加载得空串；
+        // 同步包（ClientboundBlockEntityDataPacket → loadWithComponents）则带入服务端聚合值
+        this.resolveStates = input.getString(KEY_RESOLVE_STATES).orElse("");
     }
 
     @Override
@@ -273,6 +313,33 @@ public class VideoScreenBlockEntity extends BlockEntity {
         output.putString(KEY_CONNECTED_SPEAKERS, encodeConnectedSpeakers(connectedSpeakers));
     }
 
+    // ---- ResolveStates 编解码（服务端聚合写入与客户端 GUI 解析共用） ----
+
+    /** 编码为 "uuid:code;uuid:code" */
+    private static String encodeResolveStates(java.util.Map<UUID, Integer> states) {
+        var sb = new StringBuilder();
+        for (var e : states.entrySet()) {
+            if (!sb.isEmpty()) sb.append(';');
+            sb.append(e.getKey()).append(':').append(e.getValue());
+        }
+        return sb.toString();
+    }
+
+    /** 解析 "uuid:code;uuid:code"；畸形项静默跳过。客户端 GUI 与服务端共用 */
+    public static java.util.Map<UUID, Integer> parseResolveStates(String str) {
+        var map = new java.util.LinkedHashMap<UUID, Integer>();
+        if (str == null || str.isEmpty()) return map;
+        for (String s : str.split(";")) {
+            if (s.isBlank()) continue;
+            int sep = s.indexOf(':');
+            if (sep <= 0) continue;
+            try {
+                map.put(UUID.fromString(s.substring(0, sep)), Integer.parseInt(s.substring(sep + 1)));
+            } catch (IllegalArgumentException ignored) {}
+        }
+        return map;
+    }
+
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
         CompoundTag tag = new CompoundTag();
@@ -294,6 +361,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
         tag.putFloat(KEY_OFFSET_Y, offsetY);
         tag.putFloat(KEY_OFFSET_Z, offsetZ);
         tag.putString(KEY_CONNECTED_SPEAKERS, encodeConnectedSpeakers(connectedSpeakers));
+        tag.putString(KEY_RESOLVE_STATES, resolveStates);
         return tag;
     }
 

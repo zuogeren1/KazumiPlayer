@@ -68,9 +68,11 @@ public final class VideoSourceResolver {
             }
             player.play(episodeUrl);
             screen.setVideoState(VideoState.PLAYING);
+            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
             return player;
         }
 
+        reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         resolveWithRetry(screen, episodeUrl, player, session, 0);
         return player;
     }
@@ -204,6 +206,7 @@ public final class VideoSourceResolver {
             }
             player.play(resolvedUrl);
             screen.setVideoState(VideoState.PLAYING);
+            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
         });
     }
 
@@ -220,8 +223,18 @@ public final class VideoSourceResolver {
         Minecraft.getInstance().execute(() -> {
             if (Minecraft.getInstance().level == null) return; // 已离开世界，聊天提示无意义
             screen.setVideoState(VideoState.STOPPED);
+            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_FAILED);
             KazumiClientMessages.chatError("视频源解析失败：" + reason);
         });
+    }
+
+    /** 解析状态上报：经服务端聚合进 BE NBT 同步全组（GUI 观看者列表展示谁未就绪） */
+    private static void reportResolveStatus(VideoScreenBlockEntity screen, int status) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getConnection() == null) return;
+        mc.getConnection().send(new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(
+            new me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket(
+                screen.getBlockPos(), screen.getScreenId(), status)));
     }
 
     private void sizePoolOnce() {

@@ -202,6 +202,7 @@ public class SyncGroupManager {
                 if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
                     SyncGroup g = groups.get(screen.getScreenId());
                     screen.setWatchingPlayers(g != null ? g.watchingPlayersString() : "");
+                    screen.removeResolveState(playerId); // 退服者不再是观看者，同步移除其解析状态
                 }
             }
         }

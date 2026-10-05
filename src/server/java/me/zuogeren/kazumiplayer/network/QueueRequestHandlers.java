@@ -253,6 +253,7 @@ public final class QueueRequestHandlers {
         UUID sid = screen.getScreenId();
         SyncGroupManager.get().onPlayStart(sp, sid, screenPos, url);
         screen.setPlaybackFull(url, 0, 0, index, DirectLinkQueue.buildRoadJson(urls));
+        screen.clearResolveStates(); // 新项起播：旧解析状态作废，观看者重新上报
         screen.setPlayingTitle(""); // 直链队列：清空番剧名，GUI 不显示"正在播放"行
         var g = SyncGroupManager.get().getGroup(sid);
         if (g != null) screen.setWatchingPlayers(g.watchingPlayersString());

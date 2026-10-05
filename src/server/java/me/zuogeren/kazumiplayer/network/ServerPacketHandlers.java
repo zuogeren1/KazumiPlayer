@@ -6,6 +6,7 @@ import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
 import me.zuogeren.kazumiplayer.network.packet.PositionReportPacket;
+import me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteOpenPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlayStopPacket;
@@ -50,6 +51,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
         register(NextEpisodePacket.class, ServerPacketHandlers::handleNextEpisode);
         register(PlaybackControlPacket.class, ServerPacketHandlers::handlePlaybackControl);
         register(PositionReportPacket.class, ServerPacketHandlers::handlePositionReport);
+        register(ResolveStatusPacket.class, ServerPacketHandlers::handleResolveStatus);
         register(SpeakerConnectPacket.class, ServerPacketHandlers::handleSpeakerConnect);
         register(RemoteOpenPacket.class, ServerPacketHandlers::handleRemoteOpen);
         register(RemoteFullscreenPacket.class, ServerPacketHandlers::handleRemoteFullscreen);
@@ -190,6 +192,25 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             SyncGroupManager.get().broadcastSyncState(packet.screenId(), sp.level().getServer());
             KazumiLog.sync.debug("Anchor established at {} by {} ({}ms)",
                 packet.screenPos(), sp.getName().getString(), packet.positionMs());
+        });
+    }
+
+    /**
+     * 视频源解析状态上报：校验屏幕/组成员后聚合写入 BE 的 ResolveStates NBT，
+     * 值变化时经 markDirty 自动同步全组客户端（GUI 观看者列表据此展示谁未就绪）。
+     */
+    private static void handleResolveStatus(ResolveStatusPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer sp)) return;
+            var be = sp.level().getBlockEntity(packet.screenPos());
+            if (!(be instanceof VideoScreenBlockEntity screen)) return;
+            if (!packet.screenId().equals(screen.getScreenId())) return;
+            var g = SyncGroupManager.get().getGroup(packet.screenId());
+            if (g == null || !g.players.contains(sp.getUUID())) return;
+            if (screen.updateResolveState(sp.getUUID(), packet.status())) {
+                KazumiLog.sync.debug("Resolve status {} at {} by {}",
+                    packet.status(), packet.screenPos(), sp.getName().getString());
+            }
         });
     }
 

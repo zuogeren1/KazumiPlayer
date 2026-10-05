@@ -13,24 +13,25 @@
 ## 体验与功能待办（2026-08-24 使用体验分析筛选，任务看板同名卡片）
 
 ### 功能性 Bug
-- [ ] **A1 ±10s 与小幅度 seek 无效**: 无本地回显，靠 handleSyncState 阈值 drift>10000ms 严格回灌永不触发，落盘位置恒差 ~10s——本端乐观 seek 或服务端定向 seek 指令【S】
-- [ ] **A2 断线重进从 0 重播**: joinScreen 异常恢复分支 setPlayback(url,0) 覆盖已落盘进度——改用 Math.max(0, SyncPositionMs)【S】
-- [ ] **A3 非队列播放失败整屏连坐**: 一人失败全场被踢且进度清空——降级仅本端停播+提示【S】
+- [x] **A1 ±10s 与小幅度 seek 无效**: 无本地回显，靠 handleSyncState 阈值 drift>10000ms 严格回灌永不触发，落盘位置恒差 ~10s——已由「seek 定向指令」解决：SyncStatePacket 新增 forceSeek 标志，GUI ±10s 与命令时间调整绕过漂移保护全组立即跳转（applyForcedSeek，仅保留天文位置拒绝）【S】
+- [x] **A2 断线重进从 0 重播**: joinScreen 异常恢复分支 setPlayback(url,0) 覆盖已落盘进度——已修：异常恢复沿用落盘 SyncPositionMs（clamp ≥0），不再从 0 重播【S】
+- [x] **A3 非队列播放失败整屏连坐**: 一人失败全场被踢且进度清空——已修：无队列上下文降级为仅发起者本端停播并退出同步（QueueRequestHandlers.stopLocalOnly → PlaybackController.leaveOwn），其他观看者不受影响【S】
 
 ### GUI 体验
-- [ ] **B1 全屏观影控制条+快捷键**: 底部悬浮控制条（暂停/±10s/拖动seek/音量）+空格/方向键，进度条可拖【M】
-- [ ] **B2 等待与失败可视化包**: 起播阶段文案（解析中→加载流→缓冲）+等待秒数+取消按钮；连续失败冷却+可点击「重试/换来源」；错误文案 i18n【M】
-- [ ] **B4 seek/HLS 重缓冲冻结指示**: 时间戳冻结 >1.5s 角落缓冲动画【S-M】
-- [ ] **B5 音量体系升级**: GUI/全屏音量滑块+每屏独立音量+静音快捷键（现全服共享 RECORDS 滑块）【M】
+- [x] **B1 全屏观影控制条+快捷键**: 底部悬浮控制条（暂停/±10s/拖动seek/音量）+空格/方向键，进度条可拖——已实装：控制条含暂停/±10s/可拖动进度条+时间，空格暂停、←→±10s、↑↓本屏音量、M 静音（OSD 提示）；直播直连屏停用控制条与时间轴类快捷键，音量类保留【M】
+- [ ] **B2 等待与失败可视化包**: 起播阶段文案（解析中→加载流→缓冲）+等待秒数+取消按钮；连续失败冷却+可点击「重试/换来源」；错误文案 i18n【M】——已落地：起播等待文案+秒数+取消按钮、解析状态上报三处等待可视化（ResolveHint）、失败横幅 20s 窗口与错误文案 i18n；剩余：连续失败冷却与可点击「重试/换来源」入口
+- [x] **B4 seek/HLS 重缓冲冻结指示**: 时间戳冻结 >1.5s 角落缓冲动画——已实装（全屏 HUD）：ScreenPlayerManager.isBufferingFrozen（阈值 BUFFER_FREEZE_MS=1500，位置推进即刷新时刻）→ 进度条上方琥珀文字，独立于控制条淡出恒可见【S-M】
+- [x] **B5 音量体系升级**: GUI/全屏音量滑块+每屏独立音量+静音快捷键（现全服共享 RECORDS 滑块）——已实装：有效音量=RECORDS×videoVolume×volumeScale（静音=0），每屏状态存 ScreenPlayerManager；GUI 进度条右侧滑块+静音钮、全屏 ↑↓/M、全局 M 键静音准心屏幕【M】
 - [ ] **B7 破坏性操作防误触**: 停止二次确认/撤销窗、队列删格首次点变"确认？"【S】
-- [ ] **B8 番剧单击改选中**: 单击只显示简介，双击/按钮才搜源（现误点即全源搜源+清选集）【S】
-- [ ] **B10 列表行悬停 tooltip 显全文**: 现 SimpleList 剪字无省略号、全局零 tooltip【S】
-- [ ] **B13 设置数值框失焦/Enter 提交**: 现 setResponder 逐键发包致画面抖动+包风暴【S】
-- [ ] **B14 加入/离开按钮按观看态置灰**【S】
-- [ ] **B15 全屏退出按钮鼠标静止 3s 淡出**【S】
+- [x] **B8 番剧单击改选中**: 单击只显示简介，双击/按钮才搜源（现误点即全源搜源+清选集）——已实装：搜索结果行改 addDoubleClickableRow，单击只 selectSubject（选中+显简介，零网络请求），双击才 searchSubject【S】
+- [x] **B10 列表行悬停 tooltip 显全文**: 现 SimpleList 剪字无省略号、全局零 tooltip——已实装：悬停且文本被截断时 setTooltipForNextFrame 显示全文（自动换行 200px）【S】
+- [x] **B13 设置数值框失焦/Enter 提交**: 现 setResponder 逐键发包致画面抖动+包风暴——已实装：ScreenPropsScreen 数值框改失焦/关闭时提交（propCommits 登记 + commitBox，等值输入早退），逐键发包与画面抖动消除【S】
+- [x] **B14 加入/离开按钮按观看态置灰**——已实装：joinButton/leaveButton 按本端观看态互斥置灰（数据源=BE 同步的 WatchingPlayers，与右列 ▶ 标记同源）【S】
+- [x] **B15 全屏退出按钮鼠标静止 3s 淡出**——已实装：控制条与退出按钮共用鼠标静止 3s 淡出显隐（controlsAlpha/fadeAlpha，淡出后命中失效）【S】
 - [ ] **B16 bgm 搜索结果列表可滚动**（替代翻页方案）【S-M】
 
 ### 功能新增
+- [x] **解析状态上报（播放前确认其他人是否解析完成）**: 客户端 ResolveStatusPacket(C→S) 上报 解析中/完成/失败 → 服务端校验组成员聚合进 BE ResolveStates NBT（瞬态：只由 getUpdateTag 下发、saveAdditional 不写＝不落盘；客户端经 loadAdditional 读取——26.1.2 同步包与磁盘共用该入口，markDirty 自动同步全组）→ GUI 观看者列表按人显示状态后缀；等待可视化三处共用 client/ResolveHint——GUI 预览区第三行+无信号替代、全屏 HUD 同两处、世界屏幕面居中文字；清零点=新集起播（PlaybackController 三入口+队列 playItemAt）/leaveOwn/退服/整屏停止
 - [ ] **F2 倍速播放**: 单机直链先行（WaterMedia speed 待验证）；联机需 SyncGroup 加 speed 字段防循环硬 seek【M-L】
 - [ ] **F4 每周放送时间表**: bgm calendar 免鉴权 API+TimedCache；新增"放送时刻表"物品右键打开星期分栏 GUI【S-M】
 - [x] **F5 规则热重载**: /kazumi rule reload + RuleWatcher 目录监视（WatchService 防抖 800ms+内部写回声抑制 1.5s，ruleHotReload 配置默认开）；三路广播统一 RuleSyncBroadcast（空列表也广播清客户端缓存）；reloadLive 解析失败保留内存现状不动盘

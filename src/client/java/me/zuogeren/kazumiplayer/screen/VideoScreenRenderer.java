@@ -108,6 +108,8 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
                 return t;
             });
         state.skinBlock = be.getSkinBlock();
+        state.episodeUrl = be.getEpisodeUrl();
+        state.resolveStates = be.getResolveStates();
         // 方块模型：统一走 ItemModelResolver（支持资源包替换纹理）
         String skin = be.getSkinBlock();
         if (!skin.isEmpty()) {
@@ -161,6 +163,10 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
                 collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(WHITE_TEX),
                     (pose, buffer) -> fillBar(buffer, pose, -fw, fw, -fh, fh, 0.49f, COLOR_IDLE_FRAME));
             }
+            // 观察者视角等待提示：屏幕已绑定播放但本端无播放器——居中显示组内解析进度
+            if (!state.episodeUrl.isEmpty()) {
+                drawWaitingHint(collector, poseStack, halfW, halfH, state.resolveStates);
+            }
             poseStack.popPose();
             return;
         }
@@ -176,6 +182,12 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         // 已有有效帧时保留旧帧（同片 seek/缓冲导致的短暂无帧不闪占位色）；换片后立即显示加载占位
         if (!hasFrame && (!tex.hasValidFrame() || switched)) {
             tex.fillPlaceholder(COLOR_LOADING);
+        }
+
+        // 起播等待文字提示：屏幕已绑定播放但本端尚未取得任何真实帧（解析/加载期）——
+        // 居中显示组内解析进度（ResolveStates NBT 聚合），出画后自动消失
+        if (!state.episodeUrl.isEmpty() && !tex.hasValidFrame()) {
+            drawWaitingHint(collector, poseStack, halfW, halfH, state.resolveStates);
         }
 
         RenderType renderType = RenderTypes.entityCutout(tex.getTextureId());
@@ -316,6 +328,29 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
                 fillBar(buffer, pose, pxStart, halfW, barY, barY + barH, zFg, 0xFF44FF33);
             });
         }
+    }
+
+    /**
+     * 等待提示文字：屏幕面居中单行——组内解析进度聚合（ResolveHint），无人上报时兜底
+     * 「正在解析视频源…」。行高按屏幕面高度固定占比，超宽文案按宽度收缩不溢出屏幕面。
+     * 坐标系处理与弹幕层一致：scale 后 Z180 真旋转对消视频面的 XY 双反坐标系。
+     */
+    private static void drawWaitingHint(SubmitNodeCollector collector, PoseStack poseStack,
+                                        float halfW, float halfH, String resolveStates) {
+        var text = me.zuogeren.kazumiplayer.client.ResolveHint.line(
+            me.zuogeren.kazumiplayer.client.ResolveHint.ofStates(resolveStates));
+        var font = Minecraft.getInstance().font;
+        float scale = Math.max(0.12f, halfH * 2 * 0.14f) / 9.0f;
+        float maxWPx = (halfW * 2 * 0.92f) / scale;
+        int tw = font.width(text);
+        if (tw > maxWPx) scale *= maxWPx / tw;
+        poseStack.pushPose();
+        poseStack.scale(scale, scale, scale);
+        poseStack.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(180.0F));
+        collector.submitText(poseStack, -tw / 2.0f, 3.5f, text.getVisualOrderText(),
+            false, net.minecraft.client.gui.Font.DisplayMode.POLYGON_OFFSET,
+            LightCoordsUtil.FULL_BRIGHT, 0xFFFFFFFF, 0, 0);
+        poseStack.popPose();
     }
 
     private static void addVideoQuad(VertexConsumer buffer, PoseStack.Pose pose,

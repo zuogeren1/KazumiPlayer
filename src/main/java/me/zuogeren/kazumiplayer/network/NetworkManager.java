@@ -7,6 +7,7 @@ import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
 import me.zuogeren.kazumiplayer.network.packet.PositionReportPacket;
+import me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.RemoteOpenPacket;
 import me.zuogeren.kazumiplayer.network.packet.PlaybackControlPacket;
@@ -42,6 +43,7 @@ public class NetworkManager {
         registrar.playToServer(NextEpisodePacket.TYPE, NextEpisodePacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(PlaybackControlPacket.TYPE, PlaybackControlPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(PositionReportPacket.TYPE, PositionReportPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
+        registrar.playToServer(ResolveStatusPacket.TYPE, ResolveStatusPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(SpeakerConnectPacket.TYPE, SpeakerConnectPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(GuiActionPacket.TYPE, GuiActionPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
         registrar.playToServer(RemoteOpenPacket.TYPE, RemoteOpenPacket.STREAM_CODEC, PacketDispatcher::dispatchServer);
