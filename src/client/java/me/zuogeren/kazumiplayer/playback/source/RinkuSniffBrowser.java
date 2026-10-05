@@ -44,7 +44,7 @@ import java.util.function.Consumer;
  * 3. onLoadStop 注入视频标签 MutationObserver（标准模式）或 iframe src 监听（legacy 模式）
  * 4. 每秒轮询兜底（命中即停）
  */
-public class McefSniffBrowser {
+public class RinkuSniffBrowser {
 
     /** 视频源解析事件（对齐 Kazumi VideoParserEvent record） */
     public record ParserEvent(String url, VideoSourceFormat format) {}
@@ -170,7 +170,7 @@ public class McefSniffBrowser {
     // CefRequestHandler 无多播封装（原生单槽），因此全局只注册一次，
     // 由 ACTIVE_INSTANCES 按 browserIdentifier 分发到各实例。
 
-    private static final Set<McefSniffBrowser> ACTIVE_INSTANCES = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static final Set<RinkuSniffBrowser> ACTIVE_INSTANCES = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static boolean globalHandlersRegistered;
 
     private void registerHandlers() {
@@ -186,12 +186,12 @@ public class McefSniffBrowser {
         Rinku.getClient().addLoadHandler(new CefLoadHandlerAdapter() {
             @Override
             public void onLoadStart(CefBrowser b, CefFrame frame, CefRequest.TransitionType transitionType) {
-                for (McefSniffBrowser s : ACTIVE_INSTANCES) s.handleLoadStart(b, frame);
+                for (RinkuSniffBrowser s : ACTIVE_INSTANCES) s.handleLoadStart(b, frame);
             }
 
             @Override
             public void onLoadEnd(CefBrowser b, CefFrame frame, int httpStatusCode) {
-                for (McefSniffBrowser s : ACTIVE_INSTANCES) s.handleLoadEnd(b, frame, httpStatusCode);
+                for (RinkuSniffBrowser s : ACTIVE_INSTANCES) s.handleLoadEnd(b, frame, httpStatusCode);
             }
         });
 
@@ -200,7 +200,7 @@ public class McefSniffBrowser {
             @Override
             public boolean onConsoleMessage(CefBrowser b, CefSettings.LogSeverity level,
                     String message, String source, int line) {
-                for (McefSniffBrowser s : ACTIVE_INSTANCES) {
+                for (RinkuSniffBrowser s : ACTIVE_INSTANCES) {
                     if (s.handles(b) && s.handleConsoleMessage(message)) return true;
                 }
                 return false;
@@ -227,7 +227,7 @@ public class McefSniffBrowser {
                 return new CefResourceRequestHandlerAdapter() {
                     @Override
                     public boolean onBeforeResourceLoad(CefBrowser br, CefFrame fr, CefRequest req) {
-                        McefSniffBrowser owner = findById(br.getIdentifier());
+                        RinkuSniffBrowser owner = findById(br.getIdentifier());
                         if (owner == null) return false;
                         // 浏览器流量 UA 统一为本实例创建时随机选定的 UA
                         // （Rinku 无 per-browser CefSettings.userAgent 入口，资源层改写实现同等效果）
@@ -260,8 +260,8 @@ public class McefSniffBrowser {
         });
     }
 
-    private static McefSniffBrowser findById(int identifier) {
-        for (McefSniffBrowser s : ACTIVE_INSTANCES) {
+    private static RinkuSniffBrowser findById(int identifier) {
+        for (RinkuSniffBrowser s : ACTIVE_INSTANCES) {
             if (s.browser != null && s.browserId == identifier) return s;
         }
         return null;

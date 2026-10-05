@@ -24,9 +24,9 @@ import java.util.function.Function;
  * 单个服务实例持有一个浏览器，因此解析任务按实例串行执行（resolveTail 链）；
  * 新请求会取消旧请求，旧请求经 {@link ResolveRequest#throwIfNotCurrent} 以 Cancelled 收尾。
  */
-public class McefVideoSourceService implements IVideoSourceService {
+public class RinkuVideoSourceService implements IVideoSourceService {
 
-    private McefSniffBrowser browser;
+    private RinkuSniffBrowser browser;
     private CompletableFuture<Void> resolveTail = CompletableFuture.completedFuture(null);
     private ResolveRequest activeRequest;
 
@@ -35,7 +35,7 @@ public class McefVideoSourceService implements IVideoSourceService {
     /** 订阅解析日志流（对齐 Kazumi onLog） */
     public void setOnLog(Consumer<String> listener) {
         this.logListener = listener;
-        McefSniffBrowser b = browser;
+        RinkuSniffBrowser b = browser;
         if (b != null) b.setOnLog(listener);
     }
 
@@ -76,7 +76,7 @@ public class McefVideoSourceService implements IVideoSourceService {
                     throw new VideoSourceResolveException.NotFound("Rinku（原 MCEF）未初始化，无法进行浏览器嗅探");
                 }
                 if (browser == null) {
-                    browser = new McefSniffBrowser();
+                    browser = new RinkuSniffBrowser();
                     browser.setOnLog(log -> {
                         Consumer<String> l = logListener;
                         if (l != null) l.accept(log);
@@ -121,7 +121,7 @@ public class McefVideoSourceService implements IVideoSourceService {
                     }
                     // 对齐蓝本 finally：无论成败都卸载页面释放资源
                     Minecraft.getInstance().execute(() -> {
-                        McefSniffBrowser b = browser;
+                        RinkuSniffBrowser b = browser;
                         if (b != null) b.unloadPage();
                     });
                 });

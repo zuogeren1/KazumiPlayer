@@ -156,7 +156,7 @@ public class VideoSourceResolverPool {
     }
 
     private static final class Worker {
-        private final McefVideoSourceService service = new McefVideoSourceService();
+        private final RinkuVideoSourceService service = new RinkuVideoSourceService();
         private boolean busy;
         private boolean retired;
 
