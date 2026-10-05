@@ -30,6 +30,16 @@ public class WaterMediaPlayer {
     private volatile boolean closed;
     /** 预热期静音标志：为 true 时起播后置 0 音量（清晰度无缝切换的后台播放器，交接时由调度器恢复） */
     private volatile boolean silentStart;
+    /**
+     * 停播释放线程：FFmpeg 的 demux 线程可能正阻塞在网络读取上（实测停止时被阻塞数十秒），
+     * player.stop() 同步执行会卡住调用线程（通常是渲染线程）→ 阻塞动作交给此后台线程。
+     */
+    private static final java.util.concurrent.ExecutorService STOP_EXECUTOR =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "KazumiPlayer-Stop");
+            t.setDaemon(true);
+            return t;
+        });
     /** 播放失败回调（MRL 确定失败/加载超时/播放器创建失败）：队列容错自动跳过的信号源 */
     private volatile Runnable playFailureListener;
     private final java.util.concurrent.atomic.AtomicBoolean failureFired =
@@ -217,25 +227,41 @@ public class WaterMediaPlayer {
         }
     }
 
+    /**
+     * 停播：立即失效并摘除引用（渲染/音量/tick 当帧就不再触碰该播放器），
+     * 再把阻塞的停止与释放交给后台线程——FFmpeg 的 demux 线程可能正阻塞在网络读取上，
+     * 若同步等待会卡死调用线程（实测点"停止屏幕"后主线程被卡数十秒）。
+     */
     public void stop() {
         closed = true; // 让在途的 MRL 加载线程放弃创建播放器
         pendingSeekMs = -1;
         pendingPause = false;
-        try {
-            if (player != null) {
-                player.stop();
-                player.release();
-            }
-        } catch (Throwable t) {
-            // 播放器停止异常不能阻断后续清理（否则声音残留且播放器无法复用）
-            KazumiLog.playback.warn("Failed to stop media player cleanly: {}", t.getMessage());
-        } finally {
-            player = null;
-            for (var l : listeners) {
+        final MediaPlayer dying = player;
+        player = null; // 先摘引用：主线程不再等待 FFmpeg
+        if (dying != null) {
+            try {
+                dying.mute(true); // 释放期间不得残留声音
+            } catch (Throwable ignored) {}
+            STOP_EXECUTOR.execute(() -> {
                 try {
-                    l.onStop();
-                } catch (Throwable ignored) {}
-            }
+                    dying.stop(); // 阻塞点（等待 demux 线程退出）：此时已不在渲染线程上
+                } catch (Throwable t) {
+                    KazumiLog.playback.warn("Failed to stop media player cleanly: {}", t.getMessage());
+                }
+                // release 可能触碰 GL 资源：回到渲染线程执行；此时 stop 已完成，不再长阻塞
+                Minecraft.getInstance().execute(() -> {
+                    try {
+                        dying.release();
+                    } catch (Throwable t) {
+                        KazumiLog.playback.warn("Failed to release media player: {}", t.getMessage());
+                    }
+                });
+            });
+        }
+        for (var l : listeners) {
+            try {
+                l.onStop();
+            } catch (Throwable ignored) {}
         }
     }
 

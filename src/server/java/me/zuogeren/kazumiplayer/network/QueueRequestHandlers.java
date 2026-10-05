@@ -54,10 +54,21 @@ public final class QueueRequestHandlers {
                 // 元数据在异步线程拿到：回到服务端线程改 BE（markDirty 触发全组同步）
                 server.execute(() -> applyCachedLabels(screen));
             }).exceptionally(t -> {
-                KazumiLog.network.debug("Bilibili meta fetch failed for {}: {}", url, t.getMessage());
+                // 失败可观测（DEBUG 默认关，这里用 warn 让用户能直接看到原因），并允许重试一次
+                KazumiLog.network.warn("Bilibili meta fetch failed for {}: {}", url, unwrapMetaError(t));
+                BILI_META_REQUESTED.remove(url);
                 return null;
             });
         }
+    }
+
+    /** 剥掉 CompletableFuture 包装异常，取真实原因（便于日志定位：DNS/超时/接口 code） */
+    private static String unwrapMetaError(Throwable t) {
+        while ((t instanceof java.util.concurrent.CompletionException
+                || t instanceof java.util.concurrent.ExecutionException) && t.getCause() != null) {
+            t = t.getCause();
+        }
+        return String.valueOf(t.getMessage());
     }
 
     /** 用缓存里的元数据标签重写队列显示名（move/remove 等重建 Road 的操作后回填） */
