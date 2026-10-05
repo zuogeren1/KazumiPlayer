@@ -21,6 +21,8 @@ public class ClientConfig {
     public final ModConfigSpec.IntValue fullscreenOpacity;
     // 屏幕比例与视频不一致时的播放画面适配方式
     public final ModConfigSpec.EnumValue<VideoFit> videoFit;
+    // 视频拉流方式（流式快速起播 / 磁盘缓存首播需下完）
+    public final ModConfigSpec.EnumValue<VideoCacheMode> videoCacheMode;
     // 未播放时在世界中显示屏幕面位置预览框（便于调整屏幕）
     public final ModConfigSpec.BooleanValue showIdleScreenFrame;
     // 显示弹幕开关
@@ -39,6 +41,14 @@ public class ClientConfig {
     public final ModConfigSpec.BooleanValue danmakuShowInFullscreen;
     // B 站登录 Cookie（本地扫码登录或手动粘贴；本地有值时优先于服务端下发）
     public final ModConfigSpec.ConfigValue<String> bilibiliCookie;
+
+    /** 视频拉流方式 */
+    public enum VideoCacheMode {
+        /** 流式：不落磁盘缓存，FFmpeg 直接边下边播（起播快，停止更容易中断） */
+        STREAM,
+        /** 磁盘缓存：引擎先把整个文件下完再解码（首次等待久，重复播放秒开） */
+        CACHE
+    }
 
     /** 屏幕为非常规比例时视频画面的适配方式 */
     public enum VideoFit {
@@ -80,6 +90,12 @@ public class ClientConfig {
                         "STRETCH - 拉伸填满整个屏幕面（可能变形）",
                         "CONTAIN - 等比缩放后居中（保持视频宽高比，留边）")
                 .defineEnum("videoFit", VideoFit.STRETCH);
+
+        videoCacheMode = builder
+                .comment("视频拉流方式",
+                         "STREAM - 流式：不落磁盘缓存，边下边播，起播快（默认）",
+                         "CACHE  - 磁盘缓存：先把整个媒体文件下完再开始解码，大文件首播需等数十秒，重复播放秒开")
+                .defineEnum("videoCacheMode", VideoCacheMode.STREAM);
 
         showIdleScreenFrame = builder
                 .comment("未播放时在世界中显示屏幕面位置预览框（便于调整屏幕的位置与大小）")

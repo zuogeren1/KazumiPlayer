@@ -39,21 +39,15 @@ public class KazumiPlayerClient {
         // 客户端配置
         modContainer.registerConfig(ModConfig.Type.CLIENT, ClientConfig.SPEC);
 
-        // WaterMedia 的 FFmpeg 网络缓存默认"单文件上限 10MB"，超过即 cache bypass；
-        // 实测 bypass 路径下大文件（B 站 720P 长视频约 116MB、DASH m4s 约 49MB）会卡在缓冲无法起播，
-        // 而分片型小文件（直播 m3u8 分片）正常。此处提高上限让其走磁盘缓存路径
-        // （NetworkCache 为磁盘缓存：cacheDir + CachedFile + DISK 模式 + TTL 清理，不占内存）。
-        try {
-            int target = 512 * 1024 * 1024;
-            if (org.watermedia.WaterMediaConfig.media.ffmpeg.cacheMaxSize < target) {
-                org.watermedia.WaterMediaConfig.media.ffmpeg.cacheMaxSize = target;
-                KazumiLog.playback.info("WaterMedia ffmpeg cache limit raised to {} MB",
-                    target / (1024 * 1024));
-            }
-        } catch (Throwable t) {
-            KazumiLog.playback.warn("Raise WaterMedia cache limit failed: {}",
-                String.valueOf(t.getMessage()));
-        }
+        // 拉流模式依赖配置值：构造期配置可能尚未加载，这里在加载/重载后再应用一次（幂等）
+        modEventBus.addListener((net.neoforged.fml.event.config.ModConfigEvent.Loading event) -> {
+            if (event.getConfig().getSpec() == ClientConfig.SPEC) applyWaterMediaStreamMode();
+        });
+        modEventBus.addListener((net.neoforged.fml.event.config.ModConfigEvent.Reloading event) -> {
+            if (event.getConfig().getSpec() == ClientConfig.SPEC) applyWaterMediaStreamMode();
+        });
+
+        applyWaterMediaStreamMode();
 
         // Cloth Config 可选：装了才提供配置界面（mods.toml 中声明为 optional 依赖）
         if (ModList.get().isLoaded("cloth_config")) {
@@ -99,5 +93,31 @@ public class KazumiPlayerClient {
         // RuleRequestEnhancer 不注入实现：纯服务端/无凭据场景下按原样放行请求头
 
         KazumiLog.general.info("KazumiPlayer client side initialized");
+    }
+
+    /**
+     * 应用视频拉流模式（配置界面可切换）：
+     * <ul>
+     *   <li><b>STREAM</b>（默认）：关闭 FFmpeg 网络缓存，引擎直接流式读 HTTP，
+     *       起播快、停止更容易中断；</li>
+     *   <li><b>CACHE</b>：开启磁盘缓存并把单文件上限放宽到 512MB——引擎会<b>先把整个文件下完再解码</b>
+     *       （实测 B 站 720P 约 116MB @2.8MB/s ≈ 42 秒），重复播放命中缓存才秒开。
+     *       该模式用于流式路径对某个源不可用时的兜底。</li>
+     * </ul>
+     */
+    public static void applyWaterMediaStreamMode() {
+        try {
+            var ffmpeg = org.watermedia.WaterMediaConfig.media.ffmpeg;
+            boolean cache = ClientConfig.CONFIG.videoCacheMode.get() == ClientConfig.VideoCacheMode.CACHE;
+            ffmpeg.cache = cache;
+            if (cache) {
+                int target = 512 * 1024 * 1024;
+                if (ffmpeg.cacheMaxSize < target) ffmpeg.cacheMaxSize = target;
+            }
+            KazumiLog.playback.info("WaterMedia stream mode={} (ffmpeg.cache={}, cacheMaxSize={}MB)",
+                ClientConfig.CONFIG.videoCacheMode.get(), ffmpeg.cache, ffmpeg.cacheMaxSize / (1024 * 1024));
+        } catch (Throwable t) {
+            KazumiLog.playback.warn("Apply WaterMedia stream mode failed: {}", String.valueOf(t.getMessage()));
+        }
     }
 }

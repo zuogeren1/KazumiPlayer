@@ -332,6 +332,8 @@
   "kazumiplayer.config.auto_join": "Auto-join sync when aiming at a screen",
   "kazumiplayer.config.video_fit": "Behavior when screen aspect ratio differs",
   "kazumiplayer.config.video_fit_tooltip": "How the video adapts to a non-matching screen: stretch to fill, or scale down and center with bars",
+  "kazumiplayer.config.video_cache_mode": "Video streaming mode",
+  "kazumiplayer.config.video_cache_mode_tooltip": "STREAM = no disk cache, progressive playback, starts fast (recommended). CACHE = the engine downloads the whole file before decoding: first play of a large file waits tens of seconds (replays are instant); use it as a fallback when streaming fails for a source. Takes effect immediately; ongoing playback is unaffected",
   "kazumiplayer.config.idle_frame": "Show screen position frame while idle",
   "kazumiplayer.config.idle_frame_tooltip": "While joined but not playing, draw a solid box in the world marking the screen surface for easier adjustments",
   "kazumiplayer.config.fullscreen_coverage_pct": "Fullscreen video coverage (%)",

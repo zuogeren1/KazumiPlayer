@@ -105,6 +105,17 @@ public final class KazumiConfigScreen {
                 .setTooltip(Component.translatable("kazumiplayer.config.video_fit_tooltip"))
                 .setSaveConsumer(value -> ClientConfig.CONFIG.videoFit.set(value))
                 .build());
+        playbackCategory.addEntry(entry.startEnumSelector(
+                        Component.translatable("kazumiplayer.config.video_cache_mode"),
+                        ClientConfig.VideoCacheMode.class,
+                        ClientConfig.CONFIG.videoCacheMode.get())
+                .setDefaultValue(ClientConfig.VideoCacheMode.STREAM)
+                .setTooltip(Component.translatable("kazumiplayer.config.video_cache_mode_tooltip"))
+                .setSaveConsumer(value -> {
+                    ClientConfig.CONFIG.videoCacheMode.set(value);
+                    me.zuogeren.kazumiplayer.KazumiPlayerClient.applyWaterMediaStreamMode();
+                })
+                .build());
         playbackCategory.addEntry(entry.startBooleanToggle(
                         Component.translatable("kazumiplayer.config.idle_frame"),
                         ClientConfig.CONFIG.showIdleScreenFrame.get())

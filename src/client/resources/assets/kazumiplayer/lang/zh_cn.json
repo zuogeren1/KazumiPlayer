@@ -332,6 +332,8 @@
   "kazumiplayer.config.auto_join": "瞄准屏幕时自动加入同步播放",
   "kazumiplayer.config.video_fit": "屏幕比例不一致时的播放行为",
   "kazumiplayer.config.video_fit_tooltip": "屏幕为非常规比例时视频画面的适配方式：拉伸填满，或等比缩放后居中留边",
+  "kazumiplayer.config.video_cache_mode": "视频拉流方式",
+  "kazumiplayer.config.video_cache_mode_tooltip": "STREAM＝流式：不落磁盘缓存、边下边播，起播快（推荐）。CACHE＝磁盘缓存：引擎先下完整个文件再开始播放，大文件首播要等数十秒（重复播放秒开），用于流式对某些源不可用时兜底。切换后立即生效，已开始的播放不受影响",
   "kazumiplayer.config.idle_frame": "未播放时显示屏幕位置预览框",
   "kazumiplayer.config.idle_frame_tooltip": "加入同步但未开始播放时，在世界中用实心方框标记屏幕面的位置与大小，便于调整屏幕",
   "kazumiplayer.config.fullscreen_coverage_pct": "全屏观影画面覆盖程度 (%)",
