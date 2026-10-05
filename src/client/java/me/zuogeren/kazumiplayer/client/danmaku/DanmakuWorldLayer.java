@@ -14,6 +14,7 @@ import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -34,10 +35,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * 互不改变对方的几何：滚动带起点恒为显示区顶部、TOP 带自顶部向下、BOTTOM 带自底部向上，
  * 三条带重叠时按「滚动 → TOP → BOTTOM」次序提交，固定项自然压在滚动项之上（B 站语义）。
  *
- * <p>车道准入是占用感知的：该车道每条在途弹幕的已推进像素须 ≥ max(新条文本宽, 该条文本宽) +
+ * <p>车道准入是占用感知的：该车道每条在途弹幕的已推进像素须 ≥ max(新条绘制宽, 该条绘制宽) +
  * {@link #MIN_GAP_PX} 才允许新条入轨（按行程比例换算成时间提前量），没有满足条件的车道就丢弃该条
  * 并计入 DEBUG 统计，不再轮转硬塞；占位宽度取两者的较大值，保证更宽的追随弹幕（行程更快）在最坏
  * 时刻也不会追上前车。TOP/BOTTOM 槽位同样按驻留时长占位，无空闲槽即丢弃。
+ *
+ * <p>社交优先：出队后按来源优先级（ROOM_CHAT &gt; BILIBILI_LIVE &gt; BILIBILI_VIDEO）稳定排序再准入；
+ * danmakuMaxOnScreen 容量闸只拦视频片内条目，社交条目不受上限约束（仍计入在屏数、仍受车道可用性约束）；
+ * 社交条目找不到空闲车道时抢占——丢弃该车道里最接近离场的视频片内条目腾位（无视频占位者则照常丢弃），
+ * 抢占计入 evicted-for-social DEBUG 计数。
  *
  * <p>模式：SCROLL 右进左出、REVERSE 左进右出（镜像）；TOP/BOTTOM 居中驻留 {@link #PIN_HOLD_MS}，
  * 不受 speedMultiplier 影响。行程由本地 MonoClock 驱动：即时项出队即起跑，暂停/seek 不影响
@@ -45,11 +51,17 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>来源差异：房间互发（{@link DanmakuSource#ROOM_CHAT}）按「昵称：内容」组装并染
  * {@link #ROOM_CHAT_COLOR} 金色、外描一个空心矩形文字框；B 站弹幕按包内自身颜色渲染、不画框。
- * 文字框与描边的 alpha 一律由 danmakuOpacity 控制（ARGB 组合不改 RGB）。
+ * 文字框矩形由字形实际绘制外接框（{@code Font#prepareText} 的 bounds）四边各外扩 {@link #FRAME_PAD}
+ * 像素推导，文字在框内水平与垂直都居中。文字框与描边的 alpha 一律由 danmakuOpacity 控制。
  *
  * <p>字号→世界换算：车道几何恒按 100% 基准（laneHPx = 9×1.4）计算，字号百分比只作用于条目自身
  * 的 pose 缩放 q_i = danmakuFontScale × fontSizePercent/100，故任一条目上下场都不会改变他人的
  * 位置与大小；q_i 会被钳制到单条带高以内，避免超高条目溢出到相邻车道。
+ *
+ * <p>显示区坐标：原点为屏幕面中心，显示带高 = LANE_COUNT×laneHPx（即 danmakuAreaRatio 指定的
+ * 居中显示区）、宽 = 屏幕面宽，x 向为 SCROLL 的起跑侧、y 向为下缘侧。条目位置一律按实际绘制宽度（textWPx × q）计算，
+ * 位移不随字号缩放；字形按 (laneHPx - 9q)/2 在带内垂直居中，故缩放后仍不越出本带；
+ * 整条移出显示区（按绘制外接框与显示区求交，含纵向）即不提交，文字不会飘到屏幕面之外。
  *
  * <p>描边走 {@code SubmitNodeCollector.submitText} 的 outlineColor 参数（26.1.2 mojmap
  * SubmitNodeStorage L58-L72 十参签名，末位 outlineColor）；文字框走
@@ -68,18 +80,14 @@ public final class DanmakuWorldLayer {
     /** 字形行高像素（原版字体 9px）与行距系数 */
     private static final float GLYPH_HEIGHT_PX = 9.0f;
     private static final float LINE_HEIGHT_FACTOR = 1.4f;
-    /** 文字基线相对车道顶部的偏移像素 */
-    private static final float TEXT_BASELINE_OFFSET_PX = 7.0f;
     /** 顶部/底部项驻留时长（毫秒）：固定模式不受 speedMultiplier 影响 */
     private static final long PIN_HOLD_MS = 4500L;
     /** 车道让位判据的水平间隔（像素）：旧条已推进像素须 ≥ max(新条,旧条)文本宽 + 此值才释放车道 */
     private static final float MIN_GAP_PX = 6.0f;
     /** 房间互发弹幕定色（金色）；alpha 仍由 danmakuOpacity 决定 */
     private static final int ROOM_CHAT_COLOR = 0xFFD700;
-    /** 房间互发弹幕文字框内边距与线宽（像素，条目局部绘制空间） */
-    private static final float FRAME_PAD_X = 2.0f;
-    private static final float FRAME_PAD_TOP = 3.0f;
-    private static final float FRAME_PAD_BOTTOM = 2.0f;
+    /** 房间互发弹幕文字框内边距（显示区像素，四边相等）与线宽（显示区像素） */
+    private static final float FRAME_PAD = 2.0f;
     private static final float FRAME_EDGE = 1.0f;
     /** 文字框深度：略在文字之后（文字用 POLYGON_OFFSET 前移），保证框在文字下层 */
     private static final float FRAME_Z = -0.01f;
@@ -91,6 +99,28 @@ public final class DanmakuWorldLayer {
     private record Active(DanmakuEntry entry, FormattedCharSequence text, long startMono,
                           long seq, DanmakuMode mode, int travelMs, int lane,
                           float textWPx, float scalePercent) {}
+
+    /**
+     * 车道分配结果。
+     *
+     * @param lane       可用车道下标（&lt; 0 表示无车道可入，调用侧丢弃该条）
+     * @param evictIndex 需先移除的在途条目下标（-1 表示无需腾位）
+     */
+    private record LanePick(int lane, int evictIndex) {}
+
+    /** 来源优先级（数值越小越优先）：社交弹幕先占位，视频片内条目最低 */
+    private static int sourcePriority(DanmakuSource source) {
+        return switch (source) {
+            case ROOM_CHAT -> 0;
+            case BILIBILI_LIVE -> 1;
+            case BILIBILI_VIDEO -> 2;
+        };
+    }
+
+    /** 视频片内条目：受 danmakuMaxOnScreen 容量闸限制，且可被更高优先级的弹幕抢占腾位 */
+    private static boolean isVideoDanmaku(DanmakuSource source) {
+        return source == DanmakuSource.BILIBILI_VIDEO;
+    }
 
     private static final Map<BlockPos, List<Active>> ACTIVE = new ConcurrentHashMap<>();
     /** 该屏上一帧用于到期判定的视频时间（场景态清理基线） */
@@ -126,13 +156,16 @@ public final class DanmakuWorldLayer {
         }
 
         List<DanmakuEntry> due = ClientDanmakuStore.pollDue(pos, videoTimeMs);
+        // 社交优先占位：同一帧内按来源优先级稳定排序后再准入（同优先级保持出队序）
+        if (due.size() > 1) {
+            due.sort((a, b) -> Integer.compare(sourcePriority(a.source()), sourcePriority(b.source())));
+        }
         List<Active> actives = ACTIVE.computeIfAbsent(pos, k -> new ArrayList<>());
 
         // 车道几何恒按 100% 基准：字号只影响条目自身缩放，不挤压/不位移他人
         float laneWorldH = 2 * halfH * config.danmakuAreaRatio.get().floatValue() / LANE_COUNT;
         float baseScale = laneWorldH / (GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR);
         float halfWPx = halfW / baseScale;
-        float halfHPx = halfH / baseScale;
         float laneHPx = GLYPH_HEIGHT_PX * LINE_HEIGHT_FACTOR;
         float fontScale = config.danmakuFontScale.get().floatValue();
         Font font = Minecraft.getInstance().font;
@@ -140,6 +173,8 @@ public final class DanmakuWorldLayer {
         int maxOnScreen = config.danmakuMaxOnScreen.get();
         int accepted = 0;
         int noLane = 0;
+        int capped = 0;
+        int evicted = 0;
         int skipped = 0;
         for (DanmakuEntry entry : due) {
             if (entry.mode() == DanmakuMode.ADVANCED) {
@@ -147,28 +182,31 @@ public final class DanmakuWorldLayer {
                 continue;
             }
             if (!isVisible(entry, config)) continue;
-            if (actives.size() >= maxOnScreen) {
-                KazumiLog.danmaku.debug("World danmaku dropped at {}: on-screen cap {} reached (due {})",
-                    pos, maxOnScreen, due.size());
-                break;
+            // 容量闸只拦视频片内条目：社交条目不受上限约束（仍计入 actives、仍受车道可用性约束）
+            if (isVideoDanmaku(entry.source()) && actives.size() >= maxOnScreen) {
+                capped++;
+                continue;
             }
             float textWPx = font.width(entryText(entry));
             float scalePercent = Math.max(10, entry.fontSizePercent()) / 100.0f;
             // 单条占用高度按实际缩放算并钳制到带高以内，避免超大字号溢出压到相邻车道
             float bandH = laneHPx;
             float entryScale = Math.min(fontScale * scalePercent, bandH / GLYPH_HEIGHT_PX);
+            int before = actives.size();
             Active active = admit(entry, actives, now, travelMs, textWPx, entryScale, halfWPx, laneHPx);
             if (active == null) {
                 noLane++;
                 continue;
             }
+            // 抢位：admit 已就地移除被抢占的在途条目，此时净增为 0
+            if (actives.size() < before) evicted++;
             actives.add(active);
             accepted++;
         }
-        if (!due.isEmpty() || noLane > 0 || skipped > 0) {
+        if (!due.isEmpty() || noLane > 0 || capped > 0 || evicted > 0 || skipped > 0) {
             KazumiLog.danmaku.debug(
-                "World layer consumed {} due at {} (admitted {}, no-free-lane {}, advanced-skipped {}, active {})",
-                due.size(), pos, accepted, noLane, skipped, actives.size());
+                "World layer consumed {} due at {} (admitted {}, no-free-lane {}, capped-video {}, evicted-for-social {}, advanced-skipped {}, active {})",
+                due.size(), pos, accepted, noLane, capped, evicted, skipped, actives.size());
         }
 
         for (int i = actives.size() - 1; i >= 0; i--) {
@@ -194,66 +232,109 @@ public final class DanmakuWorldLayer {
         poseStack.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(180.0F));
 
         // 分带提交：滚动带先画，TOP/BOTTOM 后画 → 三条带重叠处固定项压在上层
-        drawBand(collector, poseStack, actives, DanmakuMode.SCROLL, now, halfWPx, halfHPx, laneHPx,
+        drawBand(collector, poseStack, actives, DanmakuMode.SCROLL, now, font, halfWPx, laneHPx,
             alphaFactor, outline, outlineColor, frameColor);
-        drawBand(collector, poseStack, actives, DanmakuMode.REVERSE, now, halfWPx, halfHPx, laneHPx,
+        drawBand(collector, poseStack, actives, DanmakuMode.REVERSE, now, font, halfWPx, laneHPx,
             alphaFactor, outline, outlineColor, frameColor);
-        drawBand(collector, poseStack, actives, DanmakuMode.TOP, now, halfWPx, halfHPx, laneHPx,
+        drawBand(collector, poseStack, actives, DanmakuMode.TOP, now, font, halfWPx, laneHPx,
             alphaFactor, outline, outlineColor, frameColor);
-        drawBand(collector, poseStack, actives, DanmakuMode.BOTTOM, now, halfWPx, halfHPx, laneHPx,
+        drawBand(collector, poseStack, actives, DanmakuMode.BOTTOM, now, font, halfWPx, laneHPx,
             alphaFactor, outline, outlineColor, frameColor);
         poseStack.popPose();
     }
 
-    /** 单条带的提交：滚动带起点恒为显示区顶部；TOP 自顶部向下、BOTTOM 自底部向上 */
+    /** 单条带的提交：滚动带起点恒为显示区顶部；TOP 自顶部向下、BOTTOM 自底部向上（slot 0 最靠下） */
     private static void drawBand(SubmitNodeCollector collector, PoseStack poseStack, List<Active> actives,
-                                 DanmakuMode band, long now, float halfWPx, float halfHPx, float laneHPx,
+                                 DanmakuMode band, long now, Font font, float halfWPx, float laneHPx,
                                  float alphaFactor, boolean outline, int outlineColor, int frameColor) {
         for (Active active : actives) {
             if (active.mode() != band) continue;
             float q = active.scalePercent();
-            float textWPx = active.textWPx();
-            float xPx;
-            float yTopPx;
-            switch (band) {
-                case TOP -> {
-                    xPx = -textWPx / 2.0f;
-                    yTopPx = -halfHPx + active.lane() * laneHPx + 1.0f;
-                }
-                case BOTTOM -> {
-                    xPx = -textWPx / 2.0f;
-                    yTopPx = -halfHPx - (active.lane() + 1) * laneHPx + 1.0f;
-                }
-                case REVERSE -> {
-                    float progress = (now - active.startMono()) / (float) active.travelMs();
-                    // 左进右出：SCROLL 的镜像
-                    xPx = -halfWPx - textWPx + progress * (2 * halfWPx + textWPx);
-                    yTopPx = -halfHPx + active.lane() * laneHPx + 1.0f;
-                }
-                default -> {
-                    float progress = (now - active.startMono()) / (float) active.travelMs();
-                    // 右进左出：p=0 时文字头贴右缘（整体藏于右缘外），p=1 时文字尾贴左缘滑出
-                    xPx = halfWPx - progress * (2 * halfWPx + textWPx);
-                    yTopPx = -halfHPx + active.lane() * laneHPx + 1.0f;
-                }
-            }
-            // 整条移出显示区即不再提交（滚动/逆向滚动出界后无可见部分）
-            if (xPx > halfWPx || xPx + textWPx < -halfWPx) continue;
+            float drawnWPx = active.textWPx() * q;
+            Placement place = placementOf(active, now, halfWPx, laneHPx);
+            // 整条移出显示区即不再提交（按实际绘制外接框求交，避免文字飘到屏幕面之外）
+            if (outsideDisplay(place, drawnWPx, laneHPx, halfWPx)) continue;
+            // 字形在带内垂直居中：字号缩放后仍不越出本带与显示区上下缘
+            float localTextTop = textTopInBand(q, laneHPx) / q;
+            int color = entryColor(active.entry(), alphaFactor);
 
             poseStack.pushPose();
-            poseStack.translate(xPx, yTopPx, 0.0f);
+            poseStack.translate(place.x(), place.yTop(), 0.0f);
             poseStack.scale(q, q, 1.0f);
             if (active.entry().source() == DanmakuSource.ROOM_CHAT) {
-                submitFrame(collector, poseStack,
-                    -FRAME_PAD_X, textWPx + FRAME_PAD_X,
-                    -FRAME_PAD_TOP, laneHPx + FRAME_PAD_BOTTOM, frameColor);
+                ScreenRectangle ink = inkBounds(font, active, localTextTop, color, !outline);
+                if (ink != null) {
+                    float[] box = frameBox(ink, q);
+                    submitFrame(collector, poseStack, box[0], box[2], box[1], box[3],
+                        FRAME_EDGE / q, frameColor);
+                }
             }
-            collector.submitText(poseStack, 0.0f, TEXT_BASELINE_OFFSET_PX, active.text(),
+            collector.submitText(poseStack, 0.0f, localTextTop, active.text(),
                 !outline, Font.DisplayMode.POLYGON_OFFSET,
-                LightCoordsUtil.FULL_BRIGHT, entryColor(active.entry(), alphaFactor), 0,
+                LightCoordsUtil.FULL_BRIGHT, color, 0,
                 outline ? outlineColor : 0);
             poseStack.popPose();
         }
+    }
+
+    /** 条目落点（屏幕面局部像素坐标：原点为面中心，x 向为 SCROLL 起跑侧、y 向为下缘侧） */
+    private record Placement(float x, float yTop) {}
+
+    /** 显示带半高（像素）：danmakuAreaRatio 指定的显示区居中于屏幕面，5 条车道自 -halfBand 铺到 +halfBand */
+    private static float halfBand(float laneHPx) {
+        return LANE_COUNT * laneHPx / 2.0f;
+    }
+
+    /**
+     * 条目在显示区内的落点。横向一律按实际绘制宽度（textWPx × q）计算，位移不随字号缩放放大：
+     * SCROLL 自 +x 缘进入向左行进、REVERSE 自 -x 缘进入向右行进（互为镜像）；
+     * TOP 带自显示区上缘向下、BOTTOM 带自下缘向上，槽位 0 分别最靠上/最靠下。
+     */
+    private static Placement placementOf(Active active, long now, float halfWPx, float laneHPx) {
+        float drawnWPx = active.textWPx() * active.scalePercent();
+        float half = halfBand(laneHPx);
+        float yTop = -half + active.lane() * laneHPx;
+        float travel = 2 * halfWPx + drawnWPx;
+        float progress = progress(active, now);
+        return switch (active.mode()) {
+            case TOP -> new Placement(-drawnWPx / 2.0f, yTop);
+            case BOTTOM -> new Placement(-drawnWPx / 2.0f, half - (active.lane() + 1) * laneHPx);
+            case REVERSE -> new Placement(-halfWPx - drawnWPx + progress * travel, yTop);
+            default -> new Placement(halfWPx - progress * travel, yTop);
+        };
+    }
+
+    /** 行程进度 p∈[0,1]（本地钟驱动，与画面时间无关；固定项 travelMs=0，不参与行程） */
+    private static float progress(Active active, long now) {
+        int travelMs = active.travelMs();
+        return travelMs <= 0 ? 0.0f : (now - active.startMono()) / (float) travelMs;
+    }
+
+    /** 字形在带内的垂直偏移（显示区像素）：缩放后仍居中于本带 */
+    private static float textTopInBand(float q, float laneHPx) {
+        return (laneHPx - GLYPH_HEIGHT_PX * q) / 2.0f;
+    }
+
+    /** 整条落在显示区之外（横向按屏幕面宽度、纵向按显示带）即不提交：按绘制外接框求交 */
+    private static boolean outsideDisplay(Placement place, float drawnWPx, float laneHPx, float halfWPx) {
+        float half = halfBand(laneHPx);
+        return place.x() >= halfWPx || place.x() + drawnWPx <= -halfWPx
+            || place.yTop() >= half || place.yTop() + laneHPx <= -half;
+    }
+
+    /** 文字实际绘制外接框（条目局部域）：取字形四边形真实边界（含投影），空文本返回 null */
+    private static ScreenRectangle inkBounds(Font font, Active active, float localTextTop,
+                                             int color, boolean dropShadow) {
+        return font.prepareText(active.text(), 0.0f, localTextTop, color, dropShadow, false, 0).bounds();
+    }
+
+    /**
+     * 文字框矩形（条目局部域，{xMin, yMin, xMax, yMax}）：由文字实际绘制外接框四边各外扩
+     * {@link #FRAME_PAD} 像素——内边距除以 q 是因为局部坐标随后被 q 缩放，屏幕上才恒为 FRAME_PAD。
+     */
+    private static float[] frameBox(ScreenRectangle ink, float q) {
+        float pad = FRAME_PAD / q;
+        return new float[] {ink.left() - pad, ink.top() - pad, ink.right() + pad, ink.bottom() + pad};
     }
 
     /** 跳变帧清理：|Δ| 超过 Store 的 seek 阈值即清空该屏活动弹幕（首帧只记基线） */
@@ -266,6 +347,8 @@ public final class DanmakuWorldLayer {
 
     /**
      * 单条准入：占用感知地分配车道/槽位。
+     *
+     * <p>社交条目抢占腾位时会直接从 actives 就地移除被抢占的在途条目（调用侧据列表长度变化计数）。
      *
      * @return 已登记的 Active；无可用车道/槽位返回 null（调用侧丢弃并计入 DEBUG）
      */
@@ -285,9 +368,12 @@ public final class DanmakuWorldLayer {
             }
             case SCROLL, REVERSE -> {
                 // 占位宽度按条目实际缩放后的绘制宽度计（与 HUD 侧一致）
-                int lane = freeLane(actives, entry.mode(), textWPx * entryScale, halfWPx, now, travelMs);
-                yield lane < 0 ? null : new Active(entry, entryText(entry), now, seq,
-                    entry.mode(), (int) travelMs, lane, textWPx, entryScale);
+                LanePick pick = pickLane(actives, entry.mode(), textWPx * entryScale, halfWPx, now, travelMs,
+                    !isVideoDanmaku(entry.source()));
+                if (pick.lane() < 0) yield null;
+                if (pick.evictIndex() >= 0) actives.remove(pick.evictIndex());
+                yield new Active(entry, entryText(entry), now, seq,
+                    entry.mode(), (int) travelMs, pick.lane(), textWPx, entryScale);
             }
             default -> null;
         };
@@ -301,7 +387,17 @@ public final class DanmakuWorldLayer {
      */
     private static boolean laneReleased(List<Active> actives, DanmakuMode mode, int lane, float newWPx,
                                         float halfWPx, long now, long travelMs) {
-        for (Active active : actives) {
+        return laneReleased(actives, mode, lane, newWPx, halfWPx, now, travelMs, -1);
+    }
+
+    /**
+     * @param skipIndex 试算抢占腾位时忽略的在途条目下标（-1 表示不忽略）
+     */
+    private static boolean laneReleased(List<Active> actives, DanmakuMode mode, int lane, float newWPx,
+                                        float halfWPx, long now, long travelMs, int skipIndex) {
+        for (int i = 0; i < actives.size(); i++) {
+            if (i == skipIndex) continue;
+            Active active = actives.get(i);
             if (active.mode() != mode || active.lane() != lane) continue;
             float widest = Math.max(newWPx, active.textWPx() * active.scalePercent());
             double span = 2 * halfWPx + widest;
@@ -328,17 +424,49 @@ public final class DanmakuWorldLayer {
         return -1;
     }
 
-    /** 从轮转游标起取第一条已让出空间的车道（newWPx 为新条绘制宽）；全部车道都在占用期返回 -1 */
-    private static int freeLane(List<Active> actives, DanmakuMode mode, float newWPx, float halfWPx,
-                                long now, long travelMs) {
+    /**
+     * 车道分配：先按轮转游标找一条已让出空间的车道；全部车道都在占用期且该条可抢占时，再按同一
+     * 轮转序试算腾位——移除该车道里行程 progress 最大的视频片内条目后确实让出空间才标记抢占
+     * （试算不成立不白丢视频条目）；无可用车道返回 lane &lt; 0，由调用侧丢弃该条。
+     *
+     * @param preempt 该条是否为可抢占的社交条目（视频片内条目不得抢占）
+     */
+    private static LanePick pickLane(List<Active> actives, DanmakuMode mode, float newWPx, float halfWPx,
+                                     long now, long travelMs, boolean preempt) {
         for (int offset = 0; offset < LANE_COUNT; offset++) {
             int lane = Math.floorMod(laneCursor + offset, LANE_COUNT);
             if (laneReleased(actives, mode, lane, newWPx, halfWPx, now, travelMs)) {
                 laneCursor = Math.floorMod(lane + 1, LANE_COUNT);
-                return lane;
+                return new LanePick(lane, -1);
             }
         }
-        return -1;
+        if (!preempt) return new LanePick(-1, -1);
+        for (int offset = 0; offset < LANE_COUNT; offset++) {
+            int lane = Math.floorMod(laneCursor + offset, LANE_COUNT);
+            int victim = evictCandidate(actives, mode, lane, now);
+            if (victim < 0) continue;
+            if (!laneReleased(actives, mode, lane, newWPx, halfWPx, now, travelMs, victim)) continue;
+            laneCursor = Math.floorMod(lane + 1, LANE_COUNT);
+            return new LanePick(lane, victim);
+        }
+        return new LanePick(-1, -1);
+    }
+
+    /** 抢占候选：该车道里行程 progress 最大（最接近离场）的视频片内条目下标；没有则 -1 */
+    private static int evictCandidate(List<Active> actives, DanmakuMode mode, int lane, long now) {
+        int candidate = -1;
+        float bestProgress = -1.0f;
+        for (int i = 0; i < actives.size(); i++) {
+            Active active = actives.get(i);
+            if (active.mode() != mode || active.lane() != lane) continue;
+            if (!isVideoDanmaku(active.entry().source())) continue;
+            float progress = (now - active.startMono()) / (float) active.travelMs();
+            if (progress > bestProgress) {
+                bestProgress = progress;
+                candidate = i;
+            }
+        }
+        return candidate;
     }
 
     /** 条目寿命：滚动/逆向滚动按行程，固定项按驻留时长 */
@@ -404,10 +532,9 @@ public final class DanmakuWorldLayer {
 
     /** 空心文字框：四条细边各自提交，框内不填充，保持文字下层（FRAME_Z） */
     private static void submitFrame(SubmitNodeCollector collector, PoseStack poseStack,
-                                    float xMin, float xMax, float yMin, float yMax, int color) {
+                                    float xMin, float xMax, float yMin, float yMax, float e, int color) {
         ensureFrameTexture();
         RenderType type = RenderTypes.entityCutout(FRAME_TEX);
-        float e = FRAME_EDGE;
         submitEdge(collector, poseStack, type, xMin, xMax, yMin, yMin + e, color);
         submitEdge(collector, poseStack, type, xMin, xMax, yMax - e, yMax, color);
         submitEdge(collector, poseStack, type, xMin, xMin + e, yMin + e, yMax - e, color);
