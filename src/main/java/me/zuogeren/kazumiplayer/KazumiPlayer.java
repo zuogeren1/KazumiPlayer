@@ -24,6 +24,8 @@ public class KazumiPlayer {
 
         // 服务端通用配置
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+        // 服务端配置（B 站凭据等）：玩家登录时下发到客户端
+        modContainer.registerConfig(ModConfig.Type.SERVER, ServerConfig.SPEC);
 
         // 配置加载/重载后应用日志分类级别（修改后即时生效）
         modEventBus.addListener((ModConfigEvent.Loading event) -> {

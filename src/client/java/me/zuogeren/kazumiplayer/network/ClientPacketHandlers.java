@@ -5,6 +5,7 @@ import me.zuogeren.kazumiplayer.client.ClientClockSync;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.client.gui.GuiClientState;
 import me.zuogeren.kazumiplayer.playback.WaterMediaPlayer;
+import me.zuogeren.kazumiplayer.network.packet.BilibiliCookiePacket;
 import me.zuogeren.kazumiplayer.network.packet.GuiDataPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteFullscreenPacket;
 import me.zuogeren.kazumiplayer.network.packet.OpenRemoteGuiPacket;
@@ -40,6 +41,7 @@ public class ClientPacketHandlers implements IClientPacketHandler {
         register(OpenRemoteGuiPacket.class, ClientPacketHandlers::handleOpenRemoteGui);
         register(OpenRemoteFullscreenPacket.class, ClientPacketHandlers::handleOpenRemoteFullscreen);
         register(TimeSyncResponsePacket.class, (pkt, ctx) -> ClientClockSync.handleResponse((TimeSyncResponsePacket) pkt));
+        register(BilibiliCookiePacket.class, ClientPacketHandlers::handleBilibiliCookie);
         register(me.zuogeren.kazumiplayer.network.packet.DanmakuBroadcastPacket.class,
             ClientPacketHandlers::handleDanmakuBroadcast);
     }
@@ -53,6 +55,22 @@ public class ClientPacketHandlers implements IClientPacketHandler {
     public void handle(CustomPacketPayload packet, IPayloadContext context) {
         var h = HANDLERS.get(packet.getClass());
         if (h != null) h.accept(packet, context);
+    }
+
+    /**
+     * 服务端下发 B 站 Cookie：注入 WaterMedia 平台配置。
+     * BiliBiliPlatform 每次请求实时读取 WaterMediaConfig.platforms.biliBiliCookie，
+     * 故运行期赋值即时生效（空串 = 未登录，回落到 720P 清晰度上限）。
+     */
+    private static void handleBilibiliCookie(BilibiliCookiePacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            try {
+                org.watermedia.WaterMediaConfig.platforms.biliBiliCookie = packet.cookie();
+                KazumiLog.network.debug("Bilibili cookie applied ({} chars)", packet.cookie().length());
+            } catch (Throwable t) {
+                KazumiLog.network.warn("Bilibili cookie apply failed: {}", String.valueOf(t.getMessage()));
+            }
+        });
     }
 
     /** 屏幕遥控器：服务端已校验屏幕存在，打开对应屏幕的播放器 GUI */

@@ -4,6 +4,8 @@ import me.zuogeren.kazumiplayer.client.KazumiClientMessages;
 
 import me.zuogeren.kazumiplayer.ClientConfig;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
+import me.zuogeren.kazumiplayer.util.BilibiliUrls;
+import me.zuogeren.kazumiplayer.util.HttpUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
 
@@ -58,6 +60,14 @@ public final class VideoSourceResolver {
         // （条目被 stopAll/remove 置空 player、或被新播放器实例顶替 → 本次结果作废）
         ScreenPlayerManager.ScreenPlayer session = ScreenPlayerManager.get(screen.getBlockPos());
 
+        // B 站页面链接：WaterMedia 内置平台解析直接产出可播流（视频/直播），
+        // 嗅探浏览器对 B 站 DASH 播放页拿不到可用直链，因此必须绕开嗅探
+        if (BilibiliUrls.isBilibiliUrl(episodeUrl)) {
+            KazumiLog.sniff.info("[source] bilibili URL, using built-in platform resolver");
+            resolveBilibili(screen, episodeUrl, player, session);
+            return player;
+        }
+
         if (looksLikeDirectVideo(episodeUrl)) {
             KazumiLog.sniff.info("[source] direct video URL, playing without sniffing");
             // .m3u8/.m3u 播放列表直链按 HLS 直播流处理：置直连模式绕过服务端时钟同步
@@ -75,6 +85,39 @@ public final class VideoSourceResolver {
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         resolveWithRetry(screen, episodeUrl, player, session, 0);
         return player;
+    }
+
+    /**
+     * B 站链接起播：短链先跟随重定向展开，再交给 WaterMedia 平台解析
+     * （play 内部异步解析并轮询，视频/直播均由内置 BiliBiliPlatform 产出可播流）。
+     * 直播间置 bypassSync：直播无稳定时间轴，时钟同步与时间轴控制不适用。
+     */
+    private void resolveBilibili(VideoScreenBlockEntity screen, String episodeUrl,
+            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
+        if (BilibiliUrls.isLiveRoom(episodeUrl)) {
+            session.bypassSync = true;
+            KazumiLog.sniff.info("[source] bilibili live room, sync bypassed");
+        }
+        reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
+        if (!BilibiliUrls.isShortLink(episodeUrl)) {
+            startWhenValid(screen, session, player, episodeUrl);
+            return;
+        }
+        KazumiLog.sniff.info("[source] expanding bilibili short link: {}", episodeUrl);
+        HttpUtil.resolveFinalUrl(episodeUrl)
+            .thenAccept(finalUrl -> {
+                KazumiLog.sniff.info("[source] bilibili short link resolved to {}", finalUrl);
+                // 直播标记同样受会话守卫约束：换集/停止后的迟到结果不得污染当前会话
+                Minecraft.getInstance().execute(() -> {
+                    if (session.player != player || screen.isRemoved()) return;
+                    if (BilibiliUrls.isLiveRoom(finalUrl)) session.bypassSync = true;
+                    startWhenValid(screen, session, player, finalUrl);
+                });
+            })
+            .exceptionally(t -> {
+                failPlayback(screen, unwrap(t));
+                return null;
+            });
     }
 
     /** 停止/拆屏时取消全部在途解析 */

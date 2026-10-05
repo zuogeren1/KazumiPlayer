@@ -58,8 +58,10 @@ public final class DirectLinkQueue {
         if (q >= 0) s = s.substring(0, q);
         int f = s.indexOf('#');
         if (f >= 0) s = s.substring(0, f);
+        // B 站视频页：末段路径为空（尾部斜杠）或不可读，直接以 BV/av 号作标签
+        String biliId = bilibiliVideoId(s);
         int sep = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
-        String name = sep >= 0 ? s.substring(sep + 1) : s;
+        String name = biliId != null ? biliId : (sep >= 0 ? s.substring(sep + 1) : s);
         try {
             String decoded = URLDecoder.decode(name, StandardCharsets.UTF_8);
             if (!decoded.isBlank()) name = decoded;
@@ -71,6 +73,19 @@ public final class DirectLinkQueue {
             name = name.substring(0, name.offsetByCodePoints(0, name.codePointCount(0, MAX_LABEL_LEN - 1))) + "…";
         }
         return name;
+    }
+
+    /** B 站视频页 URL 中的 BV/av 号；非视频页返回 null（直播/短链沿用末段路径规则） */
+    @Nullable
+    private static String bilibiliVideoId(String urlWithoutQuery) {
+        if (!BilibiliUrls.isVideoPage(urlWithoutQuery)) return null;
+        int idx = urlWithoutQuery.toLowerCase().indexOf("/video/");
+        if (idx < 0) return null;
+        String rest = urlWithoutQuery.substring(idx + "/video/".length());
+        int slash = rest.indexOf('/');
+        if (slash >= 0) rest = rest.substring(0, slash);
+        String lower = rest.toLowerCase();
+        return (lower.startsWith("bv") || lower.startsWith("av")) && rest.length() > 2 ? rest : null;
     }
 
     @Nullable

@@ -31,6 +31,8 @@
 - [ ] **B16 bgm 搜索结果列表可滚动**（替代翻页方案）【S-M】
 
 ### 功能新增
+- [x] **B 站视频/直播解析（第一批，已实装）**: util/BilibiliUrls 识别视频页（BV/av 含 ?p=）/直播间（live.bilibili.com/<房间号>）/b23.tv 短链 → VideoSourceResolver.resolveBilibili 绕开 MCEF 嗅探直接交 WaterMedia 内置 BiliBiliPlatform 解析（实测可独立解析视频与直播，source 自带 Referer/UA 与 audioSlaves）；短链经 HttpUtil.resolveFinalUrl 重定向展开（含会话守卫）；直播间置 bypassSync；服务端 ServerConfig.bilibiliCookie（SERVER 类型配置）经 BilibiliCookiePacket 登录下发 → 客户端注入 WaterMediaConfig.platforms.biliBiliCookie（实时生效，未登录 720P 上限）；队列标签对视频页取 BV/av 号；参考文档 reference/watermedia-wiki/en-us.md 已按实际 jar 重写
+- [ ] **B 站弹幕（第二批，待做）**: 视频时间轴弹幕（BV→cid→分段弹幕，protobuf seg.so 或 XML list.so）+ 直播实时弹幕（WebSocket 长连接；弹幕包压缩 zlib(protover=2) 优先、必要时引入 brotli 解码依赖；HTTP 轮询 gethistory 未登录恒 0 条已实测排除）；与房间聊天弹幕混在同一弹幕层、玩家弹幕特殊样式（用户裁定）【M-L】
 - [x] **解析状态上报（播放前确认其他人是否解析完成）**: 客户端 ResolveStatusPacket(C→S) 上报 解析中/完成/失败 → 服务端校验组成员聚合进 BE ResolveStates NBT（瞬态：只由 getUpdateTag 下发、saveAdditional 不写＝不落盘；客户端经 loadAdditional 读取——26.1.2 同步包与磁盘共用该入口，markDirty 自动同步全组）→ GUI 观看者列表按人显示状态后缀；等待可视化三处共用 client/ResolveHint——GUI 预览区第三行+无信号替代、全屏 HUD 同两处、世界屏幕面居中文字；清零点=新集起播（PlaybackController 三入口+队列 playItemAt）/leaveOwn/退服/整屏停止
 - [ ] **F2 倍速播放**: 单机直链先行（WaterMedia speed 待验证）；联机需 SyncGroup 加 speed 字段防循环硬 seek【M-L】
 - [ ] **F4 每周放送时间表**: bgm calendar 免鉴权 API+TimedCache；新增"放送时刻表"物品右键打开星期分栏 GUI【S-M】

@@ -56,6 +56,9 @@ public class KazumiPlayerServer {
         // 房间弹幕：原版聊天栏监听发送入口
         NeoForge.EVENT_BUS.register(me.zuogeren.kazumiplayer.server.danmaku.DanmakuChatListener.class);
 
+        // B 站凭据：玩家登录时下发服务端配置（客户端解析需要）
+        NeoForge.EVENT_BUS.register(me.zuogeren.kazumiplayer.network.BilibiliCookieSync.class);
+
         // 初始化 GUI 通用请求处理
         GuiRequestHandlers.init(ruleManager, searchManager);
 

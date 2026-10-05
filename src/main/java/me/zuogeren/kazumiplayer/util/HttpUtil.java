@@ -194,6 +194,57 @@ public class HttpUtil {
      * 对 host 的全部解析结果逐一校验（round-robin DNS 可能同时返回公网与内网记录）；
      * 校验与后续 CLIENT.send 共享同一 JVM DNS 缓存视图，消除多次解析间的选址漂移窗口。
      */
+    /**
+     * 跟随重定向解析最终 URL（不读取响应体），用于短链展开（如 b23.tv）。
+     * 与 {@link #fetch} 共用同一套 SSRF 逐跳校验与跳数上限。
+     */
+    public static CompletableFuture<String> resolveFinalUrl(String urlString) {
+        CompletableFuture<String> future = new CompletableFuture<>();
+        CompletableFuture.runAsync(() -> {
+            try {
+                String currentUrl = urlString;
+                for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+                    URI uri = URI.create(currentUrl);
+                    checkSsrf(uri);
+                    HttpRequest request = HttpRequest.newBuilder()
+                            .uri(uri)
+                            .timeout(Duration.ofSeconds(10))
+                            .header("User-Agent", getRandomUserAgent())
+                            .header("Accept-Language", "zh-CN,zh;q=0.9")
+                            .GET()
+                            .build();
+                    HttpResponse<InputStream> response =
+                            CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                    int status = response.statusCode();
+                    String location = response.headers().firstValue("Location").orElse(null);
+                    boolean redirect = (status == 301 || status == 302 || status == 303
+                            || status == 307 || status == 308) && location != null;
+                    try (InputStream body = response.body()) {
+                        // 只需要 Location 与状态码：立即释放连接，不读响应体
+                    }
+                    if (!redirect) {
+                        if (status >= 400) {
+                            future.completeExceptionally(
+                                    new RuntimeException("站点返回 HTTP " + status));
+                            return;
+                        }
+                        KazumiLog.http.debug("Resolved final URL: {} -> {}", urlString, currentUrl);
+                        future.complete(currentUrl);
+                        return;
+                    }
+                    currentUrl = uri.resolve(location.trim()).toString();
+                }
+                future.completeExceptionally(new RuntimeException(
+                        "重定向次数超过 " + MAX_REDIRECTS + "，已中止（可疑链路）"));
+            } catch (SsrfBlockedException e) {
+                future.completeExceptionally(e);
+            } catch (Exception e) {
+                future.completeExceptionally(e);
+            }
+        });
+        return future;
+    }
+
     private static void checkSsrf(URI uri) throws SsrfBlockedException {
         String host = uri.getHost();
         if (host == null) {
