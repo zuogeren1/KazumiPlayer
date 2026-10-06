@@ -23,6 +23,19 @@
 - [x] **不需动（签名 diff 已核）**：我们在用的 `MediaAPI.mrl/glEngine/alEngine/createPlayer(mrl,gfx,sfx)`、`MRL`、`MediaPlayer` 的 `volume/width/height/time/duration/ended/isPlaying/mute/seekQuick/stop`、`platform` 包 6 个类（`IPlatform/PlatformAPI/PlatformData/DataSource/PlatformException/DataQuality`）、`util` 包 4 个类（`MediaType/Metadata/RequestHeaders/Slave`）、`WaterMediaConfig` —— **签名全部一致**；新增 API 类只有 `players/sync/*`（`Bridge/Packet/Sync/Config/Watch/Unwatch/Report/Control`）与 `MediaPlayer$Role`、`ServerMediaPlayer$Watcher`，**无任何删除**。CodecsAPI 那批修复（PNG zTXt 死循环、渐进式 JPEG、SVG 二次方、DDS 溢出…）我们不用该 API；`speed(NaN)` 拒绝我们也不调 `speed`。
 - [ ] **机会（暂缓，需单独立项）：用内置同步子系统替换自研同步层**【L】: .23 把联机同步做进了 `MediaPlayer`——`sync.Bridge`（单方法 `send(ByteBuffer)`，可承载任意字节通道，能挂在我们现有包上）、`Config.Capability`（LOCKSTEP / CONTROLS / VOLUME）、`role()/authority()/drift()/tolerance(ms)`、`ServerMediaPlayer`（权威：注册观众 + 变更广播 + 约 5s 心跳 + 处理控制请求 + 清理失联）、revision 单调计数与乱序丢弃、`syncDuration` 首胜、ENDED 态 seek 落 PAUSED。它与我们的 `SyncGroupManager` + `SyncStatePacket` + `ClientClockSync` + 漂移兜底属同一层能力，收益：①LOCKSTEP（有人缓冲时全体冻结、失败者忽略、中途加入不打断他人）正对我们「缓冲饥饿期反复戳播放器」「集间过渡」两个老痛点；②CONTROLS 让控制请求走上行、两侧 API 对称；③省掉自研协议与节流数学。风险：权威侧只有 `ServerMediaPlayer`（无真实媒体）与真实媒体播放器两类，与「每屏一个权威 + 每人本地播放器跟随」的映射需实测；**VOLUME 能力会覆盖我们每屏本端音量 → 不能启用**；`sync()` 解码发生在任意线程、内部 50ms ticker；还要与「线路/清晰度双播放器交接」「直链队列」重新对齐。结论：先记录，等其他批次稳定后再评估。
 
+## 直播延迟（2026-10-06 诊断，待拍板实施）
+
+**现象**：游戏内看 B 站直播比网页端明显落后（用户反馈）。
+
+**实测证据**（房间 6，2026-10-06）：
+- 我们走 `http_hls`（`BilibiliApi.resolveLive` 写死优先 HLS，ts 优先于 fmp4）：m3u8 为 `TARGETDURATION:3` + **3 段窗口 = 9s 媒体**；实测「最新段起始距今 2–5s、窗口起点距今 9–10s」→ HLS 的理论下限就是 ~5s，从窗口头起播就是 ~9s。
+- 网页端走 `http_stream`/FLV（flv.js），无分段窗口 → 常态 1–3s。
+- `getRoomPlayInfo` **同一次响应里就同时下发 6 组**：`http_stream`(flv, avc/hevc) + `http_hls`(ts/fmp4, avc/hevc)——我们只取了 hls。FLV 实测：HTTP 200、`Content-Type: video/x-flv`、magic `FLV`、首包 0.22s、**无需 Referer**。
+- WaterMedia 不是元凶（逐行核实）：起播阈值≈第一帧、无「先缓冲 N 秒」、无 live edge 逻辑；但**没有 FFmpeg 选项注入通道**（`DataSource` 7 字段/`MRL.Source`/`Metadata` 均无 options，唯一生效通道是 `RequestHeaders` → `headers`），故 HLS 侧调不了 `live_start_index`/`fflags=nobuffer`/`low_delay`。
+
+- [ ] **直播改走 FLV（http_stream）优先、HLS 回落**【S-M】：`BilibiliApi.resolveLive` 优先 `http_stream`+`flv`+`avc`，缺失时回落现有 `http_hls`（ts→fmp4）；`preferredQn`/`accept_qn` 逻辑不变。预期延迟 9–12s → 2–4s（贴近网页端）。
+- [ ] **护栏：播放 FLV 直播必须强制 `WaterMediaConfig.media.ffmpeg.cache=false`**【S】：`FFMediaPlayer#shouldUseFFmpegCache`（源码 :2037-2048）对**非 `.m3u8`/`.mpd`** 的 http(s) URL 一律走磁盘缓存，而 FLV 直播 URL 以 `.flv` 结尾且是无限流 → `videoCacheMode=CACHE`（或 WaterMedia 自身 `cache=true`）下会「先把整个文件下完再解码」＝永远起播不了。现默认 STREAM 模式（cache=false）安全，但 CACHE 模式必须临时降级并在直播结束后恢复。
+- [ ] **可选：起播提速**【S】：`media.ffmpeg.analyzeDuration` 7000→2000ms、`probeSize` 10→2MB（只影响起播快慢，不影响稳态延迟；全局生效、含点播，极端源可能探测失败）。
 ### 待裁决（拍板后才动）
 
 - [ ] **扫码登录成功后立即同步屏蔽词**: `BilibiliLoginScreen` 登录成功处加一行拉取 `x/dm/filter/user`（一行改动，取舍在「登录即联网」的体验）【S】
