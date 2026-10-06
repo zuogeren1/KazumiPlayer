@@ -111,6 +111,7 @@
   "kazumiplayer.msg.danmaku_video_failed": "Failed to load video danmaku",
   "kazumiplayer.msg.danmaku_live_failed": "Failed to connect live danmaku",
   "kazumiplayer.msg.bilibili_anonymous_danmaku": "Not logged in to Bilibili: only part of the in-video danmaku is available — sign in with the QR code in the config screen's Bilibili category",
+  "kazumiplayer.msg.playback_link_expired": "The playback source link has expired — resolve it again",
   "kazumiplayer.gui.main.status_quality_switched": "Quality switched: %s (this client only)",
   "kazumiplayer.gui.main.quality_vip_tag": " (Premium)",
   "kazumiplayer.gui.main.quality_unavailable_tag": " (unavailable)",

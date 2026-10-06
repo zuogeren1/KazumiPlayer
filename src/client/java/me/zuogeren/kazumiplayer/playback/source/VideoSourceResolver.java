@@ -326,23 +326,37 @@ public final class VideoSourceResolver {
     }
 
     /**
-     * 链接自身的 deadline（秒级时间戳，B 站直播与点播都带），不做任何余量扣减——
-     * 直播链接有效期短，扣余量会把刚签发的地址判成过期；缺失或已过期时返回 0（不参与过期判定）。
+     * 链接自身的签名失效时刻（秒级时间戳）：点播 DASH 带 {@code deadline}，直播 FLV/HLS 带
+     * {@code expires}——两者都是绝对 Unix 秒，单位一致但参数名不同，只认 deadline 会让直播拿到 0。
+     * 不做任何余量扣减：直播链接有效期短，扣余量会把刚签发的地址判成过期；
+     * 缺失或已过期时返回 0（由平台侧按"不过期"处理）。
      */
     private static long linkDeadlineOf(String url) {
         long now = System.currentTimeMillis() / 1000;
         try {
             String query = java.net.URI.create(url).getRawQuery();
             if (query != null) {
-                for (String pair : query.split("&")) {
-                    if (pair.startsWith("deadline=")) {
-                        long deadline = Long.parseLong(pair.substring("deadline=".length()));
-                        return deadline > now ? deadline : 0L;
-                    }
-                }
+                long deadline = queryParam(query, "deadline");
+                if (deadline > now) return deadline;
+                long expires = queryParam(query, "expires");
+                if (expires > now) return expires;
             }
         } catch (RuntimeException ignored) {
             // 参数缺失或格式变化：按未知处理
+        }
+        return 0L;
+    }
+
+    /** 取 query 参数并解析为 long；缺失或非数字返回 0 */
+    private static long queryParam(String query, String name) {
+        for (String pair : query.split("&")) {
+            if (pair.startsWith(name + "=")) {
+                try {
+                    return Long.parseLong(pair.substring(name.length() + 1));
+                } catch (NumberFormatException e) {
+                    return 0L;
+                }
+            }
         }
         return 0L;
     }

@@ -104,6 +104,15 @@ public class WaterMediaPlayer {
                 // MRL 已进入确定失败态（如 content-type 校验拒绝、平台拦截）：
                 // 即时报错收尾，不必傻等满 30 轮超时（典型：IPTV 目录 m3u8 被 text/plain 拒绝）
                 MRL.Status st = mrl.status();
+                if (st == MRL.Status.EXPIRED) {
+                    // 链接签名已过期：重试无意义（每次查询都会触发 reload 并清空 sources）
+                    KazumiLog.playback.error("MRL expired: {} (normalized: {})", videoUrl, url);
+                    mc.execute(() -> KazumiClientMessages.chatError(
+                        net.minecraft.network.chat.Component
+                            .translatable("kazumiplayer.msg.playback_link_expired").getString()));
+                    firePlayFailure();
+                    return;
+                }
                 if (st == MRL.Status.ERROR || st == MRL.Status.BLOCKED) {
                     Throwable reason = mrl.exception();
                     String raw = reason != null && reason.getMessage() != null

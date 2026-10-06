@@ -15,6 +15,10 @@
 
 - [x] **按 F2 截图后驱动崩溃（`nvoglv64.dll` EXCEPTION_ACCESS_VIOLATION）**：崩溃栈为 `GL11C.nglGetTexImage ← VideoScreenTexture.updateFrame ← VideoScreenRenderer.submit ← LevelRenderer.addMainPass`。根因是**像素打包状态被截图路径污染**：MC 26.1 的截图/纹理下载走 `GlCommandEncoder.copyTextureToBuffer`，其中 `GlStateManager._pixelStore(3330, width)` 把 `GL_PACK_ROW_LENGTH` 设为**帧缓冲宽度**，读完只解绑 PBO、**从不复位**（全 MC 反编译源码内该状态仅此一处写入）→ 此后每帧的 `glGetTexImage` 都按该行距铺满 height 行，远超 `NativeImage` 缓冲容量。**离线端到端复刻**（离屏 GL 3.3 + 与生产代码同序列的调用，NVIDIA 616.92）：先按截图路径留下残留（`PACK_ROW_LENGTH=320`），再把 128×64 纹理读进 32768 B 缓冲——旧序列从偏移 33280（第 26 行起）一路写到 81151，**越界 ≈48 KB 且 `glError` 恒 0**（静默越界）；同一序列加上修复后**越界 0 字节**。修复：读回前显式置 `GL_PACK_ROW_LENGTH`/`SKIP_ROWS`/`SKIP_PIXELS`=0、`GL_PACK_ALIGNMENT`=1，读完复位为 GL 默认值（0/4）；另加一次性 GL 错误告警便于同类问题将来暴露。命中条件与现象吻合：**只有"播放视频 + 按过 F2"之后才会崩**（崩溃日志 elapsed 3696 s，崩点正落在视频读回路径）。实验脚本：`_probe/gl/GlPackCheck.java`（纯越界测量）与 `_probe/gl/GlScreenshotRepro.java`（截图残留 → 读回端到端复刻）。
 
+## 直播播放（2026-10-06）
+
+- [x] **直播播放源加载失败（用户报「直播间解析失败」）**：实测**解析本身成功**——日志里 `live stream registered as kazumibili://kz-6` 与 `Loaded 1 uri(s) for: kazumibili://kz-6` 都正常打出，失败在装载环节（`MRL loading timeout` → 聊天栏「播放源加载失败」，用户当时改用直链 m3u8 绕过，而直链没有直播间号所以也没有弹幕）。**根因是过期时间**：`MRL.status()` 每次被查询都会把 `expiresAt` 早于当前时刻的条目标成 `EXPIRED`，而 `MRL.get()` 见到 `EXPIRED` 立刻 `reload()`（清空 `sources` 并重新装载）→ 我们 500 ms 一轮的装载循环里 `source(0)` **永远为 null**，直到 15 s 超时。喂进去的纪元 0 从哪来：直播取流地址的签名参数是 **`expires=`**（绝对 Unix 秒），而 `VideoSourceResolver.linkDeadlineOf` 只认点播 DASH 的 **`deadline=`** → 直播拿到 0 → `PlatformData(Instant.ofEpochSecond(0))`。日志指纹完全吻合：`Loaded 1 uri(s)` 每 500 ms 精确重复一次（等于循环节奏），15 s 后超时。修复三处：①`linkDeadlineOf` 同时识别 `expires`（`deadline` 优先）；②`KazumiBiliPlatform` 把 `expiresAtEpochSec <= 0` 映射为 `PlatformData(null, …)`（= 永不过期），**绝不写纪元 0**；③装载循环把 `Status.EXPIRED` 当确定失败即时收尾（新文案 `kazumiplayer.msg.playback_link_expired`），不再白等 15 s。验证：该房间 `getRoomPlayInfo` 正常、12 条流地址实测全部可达（FLV 200 + `FLV` magic、m3u8 200）；房间 `getDanmuInfo`（WBI 签名）code=0、token 256 字符、host_list 3 条 → 修好后房间流程会带上 `liveRoomId` 正常接弹幕；构建通过。**实机复测待用户确认**。
+
 ## 前置 Mod 跟进（2026-10-06）
 
 > 本区仍有未完成项，上下文见 `TODO.md`。

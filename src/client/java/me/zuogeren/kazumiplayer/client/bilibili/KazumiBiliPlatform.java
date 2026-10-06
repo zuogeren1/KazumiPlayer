@@ -99,7 +99,11 @@ public final class KazumiBiliPlatform implements IPlatform {
         // 引擎自身也允许为 null（字节码确认 DataSource 的紧凑构造对 thumbnail 只是 putfield 透传）
         DataSource source = new DataSource(MediaType.VIDEO, video,
                 metadata, headers, variants, audioSlaves, List.of());
-        // expires 原样交给 WaterMedia 与调用方判断条目是否过期，本表不做主动清理
-        return new PlatformData(Instant.ofEpochSecond(snapshot.expiresAtEpochSec()), List.of(source));
+        // 有效期 0 = 未知：MRL.status() 每被查询一次就把 expiresAt 早于当前时刻的条目标成 EXPIRED，
+        // 而 MRL.get() 见到 EXPIRED 会 reload（清空 sources 并重载）→ source 永远为 null，
+        // 表现为"MRL 每 500ms 重载一次直到装载超时"。故未知有效期必须留 null（= 永不过期），不得写成纪元 0。
+        Instant expires = snapshot.expiresAtEpochSec() > 0
+                ? Instant.ofEpochSecond(snapshot.expiresAtEpochSec()) : null;
+        return new PlatformData(expires, List.of(source));
     }
 }
