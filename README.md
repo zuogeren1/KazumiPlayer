@@ -69,10 +69,14 @@ WaterMedia (FFmpeg) 和 Rinku (Chromium) 实现多人同步观影。
 
 配置文件位于 `.minecraft/config/`（单人/服务器共用同一份）：
 
-| 文件                                | 内容                                                           |
-|-----------------------------------|--------------------------------------------------------------|
-| `kazumiplayer-server.toml`        | 服务端通用配置（凭据、搜索、同步等）+ 日志分类 DEBUG 开关（`log.debugGeneral` 等 14 项） |
-| `kazumiplayer_client-client.toml` | 客户端配置（播放/嗅探/全屏/弹幕，含「弹幕」分类全部选项）                               |
+| 文件 | 内容 |
+|------|------|
+| `kazumiplayer-common.toml` | 服务端与客户端共用：**B 站凭据**、搜索/SSRF/弹幕池限额 + 日志分类 DEBUG 开关（`log.debugGeneral` 等 14 项） |
+| `kazumiplayer_client-client.toml` | 客户端配置（播放/嗅探/全屏/弹幕，含「弹幕」分类全部选项） |
+
+**改动即时生效**：配置文件被监视，保存后自动重载，无需重启（服务器运行中修改同样即时生效）。
+
+**B 站凭据放在 `kazumiplayer-common.toml`**：本模组不使用 `SERVER` 类型配置——NeoForge 会把 SERVER 配置的原文**明文同步给每个连入的客户端**，凭据放在那里等于对所有玩家公开。
 
 **日志开关**：默认全部关闭，开启后对应分类输出 DEBUG 诊断日志并即时生效，无需重启。
 

@@ -34,7 +34,7 @@ public final class QueueRequestHandlers {
      */
     private static void enrichBilibiliMeta(VideoScreenBlockEntity screen, List<String> urls) {
         if (urls == null || urls.isEmpty()) return;
-        String cookie = me.zuogeren.kazumiplayer.ServerConfig.CONFIG.bilibiliCookie.get();
+        String cookie = me.zuogeren.kazumiplayer.Config.CONFIG.bilibiliCookie.get();
         for (String url : urls) {
             if (url == null || !me.zuogeren.kazumiplayer.util.BilibiliUrls.isBilibiliUrl(url)) continue;
             if (BilibiliMetaCache.label(url) != null || !BilibiliMetaCache.markRequested(url)) continue;

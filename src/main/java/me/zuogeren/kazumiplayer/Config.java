@@ -25,6 +25,8 @@ public class Config {
     public final ModConfigSpec.IntValue maxSearchResultsPerRule;
     // 搜索响应最大字节数
     public final ModConfigSpec.IntValue maxSearchResponseBytes;
+    // B 站登录 Cookie（服务端代理解析用；COMMON 类型不参与网络同步，凭据不会外发给客户端）
+    public final ModConfigSpec.ConfigValue<String> bilibiliCookie;
     // SSRF 域名白名单 (为空时仅允许公网地址)
     public final ModConfigSpec.ConfigValue<List<? extends String>> ssrfWhitelist;
     // 是否拦截 CGNAT 100.64/10 段（VPC/Docker 内网常见；代理 TUN 环境极少用该段映射）
@@ -75,6 +77,17 @@ public class Config {
         maxSearchResponseBytes = builder
                 .comment("搜索/章节 HTML 响应最大字节数")
                 .defineInRange("maxSearchResponseBytes", 5_242_880, 1024, 52_428_800);
+
+        builder.pop();
+        builder.push("bilibili");
+
+        bilibiliCookie = builder
+                .comment("B 站登录 Cookie（浏览器开发者工具复制完整 Cookie，至少含 SESSDATA）",
+                         "留空 = 未登录：视频清晰度上限 720P、直播取默认码率",
+                         "填入后可请求 1080P/原画（能否真正播放取决于接口返回的流形态）",
+                         "凭据只在本端配置文件里：解析在服务端执行，只有有时效的直链/直播流地址下发给客户端",
+                         "放在 COMMON 而非 SERVER 类型：SERVER 配置会被 NeoForge 明文同步给每个连入的客户端")
+                .define("bilibiliCookie", "");
 
         builder.pop();
         builder.push("security");

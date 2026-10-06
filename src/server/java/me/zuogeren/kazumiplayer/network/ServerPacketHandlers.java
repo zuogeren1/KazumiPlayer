@@ -232,7 +232,7 @@ public class ServerPacketHandlers implements IServerPacketHandler {
             var group = SyncGroupManager.get().getGroup(packet.screenId());
             if (group == null || !group.players.contains(sp.getUUID())) return;
 
-            String cookie = me.zuogeren.kazumiplayer.ServerConfig.CONFIG.bilibiliCookie.get();
+            String cookie = me.zuogeren.kazumiplayer.Config.CONFIG.bilibiliCookie.get();
             String pageUrl = packet.pageUrl();
             boolean live = BilibiliApi.liveRoomId(pageUrl) > 0;
             KazumiLog.sniff.info("[bilibili] server-side resolve by {} for {} (qn={}, live={}, credentials={})",

@@ -52,7 +52,7 @@ public final class KazumiMessages {
 
     /** 统一前缀 + 指定颜色的可本地化消息组件 */
     private static MutableComponent prefixed(net.minecraft.ChatFormatting color, String key, String... args) {
-        var body = Component.translatable(key, java.util.Arrays.stream(args)
+        var body = Component.translatable(key, (Object[]) java.util.Arrays.stream(args)
                 .map(Component::literal).toArray(Component[]::new)).withStyle(color);
         return Component.literal("[KazumiPlayer]").withStyle(net.minecraft.ChatFormatting.GREEN)
                 .append(Component.literal(" "))
@@ -61,7 +61,7 @@ public final class KazumiMessages {
 
     /** 参数为现成组件的版本：嵌套 translatable 不经 getString 扁平化，专用服语言表缺失时仍由客户端渲染 */
     private static MutableComponent prefixed(net.minecraft.ChatFormatting color, String key, net.minecraft.network.chat.Component[] args) {
-        var body = Component.translatable(key, args).withStyle(color);
+        var body = Component.translatable(key, (Object[]) args).withStyle(color);
         return Component.literal("[KazumiPlayer]").withStyle(net.minecraft.ChatFormatting.GREEN)
                 .append(Component.literal(" "))
                 .append(body);

@@ -3,6 +3,10 @@
 > 由 `TODO.md` 归档的已完成项（`[x]`），保留原文与实测证据，按原分区排列；新完成的条目请追加到对应分区。
 > 未完成项与仍在生效的上下文见 [`TODO.md`](TODO.md)。
 
+## 安全修复（2026-10-06）
+
+- [x] **B 站凭据不再随 SERVER 配置外发**：`bilibiliCookie` 原放在 `ModConfig.Type.SERVER`（`config/kazumiplayer-server.toml`），而 NeoForge 的 `ConfigSync.syncAllConfigs`（`SyncConfig` 配置阶段任务）会把**每个 SERVER 配置文件的原文 TOML 明文**用 `ConfigFilePayload` 发给每个连入的客户端（只跳过内存连接＝单机自连），重载后 `registerEventListeners` + `syncPendingConfigs` 还会把新内容推给在线玩家；客户端 `ClientPayloadHandler` → `ConfigTracker.acceptSyncedConfig` 装进内存配置后，任意客户端 mod 都能读出服务端 cookie（客户端 UI 虽禁止在多人游戏里编辑 SERVER 配置，但那只是 UI 限制）；官方文档亦写明 SERVER = "Synced across the network to the client"。已迁到 **COMMON**（`config/kazumiplayer-common.toml` 的 `bilibili.bilibiliCookie`，COMMON 不参与网络同步），**删除 `ServerConfig` 与 `ModConfig.Type.SERVER` 注册——本模组不再存在任何 SERVER 类型配置**；两处读取点（`ServerPacketHandlers` / `QueueRequestHandlers`）改读 COMMON。附迁移提示：旧文件里仍有非空 cookie 而新键为空时启动 WARN 一次（`KazumiPlayer.warnLegacyServerCookie`，纯文本匹配不解析 TOML）。顺带消除 `KazumiMessages` 两处 varargs 编译告警（`Component[]` 传 varargs 需显式 `(Object[])` 转换）。
+
 ## 前置 Mod 跟进（2026-10-06）
 
 > 本区仍有未完成项，上下文见 `TODO.md`。
