@@ -35,7 +35,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>提醒策略（避免聊天刷屏）：只有"用户主动操作可感知"的装载失败才给一条聊天提示
  * （清晰度切换等手动动作，{@code notifyUser=true}）；自动起播/换集的加载失败只记 DEBUG 日志，
- * 用户可从清晰度切换重新触发一次解析。
+ * 用户可从清晰度切换重新触发一次解析。另有一条能力说明：本机未配置 B 站凭据时，
+ * 装载片内弹幕会提示一次弹幕只取到一部分（每次游戏会话仅一条，见 {@link #anonymousHintShown}）。
  */
 public final class BilibiliDanmakuService {
 
@@ -52,6 +53,10 @@ public final class BilibiliDanmakuService {
 
     /** 直播侧命中屏蔽词的累计条数每满该值记一次 DEBUG（不逐条刷屏） */
     private static final int LIVE_BLOCK_LOG_EVERY = 50;
+
+    /** 匿名弹幕量提示的会话级去重标志（每屏/每集都会 attach，不重复刷屏） */
+    private static final java.util.concurrent.atomic.AtomicBoolean anonymousHintShown =
+        new java.util.concurrent.atomic.AtomicBoolean();
 
     private static final int STAGE_LOADING = 0;
     private static final int STAGE_LOADED = 1;
@@ -102,6 +107,10 @@ public final class BilibiliDanmakuService {
             KazumiLog.danmaku.debug("Video danmaku attach skipped at {}: no level", pos);
             markFailedIfCurrent(pos, fetchId);
             return;
+        }
+        if (cookie.isEmpty() && anonymousHintShown.compareAndSet(false, true)) {
+            KazumiClientMessages.chatWarn(
+                Component.translatable("kazumiplayer.msg.bilibili_anonymous_danmaku").getString());
         }
         java.util.concurrent.CompletableFuture<java.util.List<BilibiliDanmaku>> future =
             BilibiliApi.fetchVideoDanmaku(cid, cookie);
