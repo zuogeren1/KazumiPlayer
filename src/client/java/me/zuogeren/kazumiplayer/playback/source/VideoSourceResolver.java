@@ -84,6 +84,7 @@ public final class VideoSourceResolver {
             // （live 无稳定时间轴，同步校正/暂停广播只会干扰缓冲，GUI 时间轴控制随之禁用）
             if (isLivePlaylistUrl(episodeUrl)) {
                 session.bypassSync = true;
+                me.zuogeren.kazumiplayer.KazumiPlayerClient.setLiveStreamActive(true);
                 KazumiLog.sniff.info("[source] live playlist URL, sync bypassed");
             }
             me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 直链/直播无片内弹幕源，关掉上一段的
@@ -178,6 +179,8 @@ public final class VideoSourceResolver {
         boolean live = BilibiliApi.liveRoomId(pageUrl) > 0;
         if (live) {
             session.bypassSync = true;
+            // 直播可能取到 FLV（无限流）：磁盘缓存会先下完整文件再解码，起播前就关掉
+            me.zuogeren.kazumiplayer.KazumiPlayerClient.setLiveStreamActive(true);
             KazumiLog.sniff.info("[source] bilibili live room, sync bypassed");
         }
         int qn = BilibiliQualityPrefs.preferredQn(pos);

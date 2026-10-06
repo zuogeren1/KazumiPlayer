@@ -116,19 +116,44 @@ public class KazumiPlayerClient {
      *       该模式用于流式路径对某个源不可用时的兜底。</li>
      * </ul>
      */
+    /**
+     * 起播探测上限：FFmpeg 自身默认 5s/5MB、WaterMedia 默认 7s/10MB——压到 2s/2MB 换取更快的起播
+     * （只影响 avformat_find_stream_info 的等待，不影响稳态延迟；个别探测困难的源若起播失败，先调回这两个常量）。
+     */
+    private static final long PROBE_ANALYZE_MS = 2000L;
+    private static final int PROBE_SIZE_MB = 2;
+
+    /** 直播播放器在屏：由调度器每秒对账 + 解析发起时即时置位 */
+    private static volatile boolean liveStreamActive;
+
     public static void applyWaterMediaStreamMode() {
         try {
             var ffmpeg = org.watermedia.WaterMediaConfig.media.ffmpeg;
-            boolean cache = ClientConfig.CONFIG.videoCacheMode.get() == ClientConfig.VideoCacheMode.CACHE;
+            // 直播强制流式：FFMediaPlayer#shouldUseFFmpegCache 只放过 .m3u8/.mpd，FLV 直播（无限流）
+            // 一旦走磁盘缓存就变成「先下完整文件再解码」＝永远起播不了
+            boolean cache = ClientConfig.CONFIG.videoCacheMode.get() == ClientConfig.VideoCacheMode.CACHE
+                && !liveStreamActive;
             ffmpeg.cache = cache;
+            ffmpeg.analyzeDuration = PROBE_ANALYZE_MS;
+            ffmpeg.probeSize = PROBE_SIZE_MB;
             if (cache) {
                 int target = 512 * 1024 * 1024;
                 if (ffmpeg.cacheMaxSize < target) ffmpeg.cacheMaxSize = target;
             }
-            KazumiLog.playback.info("WaterMedia stream mode={} (ffmpeg.cache={}, cacheMaxSize={}MB)",
-                ClientConfig.CONFIG.videoCacheMode.get(), ffmpeg.cache, ffmpeg.cacheMaxSize / (1024 * 1024));
+            KazumiLog.playback.info(
+                "WaterMedia stream mode={} (ffmpeg.cache={}, cacheMaxSize={}MB, analyze={}ms, probe={}MB, liveActive={})",
+                ClientConfig.CONFIG.videoCacheMode.get(), ffmpeg.cache, ffmpeg.cacheMaxSize / (1024 * 1024),
+                ffmpeg.analyzeDuration, ffmpeg.probeSize, liveStreamActive);
         } catch (Throwable t) {
             KazumiLog.playback.warn("Apply WaterMedia stream mode failed: {}", String.valueOf(t.getMessage()));
         }
+    }
+
+    /** 直播播放器在屏状态变化时重新应用拉流模式（CACHE 档位下播直播必须临时退回流式） */
+    public static void setLiveStreamActive(boolean active) {
+        if (liveStreamActive == active) return;
+        liveStreamActive = active;
+        KazumiLog.playback.info("Live stream active={}, reapplying WaterMedia stream mode", active);
+        applyWaterMediaStreamMode();
     }
 }

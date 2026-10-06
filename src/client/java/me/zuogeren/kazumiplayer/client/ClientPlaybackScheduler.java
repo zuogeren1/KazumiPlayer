@@ -56,6 +56,10 @@ public class ClientPlaybackScheduler {
         }
         // 先对账：Manager 中存在但世界已对不上的条目（屏幕移除/停止播放/空闲残留）
         reconcileStaleEntries(mc);
+        // 直播标记对账：任一屏在播直播（bypassSync）即强制关 FFmpeg 缓存——FLV 是无限流，
+        // 磁盘缓存会「先下完整文件再解码」永远起播不了；直播结束自动恢复配置档位
+        me.zuogeren.kazumiplayer.KazumiPlayerClient.setLiveStreamActive(
+            ScreenPlayerManager.getAll().values().stream().anyMatch(sp -> sp.bypassSync && sp.player != null));
         // 单次遍历渲染范围 BE：视频屏幕调度 + 音响 tick
         long zombieTimeoutMs = Math.max(75_000,
             me.zuogeren.kazumiplayer.ClientConfig.CONFIG.sniffTimeoutSeconds.get() * 2000L + 15_000);

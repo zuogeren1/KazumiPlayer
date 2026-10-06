@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  *   <li><b>视频页</b>：view 取 cid → WBI 签名调 html5 播放接口（fnval=0 + platform=html5 + high_quality=1）
  *       取 durl 单流 mp4（音视频合一）。不取 DASH：分离流的音频 slave 在播放器侧建连会被 CDN 终止
  *       （表现为无音轨且 demux 无数据推进、画面卡缓冲）。</li>
- *   <li><b>直播间</b>：getRoomPlayInfo 取 http_hls 的 m3u8（ts 优先，回落 fmp4）。</li>
+ *   <li><b>直播间</b>：getRoomPlayInfo 取流（FLV 优先＝低延迟，无 FLV 时回落 http_hls 的 m3u8，ts 优先于 fmp4）。</li>
  * </ul>
  *
  * 凭据以参数传入：服务端代理解析用服务端配置；客户端回落用本地配置。匿名调用亦可（清晰度上限 720P）。
@@ -391,7 +391,27 @@ public final class BilibiliApi {
     }
 
     /**
-     * 解析直播间为 http_hls 的 m3u8 地址（直播无时间轴，客户端按直播直连处理）。
+     * 直播流优选评分：**FLV 优先**（http_stream/flv）——FLV 无分段窗口，实测网页端同款协议延迟 1–3s；
+     * HLS 的 m3u8 只有 3 段 × 3s 窗口（实测最新段起始距今 2–5s、窗口起点距今 9–10s），起播即落后约 9s，
+     * 故只在响应里没有 FLV 时回落 HLS。同协议内 ts 优先于 fmp4、avc 优先于 hevc（HEVC 在部分环境无解码器）。
+     */
+    private static int liveStreamScore(String protocol, String formatName, String codecName) {
+        int protocolScore = switch (protocol) {
+            case "http_stream" -> 2;
+            case "http_hls" -> 1;
+            default -> 0;
+        };
+        int formatScore = switch (formatName) {
+            case "flv", "ts" -> 2;
+            case "fmp4" -> 1;
+            default -> 0;
+        };
+        int codecScore = "avc".equals(codecName) ? 2 : ("hevc".equals(codecName) ? 1 : 0);
+        return protocolScore * 100 + formatScore * 10 + codecScore;
+    }
+
+    /**
+     * 解析直播间为可取流地址（默认 FLV，无 FLV 时回落 http_hls 的 m3u8；直播无时间轴，客户端按直播直连处理）。
      * preferredQn &gt; 0 时按指定清晰度请求（qn 参数，越界由 B 站回落）。
      */
     public static CompletableFuture<Stream> resolveLive(String roomUrl, int preferredQn, String cookie) {
@@ -412,32 +432,36 @@ public final class BilibiliApi {
                 throw new IllegalStateException("直播间未开播或未返回播放流");
             }
             JsonArray streams = playurl.getAsJsonArray("stream");
-            JsonObject hlsCodec = null;
-            JsonObject anyCodec = null;
-            JsonArray acceptQn = null;
+            JsonObject chosen = null;
+            int chosenScore = Integer.MIN_VALUE;
+            JsonArray anyAcceptQn = null;
             for (int i = 0; i < streams.size(); i++) {
                 JsonObject stream = streams.get(i).getAsJsonObject();
                 String protocol = stream.has("protocol_name") ? stream.get("protocol_name").getAsString() : "";
                 JsonArray formats = stream.getAsJsonArray("format");
                 if (formats == null) continue;
                 for (int j = 0; j < formats.size(); j++) {
-                    JsonArray codecs = formats.get(j).getAsJsonObject().getAsJsonArray("codec");
-                    if (codecs == null || codecs.isEmpty()) continue;
-                    JsonObject codec = codecs.get(0).getAsJsonObject();
-                    if (anyCodec == null) {
-                        anyCodec = codec;
-                        acceptQn = codec.getAsJsonArray("accept_qn");
-                    }
-                    // 优先 HLS（ts 优先于 fmp4），否则退回首个可用流
-                    if ("http_hls".equals(protocol) && (hlsCodec == null || "ts".equals(
-                            formats.get(j).getAsJsonObject().get("format_name").getAsString()))) {
-                        hlsCodec = codec;
-                        acceptQn = codec.getAsJsonArray("accept_qn");
+                    JsonObject format = formats.get(j).getAsJsonObject();
+                    String formatName = format.has("format_name") ? format.get("format_name").getAsString() : "";
+                    JsonArray codecs = format.getAsJsonArray("codec");
+                    if (codecs == null) continue;
+                    for (int k = 0; k < codecs.size(); k++) {
+                        JsonObject codec = codecs.get(k).getAsJsonObject();
+                        if (anyAcceptQn == null && codec.has("accept_qn")) {
+                            anyAcceptQn = codec.getAsJsonArray("accept_qn");
+                        }
+                        int score = liveStreamScore(protocol, formatName,
+                            codec.has("codec_name") ? codec.get("codec_name").getAsString() : "");
+                        if (score > chosenScore) {
+                            chosenScore = score;
+                            chosen = codec;
+                        }
                     }
                 }
             }
-            JsonObject chosen = hlsCodec != null ? hlsCodec : anyCodec;
             if (chosen == null) throw new IllegalStateException("直播间未找到可用流");
+            JsonArray acceptQn = chosen.has("accept_qn")
+                ? chosen.getAsJsonArray("accept_qn") : anyAcceptQn;
             String url = streamUrlOf(chosen);
             List<Quality> qualities = new ArrayList<>();
             if (acceptQn != null) {

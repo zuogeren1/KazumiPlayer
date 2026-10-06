@@ -33,9 +33,9 @@
 - `getRoomPlayInfo` **同一次响应里就同时下发 6 组**：`http_stream`(flv, avc/hevc) + `http_hls`(ts/fmp4, avc/hevc)——我们只取了 hls。FLV 实测：HTTP 200、`Content-Type: video/x-flv`、magic `FLV`、首包 0.22s、**无需 Referer**。
 - WaterMedia 不是元凶（逐行核实）：起播阈值≈第一帧、无「先缓冲 N 秒」、无 live edge 逻辑；但**没有 FFmpeg 选项注入通道**（`DataSource` 7 字段/`MRL.Source`/`Metadata` 均无 options，唯一生效通道是 `RequestHeaders` → `headers`），故 HLS 侧调不了 `live_start_index`/`fflags=nobuffer`/`low_delay`。
 
-- [ ] **直播改走 FLV（http_stream）优先、HLS 回落**【S-M】：`BilibiliApi.resolveLive` 优先 `http_stream`+`flv`+`avc`，缺失时回落现有 `http_hls`（ts→fmp4）；`preferredQn`/`accept_qn` 逻辑不变。预期延迟 9–12s → 2–4s（贴近网页端）。
-- [ ] **护栏：播放 FLV 直播必须强制 `WaterMediaConfig.media.ffmpeg.cache=false`**【S】：`FFMediaPlayer#shouldUseFFmpegCache`（源码 :2037-2048）对**非 `.m3u8`/`.mpd`** 的 http(s) URL 一律走磁盘缓存，而 FLV 直播 URL 以 `.flv` 结尾且是无限流 → `videoCacheMode=CACHE`（或 WaterMedia 自身 `cache=true`）下会「先把整个文件下完再解码」＝永远起播不了。现默认 STREAM 模式（cache=false）安全，但 CACHE 模式必须临时降级并在直播结束后恢复。
-- [ ] **可选：起播提速**【S】：`media.ffmpeg.analyzeDuration` 7000→2000ms、`probeSize` 10→2MB（只影响起播快慢，不影响稳态延迟；全局生效、含点播，极端源可能探测失败）。
+- [x] **直播改走 FLV（http_stream）优先、HLS 回落**【S-M】（已实施）：`BilibiliApi.resolveLive` 优先 `http_stream`+`flv`+`avc`，缺失时回落现有 `http_hls`（ts→fmp4）；`preferredQn`/`accept_qn` 逻辑不变。预期延迟 9–12s → 2–4s（贴近网页端）。
+- [x] **护栏：播放 FLV 直播强制 `WaterMediaConfig.media.ffmpeg.cache=false`**【S】（已实施）：`FFMediaPlayer#shouldUseFFmpegCache`（源码 :2037-2048）对**非 `.m3u8`/`.mpd`** 的 http(s) URL 一律走磁盘缓存，而 FLV 直播 URL 以 `.flv` 结尾且是无限流 → `videoCacheMode=CACHE`（或 WaterMedia 自身 `cache=true`）下会「先把整个文件下完再解码」＝永远起播不了。现默认 STREAM 模式（cache=false）安全，但 CACHE 模式必须临时降级并在直播结束后恢复。
+- [x] **起播提速**【S】（已实施）：`media.ffmpeg.analyzeDuration` 7000→2000ms、`probeSize` 10→2MB（只影响起播快慢，不影响稳态延迟；全局生效、含点播，极端源可能探测失败）。
 ### 待裁决（拍板后才动）
 
 - [ ] **扫码登录成功后立即同步屏蔽词**: `BilibiliLoginScreen` 登录成功处加一行拉取 `x/dm/filter/user`（一行改动，取舍在「登录即联网」的体验）【S】

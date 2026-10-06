@@ -78,7 +78,7 @@ public final class GuiPayloads {
                 for (int i = 0; i < components.length; i++) {
                     components[i] = net.minecraft.network.chat.Component.literal(args.get(i));
                 }
-                return net.minecraft.network.chat.Component.translatable(key, components);
+                return net.minecraft.network.chat.Component.translatable(key, (Object[]) components);
             }
             return net.minecraft.network.chat.Component.literal(title == null ? "" : title);
         }
@@ -106,7 +106,7 @@ public final class GuiPayloads {
                 for (int i = 0; i < components.length; i++) {
                     components[i] = net.minecraft.network.chat.Component.literal(args.get(i));
                 }
-                return net.minecraft.network.chat.Component.translatable(key, components);
+                return net.minecraft.network.chat.Component.translatable(key, (Object[]) components);
             }
             return net.minecraft.network.chat.Component.literal(message == null ? "" : message);
         }
