@@ -1,30 +1,36 @@
 package me.zuogeren.kazumiplayer.client.bilibili;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * B 站 DASH 解析结果的内存注册表：把一次解析得到的视频流与音频流暂存于此，
+ * B 站取流结果的内存注册表：把一次解析得到的流地址（含 DASH 音频流、请求头 Referer）暂存于此，
  * 换取一个可以交给 WaterMedia 的自定义 URI（kazumibili://kz-&lt;序号&gt;）。
  *
- * B 站 1080P 以上只有 DASH，视频与音频是两条独立 m4s，而 WaterMedia 的 MRL 解析只认 URI，
- * 无从表达"这条 URI 的伴随音轨是另一条 URI"。所以由 {@link KazumiBiliPlatform} 在本进程内注册为平台，
- * 解析引擎把自定义 URI 回调给平台，平台再回到本表取回原始流地址。
+ * 两类用途：<b>DASH</b>——1080P 以上音视频是两条独立 m4s，而 WaterMedia 的 MRL 解析只认 URI，
+ * 无从表达"这条 URI 的伴随音轨是另一条 URI"；<b>直播</b>——FLV 节点按 UA + Referer 校验防盗链，
+ * 而普通 MRL 表达不了请求头。两种情形都由 {@link KazumiBiliPlatform} 在本进程内注册为平台，
+ * 解析引擎把自定义 URI 回调给平台，平台再回到本表取回原始流地址与请求头。
  *
  * 注册的设计约束：解析结果是瞬态的（CDN 地址带时效签名），因此条目按容量上限淘汰最旧的一条，
  * 避免长时间观影（连播数十集）时无限增长；过期判定交由调用方按快照内的过期时间处理，
  * 表本身不做主动清理——清理线程引入的生命周期管理不值当。
  */
-public final class BiliDashRegistry {
+public final class BiliStreamRegistry {
 
-    /** 单条解析结果：DASH 视频流、音频流地址与分辨率（分辨率用于构造 DataQuality） */
-    public record Snapshot(String videoUri, String audioUri, int width, int height, long expiresAtEpochSec) {}
+    /**
+     * 单条注册结果：视频流（DASH 时另有音频流）、分辨率与请求头 Referer。
+     *
+     * @param referer 该条流要附带的 Referer；null 表示由平台按站点默认值补齐
+     */
+    public record Snapshot(String videoUri, String audioUri, int width, int height, long expiresAtEpochSec,
+                           String referer) {}
 
     /** 表内条目：快照与它的过期时间（过期时间由链接方给出，见 PlatformData.expires） */
-    public record Entry(String videoUri, String audioUri, int width, int height, long expiresAtEpochSec) {}
+    public record Entry(String videoUri, String audioUri, int width, int height, long expiresAtEpochSec,
+                        String referer) {}
 
     /** 自定义 URI 的 scheme，供注册方拼 URI 与排查日志 */
     public static final String SCHEME = "kazumibili";
@@ -43,7 +49,7 @@ public final class BiliDashRegistry {
     /** ID 序号：单调递增即可，不参与淘汰，无需回绕 */
     private static final AtomicLong sequence = new AtomicLong();
 
-    private BiliDashRegistry() {}
+    private BiliStreamRegistry() {}
 
     /**
      * 注册一次解析结果，返回可直接交给 WaterMedia 的自定义 URI 字符串。
@@ -52,10 +58,28 @@ public final class BiliDashRegistry {
      *                 调用方据此退回普通单流播放
      */
     public static String register(String videoUri, String audioUri, int width, int height, long expiresAtEpochSec) {
-        if (videoUri == null || videoUri.isBlank()) return null;
         if (audioUri == null || audioUri.isBlank()) return null;
+        return put(videoUri, audioUri, width, height, expiresAtEpochSec, null);
+    }
+
+    /**
+     * 注册单条流（无伴随音轨），用于必须按源附带请求头的场合：
+     * B 站直播 FLV 节点按 UA + Referer 校验防盗链（实测缺任一项直接 HTTP 403，而 m3u8 不校验），
+     * 普通 MRL 表达不了请求头，只能借平台通道（见 {@link KazumiBiliPlatform}）把头带进播放器。
+     *
+     * @param referer 该流所需的 Referer，交给平台原样使用
+     * @return 自定义 URI；videoUri 为空时返回 null
+     */
+    public static String registerSingle(String videoUri, long expiresAtEpochSec, String referer) {
+        return put(videoUri, null, 0, 0, expiresAtEpochSec, referer);
+    }
+
+    /** 登记一条流并返回自定义 URI；videoUri 为空时返回 null */
+    private static String put(String videoUri, String audioUri, int width, int height,
+            long expiresAtEpochSec, String referer) {
+        if (videoUri == null || videoUri.isBlank()) return null;
         String id = ID_PREFIX + sequence.incrementAndGet();
-        Entry entry = new Entry(videoUri, audioUri, width, height, expiresAtEpochSec);
+        Entry entry = new Entry(videoUri, audioUri, width, height, expiresAtEpochSec, referer);
         // 登记顺序、写入表与容量淘汰必须是一个整体：先写表后登记会让淘汰看不到自己的 id，
         // 先登记后写表又会让另一线程的淘汰取下尚不存在的表项
         synchronized (order) {
@@ -74,7 +98,8 @@ public final class BiliDashRegistry {
     public static Snapshot find(String id) {
         Entry entry = resolve(id);
         if (entry == null) return null;
-        return new Snapshot(entry.videoUri(), entry.audioUri(), entry.width(), entry.height(), entry.expiresAtEpochSec());
+        return new Snapshot(entry.videoUri(), entry.audioUri(), entry.width(), entry.height(),
+            entry.expiresAtEpochSec(), entry.referer());
     }
 
     /** 按 id 取回过期时间（Unix 纪元秒）；未命中返回 0 */

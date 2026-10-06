@@ -35,6 +35,7 @@
 
 - [x] **直播改走 FLV（http_stream）优先、HLS 回落**【S-M】（已实施）：`BilibiliApi.resolveLive` 优先 `http_stream`+`flv`+`avc`，缺失时回落现有 `http_hls`（ts→fmp4）；`preferredQn`/`accept_qn` 逻辑不变。预期延迟 9–12s → 2–4s（贴近网页端）。
 - [x] **护栏：播放 FLV 直播强制 `WaterMediaConfig.media.ffmpeg.cache=false`**【S】（已实施）：`FFMediaPlayer#shouldUseFFmpegCache`（源码 :2037-2048）对**非 `.m3u8`/`.mpd`** 的 http(s) URL 一律走磁盘缓存，而 FLV 直播 URL 以 `.flv` 结尾且是无限流 → `videoCacheMode=CACHE`（或 WaterMedia 自身 `cache=true`）下会「先把整个文件下完再解码」＝永远起播不了。现默认 STREAM 模式（cache=false）安全，但 CACHE 模式必须临时降级并在直播结束后恢复。
+- [x] **FLV 403 修复（实机暴露）**：直播 FLV 节点按 **UA + Referer 双重防盗链**校验——头组合矩阵实测：Chrome UA 无 Referer=403、Lavf UA 无 Referer=403、Lavf UA + Referer=403、**Chrome UA + `Referer: https://live.bilibili.com/` = 200（magic FLV）**；而 m3u8 四种组合全部 200（这正是 HLS 一直能用、FLV 一上就 403 的原因）。FFmpeg 默认 UA 是 `Lavf/...`，普通 MRL 又表达不了请求头 → 直播改经平台通道注册：`BiliStreamRegistry.registerSingle(url, deadline, LIVE_REFERER)`（原 `BiliDashRegistry` 更名，Entry 增 `referer` 字段、音频流可为空），`KazumiBiliPlatform` 按条取 Referer（缺省 `https://www.bilibili.com/`）、单流时 audioSlaves 留空；有效期取链接自身 `deadline` 且**不扣余量**（直播链接短，扣 600s 会把刚签发的判成过期）。验证：按平台实际下发的三头组合复测 = HTTP 200 + magic FLV
 - [x] **起播提速**【S】（已实施）：`media.ffmpeg.analyzeDuration` 7000→2000ms、`probeSize` 10→2MB（只影响起播快慢，不影响稳态延迟；全局生效、含点播，极端源可能探测失败）。
 ### 待裁决（拍板后才动）
 

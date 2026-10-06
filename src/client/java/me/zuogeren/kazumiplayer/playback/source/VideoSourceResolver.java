@@ -288,7 +288,7 @@ public final class VideoSourceResolver {
             KazumiLog.sniff.warn("[source] requested quality {} not granted (vip={}), got {} ({})",
                 requested, vipTarget, currentQn, origin);
         }
-        String playUri = mediaUriOf(url, audioUrl);
+        String playUri = mediaUriOf(url, audioUrl, pending.live());
         if (pending.prewarm()) {
             installPrewarmPlayer(pending, playUri, currentQn);
             return;
@@ -298,18 +298,53 @@ public final class VideoSourceResolver {
     }
 
     /**
-     * DASH 结果的音视频是两条独立流，直接把视频地址交给播放器会没有声音：
-     * 先登记成 WaterMedia 平台可解析的媒体 URI（见 KazumiBiliPlatform），由音频从属流补齐音轨。
-     * 音频缺失或登记失败时退回单播原地址。
+     * 经 WaterMedia 平台通道构造可带请求头的媒体 URI（见 KazumiBiliPlatform），两类用途：
+     * <ul>
+     *   <li><b>DASH</b>：音视频是两条独立流，直接把视频地址交给播放器会没有声音，用音频从属流补齐；</li>
+     *   <li><b>直播</b>：FLV 节点按 UA + Referer 校验防盗链，缺任一项直接 HTTP 403
+     *       （实测 m3u8 不校验，故只有直播需要），而普通 MRL 表达不了请求头。</li>
+     * </ul>
+     * 登记失败时退回原地址。
      */
-    private static String mediaUriOf(String url, String audioUrl) {
+    private static String mediaUriOf(String url, String audioUrl, boolean live) {
+        if (live) {
+            String mediaUri = me.zuogeren.kazumiplayer.client.bilibili.BiliStreamRegistry
+                .registerSingle(url, linkDeadlineOf(url),
+                    me.zuogeren.kazumiplayer.client.bilibili.KazumiBiliPlatform.LIVE_REFERER);
+            if (mediaUri == null) return url;
+            KazumiLog.sniff.info("[source] live stream registered as {} (host={}, referer=live)",
+                mediaUri, hostOf(url));
+            return mediaUri;
+        }
         if (audioUrl == null || audioUrl.isBlank()) return url;
-        String mediaUri = me.zuogeren.kazumiplayer.client.bilibili.BiliDashRegistry
+        String mediaUri = me.zuogeren.kazumiplayer.client.bilibili.BiliStreamRegistry
             .register(url, audioUrl, 0, 0, expiresAtOf(url));
         if (mediaUri == null) return url;
         KazumiLog.sniff.info("[source] dash stream registered as {} (video host={}, audio host={})",
             mediaUri, hostOf(url), hostOf(audioUrl));
         return mediaUri;
+    }
+
+    /**
+     * 链接自身的 deadline（秒级时间戳，B 站直播与点播都带），不做任何余量扣减——
+     * 直播链接有效期短，扣余量会把刚签发的地址判成过期；缺失或已过期时返回 0（不参与过期判定）。
+     */
+    private static long linkDeadlineOf(String url) {
+        long now = System.currentTimeMillis() / 1000;
+        try {
+            String query = java.net.URI.create(url).getRawQuery();
+            if (query != null) {
+                for (String pair : query.split("&")) {
+                    if (pair.startsWith("deadline=")) {
+                        long deadline = Long.parseLong(pair.substring("deadline=".length()));
+                        return deadline > now ? deadline : 0L;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // 参数缺失或格式变化：按未知处理
+        }
+        return 0L;
     }
 
     /**
