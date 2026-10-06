@@ -39,8 +39,23 @@ public final class BilibiliQualityPrefs {
         return infos.get(pos);
     }
 
+    /** 该屏当前生效档位名；无档位表（非 B 站源/尚未解析）时返回空串 */
+    public static String currentLabel(BlockPos pos) {
+        Info info = infos.get(pos);
+        if (info == null) return "";
+        for (BilibiliApi.Quality q : info.qualities()) {
+            if (q.qn() == info.currentQn()) return q.label();
+        }
+        return info.currentQn() > 0 ? String.valueOf(info.currentQn()) : "";
+    }
+
     public static void setInfo(BlockPos pos, Info info) {
         infos.put(pos, info);
+    }
+
+    /** 换源时清档位表（偏好保留）：档位名只对产生它的那次解析有效，留着会在加载提示里显示过期档位 */
+    public static void clearInfo(BlockPos pos) {
+        infos.remove(pos);
     }
 
     /** 换片/停止时清理（档位表随内容失效，偏好保留由调用方决定是否一并清除） */

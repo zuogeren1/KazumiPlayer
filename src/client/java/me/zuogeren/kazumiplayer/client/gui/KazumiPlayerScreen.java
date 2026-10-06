@@ -366,9 +366,9 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             if (!qualityAvailable) this.qualityDropdownOpen = false;
             this.updateQualityButtonLabel(qualityInfo);
         }
-        // 起播等待可视化：取消按钮仅在解析/加载期间可点
+        // 起播等待可视化：取消按钮在"还没出画"的整个期间都可点（时钟进入播放态但视频没出帧也算等待）
         var spState = ScreenPlayerManager.get(this.screenPos);
-        this.cancelStartupButton.visible = spState.player != null && !spState.everPlayed;
+        this.cancelStartupButton.visible = spState.player != null && spState.firstFrameAt == 0;
         // 直链提交按钮随屏幕状态切换语义；右侧两面板低频刷新（BE NBT 同步与 TabList 解析均有延迟）
         var screen = this.boundScreen();
         if (this.playUrlButton != null) {
@@ -505,46 +505,34 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         var player = this.getPlayer();
         var sp = ScreenPlayerManager.get(this.screenPos);
         long now = System.currentTimeMillis();
-        boolean starting = player != null && !sp.everPlayed;
         boolean failed = player == null && sp.lastFailedAt > 0 && now - sp.lastFailedAt < 20000
             && sp.lastFailedUrl.equals(this.boundScreen() != null ? this.boundScreen().getEpisodeUrl() : "");
         if (tex == null || !tex.hasValidFrame() || player == null
                 || player.getWidth() <= 0 || player.getHeight() <= 0) {
-            if (starting) {
-                // 起播等待：已耗时秒数 + 阶段说明 + 组内解析进度（取消按钮由 tick 控制可见性）
-                long sec = Math.max(0, (now - sp.playbackStartedAt) / 1000);
-                graphics.centeredText(this.font, Component.translatable(
-                        "kazumiplayer.gui.main.startup_status", String.valueOf(sec)),
-                    x + areaW / 2, y + areaH / 2 - 10, 0xFFCCCCCC);
-                var be = this.boundScreen();
-                boolean episodeContext = be != null && !be.getEpisodeData().isEmpty()
-                    && !me.zuogeren.kazumiplayer.util.DirectLinkQueue.isQueueData(be.getEpisodeData());
-                Component detail = episodeContext
-                    ? Component.translatable("kazumiplayer.gui.main.startup_episode",
-                        String.valueOf(be.getEpisodeIndex()))
-                    : Component.translatable("kazumiplayer.gui.main.startup_hint");
-                graphics.centeredText(this.font, detail, x + areaW / 2, y + areaH / 2 + 6, 0xFF667788);
-                // 第三行：其他观看者的解析进度（有人上报时才显示，播放前确认其他人是否解析完成）
-                var others = me.zuogeren.kazumiplayer.client.ResolveHint.of(be);
+            // 加载期两行：第一行本端起播阶段（在等什么＋已等多久＋量化细节），第二行组内进度
+            //（谁已出画/还在加载/失败）。本端未参与该屏时 of() 与 phaseLine() 均为 null，回落「无信号」
+            var phase = me.zuogeren.kazumiplayer.client.ResolveHint.phaseLine(sp, this.screenPos);
+            var others = me.zuogeren.kazumiplayer.client.ResolveHint.of(this.boundScreen());
+            if (phase != null || others != null) {
+                int lineY = y + areaH / 2 - (phase != null && others != null ? 14 : 4);
+                if (phase != null) {
+                    graphics.centeredText(this.font, phase, x + areaW / 2, lineY, 0xFFCCCCCC);
+                    lineY += 18;
+                }
                 if (others != null) {
                     graphics.centeredText(this.font,
                         me.zuogeren.kazumiplayer.client.ResolveHint.line(others),
-                        x + areaW / 2, y + areaH / 2 + 22, 0xFF88AACC);
+                        x + areaW / 2, lineY, 0xFF88AACC);
+                }
+                if (failed) {
+                    graphics.centeredText(this.font, Component.translatable(
+                        "kazumiplayer.gui.main.fail_banner"), x + areaW / 2, lineY + 18, 0xFFFF8888);
                 }
                 return;
             }
             if (failed) {
                 graphics.centeredText(this.font, Component.translatable(
                         "kazumiplayer.gui.main.fail_banner"), x + areaW / 2, y + areaH / 2 - 4, 0xFFFF8888);
-                return;
-            }
-            // 本端为观看者但尚无有效帧、且有人上报解析状态：改显组内等待进度；
-            // 本端未参与该屏（未加入/已离开）时 of() 返回 null，回落「无信号」
-            var waiting = me.zuogeren.kazumiplayer.client.ResolveHint.of(this.boundScreen());
-            if (waiting != null) {
-                graphics.centeredText(this.font,
-                    me.zuogeren.kazumiplayer.client.ResolveHint.line(waiting),
-                    x + areaW / 2, y + areaH / 2 - 4, 0xFFCCCCCC);
                 return;
             }
             graphics.centeredText(this.font, Component.translatable("kazumiplayer.gui.main.preview_no_signal"), x + areaW / 2, y + areaH / 2 - 4, 0xFF888888);
@@ -883,6 +871,8 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
                 Component.translatable("kazumiplayer.gui.main.watcher_resolving").withStyle(ChatFormatting.GRAY);
             case me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY ->
                 Component.translatable("kazumiplayer.gui.main.watcher_ready").withStyle(ChatFormatting.GREEN);
+            case me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_LOADING ->
+                Component.translatable("kazumiplayer.gui.main.watcher_loading").withStyle(ChatFormatting.YELLOW);
             case me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_FAILED ->
                 Component.translatable("kazumiplayer.gui.main.watcher_failed").withStyle(ChatFormatting.RED);
             default -> Component.empty();
@@ -1126,6 +1116,11 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
     private void sendAction(String action, Object payloadJson) {
         Minecraft mc = Minecraft.getInstance();
+        // 用户主动起播/重新加入：清掉本屏残留的起播失败冷却，让这一次尝试立刻进行
+        if (GuiProtocol.ACTION_JOIN.equals(action) || GuiProtocol.ACTION_QUEUE_ADD.equals(action)) {
+            var sp = ScreenPlayerManager.peek(this.screenPos);
+            if (sp != null) sp.clearFailureCooldown();
+        }
         if (mc.getConnection() != null) {
             KazumiLog.network.info("GUI send action '{}' at {}", action, this.screenPos.toShortString());
             mc.getConnection().send(new ServerboundCustomPayloadPacket(

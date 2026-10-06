@@ -30,6 +30,10 @@ public class WaterMediaPlayer {
     private volatile boolean closed;
     /** 预热期静音标志：为 true 时起播后置 0 音量（清晰度无缝切换的后台播放器，交接时由调度器恢复） */
     private volatile boolean silentStart;
+    /** MRL 装载轮询次数（每 500ms 一次）：加载期提示与排查用 */
+    private volatile int loaderPolls;
+    /** 最近一次失败的可读细节（HTTP 状态/引擎消息）；重新 play 时清空 */
+    private volatile String failureDetail = "";
     /**
      * 停播释放线程：FFmpeg 的 demux 线程可能正阻塞在网络读取上（实测停止时被阻塞数十秒），
      * player.stop() 同步执行会卡住调用线程（通常是渲染线程）→ 阻塞动作交给此后台线程。
@@ -44,6 +48,15 @@ public class WaterMediaPlayer {
     private volatile Runnable playFailureListener;
     private final java.util.concurrent.atomic.AtomicBoolean failureFired =
             new java.util.concurrent.atomic.AtomicBoolean();
+    /**
+     * 失败早于监听登记的暂存标志：MRL 装载跑在独立线程，首轮即确定失败时会赶在主线程
+     * {@code attachFailureSkip} 登记之前触发——不留暂存就会把这次失败丢掉（队列不会跳过、
+     * 状态也不会转 FAILED），只能等看门狗超时兜底
+     */
+    private final java.util.concurrent.atomic.AtomicBoolean failureMissed =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    /** 异步解析中（嗅探/服务端代理解析）：用于加载期提示区分"正在解析"与"正在取源" */
+    private volatile boolean resolving;
     private final List<PlayStateListener> listeners = new ArrayList<>();
 
     public void addListener(PlayStateListener l) { listeners.add(l); }
@@ -53,16 +66,32 @@ public class WaterMediaPlayer {
     public void setPlayFailureListener(Runnable r) {
         this.playFailureListener = r;
         this.failureFired.set(false);
+        // 登记之前已经失败过：补投一次，别让这次失败丢掉
+        if (this.failureMissed.compareAndSet(true, false)) firePlayFailure();
     }
 
     /** 可能在 MRL-Loader 线程触发，回调实现方自行投递主线程 */
     private void firePlayFailure() {
-        if (this.playFailureListener != null && this.failureFired.compareAndSet(false, true)) {
+        if (this.playFailureListener == null) {
+            this.failureMissed.set(true); // 尚无监听：暂存，登记时补投
+            return;
+        }
+        if (this.failureFired.compareAndSet(false, true)) {
             try {
                 this.playFailureListener.run();
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    /** 标记"正在异步解析"（嗅探/服务端代理解析）；play() 一进来即清除 */
+    public void markResolving() {
+        this.resolving = true;
+    }
+
+    /** 是否处于异步解析阶段（尚未拿到媒体地址） */
+    public boolean isResolving() {
+        return this.resolving;
     }
 
     private static String normalizeUrl(String url) {
@@ -87,12 +116,17 @@ public class WaterMediaPlayer {
     public void play(String videoUrl, boolean silent) {
         closed = false;
         this.silentStart = silent;
+        this.resolving = false;
+        this.loaderPolls = 0;
+        this.failureDetail = "";
+        this.failureMissed.set(false);
         String url = normalizeUrl(videoUrl);
         KazumiLog.playback.debug("WaterMedia.play() called url={}", url);
         Minecraft mc = Minecraft.getInstance();
         new Thread(() -> {
             for (int retry = 0; retry < 30; retry++) {
                 if (closed) return; // 加载期间被 stop：放弃起播（防孤儿播放器）
+                loaderPolls++;
                 MRL mrl = MediaAPI.mrl(url);
                 if (mrl.source(0) != null) {
                     mc.execute(() -> {
@@ -107,6 +141,7 @@ public class WaterMediaPlayer {
                 if (st == MRL.Status.EXPIRED) {
                     // 链接签名已过期：重试无意义（每次查询都会触发 reload 并清空 sources）
                     KazumiLog.playback.error("MRL expired: {} (normalized: {})", videoUrl, url);
+                    failureDetail = "MRL expired";
                     mc.execute(() -> KazumiClientMessages.chatError(
                         net.minecraft.network.chat.Component
                             .translatable("kazumiplayer.msg.playback_link_expired").getString()));
@@ -119,8 +154,11 @@ public class WaterMediaPlayer {
                             ? reason.getMessage() : st.name();
                     if (raw.length() > 120) raw = raw.substring(0, 120) + "…";
                     String detail = raw;
+                    failureDetail = detail;
                     KazumiLog.playback.error("MRL load failed ({}): {}", url, detail);
-                    mc.execute(() -> KazumiClientMessages.chatError("视频加载失败：" + detail));
+                    mc.execute(() -> KazumiClientMessages.chatError(
+                        net.minecraft.network.chat.Component
+                            .translatable("kazumiplayer.msg.playback_load_failed", detail).getString()));
                     firePlayFailure();
                     return;
                 }
@@ -128,7 +166,10 @@ public class WaterMediaPlayer {
             }
             if (closed) return;
             KazumiLog.playback.error("MRL loading timeout: {} (normalized: {})", videoUrl, url);
-            mc.execute(() -> KazumiClientMessages.chatError("视频加载超时，请检查网络或稍后重试"));
+            failureDetail = "MRL loading timeout";
+            mc.execute(() -> KazumiClientMessages.chatError(
+                net.minecraft.network.chat.Component
+                    .translatable("kazumiplayer.msg.playback_load_timeout").getString()));
             firePlayFailure();
         }, "KazumiPlayer-MRL-Loader").start();
     }
@@ -142,7 +183,10 @@ public class WaterMediaPlayer {
                 () -> MediaAPI.alEngine());
             if (player == null) {
                 KazumiLog.playback.error("Failed to create player for: {}", mrl.uri);
-                mc.execute(() -> KazumiClientMessages.chatError("创建播放器失败"));
+                failureDetail = "player creation returned null";
+                mc.execute(() -> KazumiClientMessages.chatError(
+                    net.minecraft.network.chat.Component
+                        .translatable("kazumiplayer.msg.playback_create_failed").getString()));
                 firePlayFailure();
                 return;
             }
@@ -157,6 +201,7 @@ public class WaterMediaPlayer {
             // seek 交给外部 tick 延迟执行（此时 demuxer 尚未就绪）
         } catch (Exception e) {
             KazumiLog.playback.error("Playback failed: {}", e.getMessage());
+            failureDetail = String.valueOf(e.getMessage());
             firePlayFailure();
         }
     }
@@ -300,4 +345,24 @@ public class WaterMediaPlayer {
     }
 
     public MediaPlayer getPlayer() { return player; }
+
+    /**
+     * 是否已取得可上传的视频帧：纹理与非零尺寸同时就绪＝解码器已出帧。
+     * 这是"出画"的唯一硬判据（时钟进入 PLAYING 只代表音频可播，视频帧可能还没解码出来）。
+     */
+    public boolean hasVideoOutput() {
+        return getTextureId() != 0 && getWidth() > 0;
+    }
+
+    /** WaterMedia 时钟状态名（WAITING/LOADING/BUFFERING/PLAYING/PAUSED/STOPPED/ENDED/ERROR）；播放器未创建时 NONE */
+    public String statusToken() {
+        MediaPlayer p = player;
+        return p == null ? "NONE" : p.status().name();
+    }
+
+    /** MRL 装载轮询次数（加载期提示用） */
+    public int getLoaderPolls() { return loaderPolls; }
+
+    /** 最近一次失败的可读细节（无失败为空串） */
+    public String getFailureDetail() { return failureDetail; }
 }

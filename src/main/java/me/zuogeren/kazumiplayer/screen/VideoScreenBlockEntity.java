@@ -101,7 +101,7 @@ public class VideoScreenBlockEntity extends BlockEntity {
     /** 更新某观看者的解析状态；@return 值有变化才 true（调用方据此决定是否值得同步） */
     public boolean updateResolveState(UUID playerId, int status) {
         if (status < me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING
-                || status > me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_FAILED) {
+                || status > me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_LOADING) {
             return false;
         }
         var map = parseResolveStates(resolveStates);

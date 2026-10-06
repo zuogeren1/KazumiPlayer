@@ -290,15 +290,13 @@ public class ClientFullscreenState {
                 hasValidFrame ? currentVideoTimeMs(player) : 0, CTL_BAR_H, ctlBar[1]);
         } else {
             g.fill(ax, ay, ax + areaW, ay + areaH, 0xC8101010);
-            // 本端为观看者但无信号、且有人上报解析状态：改显组内等待进度；
-            // 本端未参与该屏（未加入/已离开）时 of() 返回 null，回落「无信号」
+            // 加载期两行（本端阶段 + 组内进度）统一由 drawStartupStatus 绘制，此处不再重复画组内进度；
+            // 只有"本端既没在起播、也没有任何解析上报"时才回落「无信号」
             var waitBe = mc.level != null && mc.level.getBlockEntity(screenPos)
                 instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vs ? vs : null;
-            var waiting = me.zuogeren.kazumiplayer.client.ResolveHint.of(waitBe);
-            if (waiting != null) {
-                g.centeredText(mc.font, me.zuogeren.kazumiplayer.client.ResolveHint.line(waiting),
-                    ax + areaW / 2, ay + areaH / 2 - 4, 0xFFCCCCCC);
-            } else {
+            if (me.zuogeren.kazumiplayer.client.ResolveHint.of(waitBe) == null
+                    && me.zuogeren.kazumiplayer.client.ResolveHint.phaseLine(
+                        ScreenPlayerManager.peek(screenPos), screenPos) == null) {
                 g.centeredText(mc.font, Component.translatable("kazumiplayer.gui.full.no_signal"), ax + areaW / 2, ay + areaH / 2 - 4, 0xFF888888);
             }
         }
@@ -314,41 +312,37 @@ public class ClientFullscreenState {
         drawExitButton(g, mc);
     }
 
-    /** 起播等待/最近失败的状态文字（画面中央，独立于控制条淡出） */
+    /**
+     * 起播等待/最近失败的状态文字（画面中央，独立于控制条淡出）：
+     * 第一行本端起播阶段（在等什么＋已等多久＋量化细节），第二行组内进度（已出画/加载中/失败），
+     * 失败时追加可操作指引。直播屏同样显示——起播饥饿正是最需要看清阶段的地方。
+     */
     private static void drawStartupStatus(GuiGraphicsExtractor g, Minecraft mc) {
         var sp = ScreenPlayerManager.get(screenPos);
         int[] a = areaRect();
         long now = System.currentTimeMillis();
-        if (!sp.bypassSync && sp.player != null && !sp.everPlayed) {
-            long sec = Math.max(0, (now - sp.playbackStartedAt) / 1000);
-            String t = Component.translatable("kazumiplayer.gui.main.startup_status",
-                String.valueOf(sec)).getString();
-            g.text(mc.font, Component.literal(t),
-                a[0] + (a[2] - mc.font.width(t)) / 2, a[1] + a[3] / 2 - 16, 0xFFCCCCCC);
-            var be = mc.level != null && mc.level.getBlockEntity(screenPos)
-                instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vs ? vs : null;
-            if (be != null && !be.getEpisodeData().isEmpty()
-                    && !me.zuogeren.kazumiplayer.util.DirectLinkQueue.isQueueData(be.getEpisodeData())) {
-                String ep = Component.translatable("kazumiplayer.gui.main.startup_episode",
-                    String.valueOf(be.getEpisodeIndex())).getString();
-                g.text(mc.font, Component.literal(ep),
-                    a[0] + (a[2] - mc.font.width(ep)) / 2, a[1] + a[3] / 2, 0xFF667788);
-            }
-            // 第三行：其他观看者的解析进度（有人上报时才显示，播放前确认其他人是否解析完成）
-            var others = me.zuogeren.kazumiplayer.client.ResolveHint.of(be);
-            if (others != null) {
-                g.centeredText(mc.font, me.zuogeren.kazumiplayer.client.ResolveHint.line(others),
-                    a[0] + a[2] / 2, a[1] + a[3] / 2 + 16, 0xFF88AACC);
-            }
-        } else if (!sp.bypassSync && sp.player == null && sp.lastFailedAt > 0
-                && now - sp.lastFailedAt < 20000) {
-            // 与 GUI 横幅同一 URL 守卫：换集后 player 短暂为空的间隙不闪现上一集的失败横幅
-            var be = mc.level != null && mc.level.getBlockEntity(screenPos)
-                instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vs ? vs : null;
-            if (be == null || !be.getEpisodeUrl().equals(sp.lastFailedUrl)) return;
-            String t = Component.translatable("kazumiplayer.gui.main.fail_banner").getString();
-            g.text(mc.font, Component.literal(t),
-                a[0] + (a[2] - mc.font.width(t)) / 2, a[1] + a[3] / 2 - 16, 0xFFFF8888);
+        var be = mc.level != null && mc.level.getBlockEntity(screenPos)
+            instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity vs ? vs : null;
+        // 与 GUI 横幅同一 URL 守卫：换集后 player 短暂为空的间隙不闪现上一集的失败横幅
+        boolean failed = sp.player == null && sp.lastFailedAt > 0 && now - sp.lastFailedAt < 20000
+            && (be == null || be.getEpisodeUrl().equals(sp.lastFailedUrl));
+        var phase = me.zuogeren.kazumiplayer.client.ResolveHint.phaseLine(sp, screenPos);
+        var others = me.zuogeren.kazumiplayer.client.ResolveHint.of(be);
+        if (phase == null && others == null && !failed) return;
+        int centerX = a[0] + a[2] / 2;
+        int lineY = a[1] + a[3] / 2 - 16;
+        if (phase != null) {
+            g.centeredText(mc.font, phase, centerX, lineY, 0xFFCCCCCC);
+            lineY += 18;
+        }
+        if (others != null) {
+            g.centeredText(mc.font, me.zuogeren.kazumiplayer.client.ResolveHint.line(others),
+                centerX, lineY, 0xFF88AACC);
+            lineY += 18;
+        }
+        if (failed) {
+            g.centeredText(mc.font, Component.translatable("kazumiplayer.gui.main.fail_banner"),
+                centerX, lineY, 0xFFFF8888);
         }
     }
 

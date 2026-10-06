@@ -97,10 +97,10 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                 .cancelResolve(packet.screenPos());
             // 屏幕方块可能已被移除（BE 已不存在），直接按位置停止本地播放器
             var player = ScreenPlayerManager.getPlayer(packet.screenPos());
-            if (player != null) {
-                player.stop();
-                ScreenPlayerManager.remove(packet.screenPos());
-            }
+            if (player != null) player.stop();
+            // 无条件移除条目：失败冷却、尝试次数、lastEpisodeUrl 等瞬态必须随"服务端已停播本端"一起清掉，
+            // 否则玩家按失败横幅提示重新加入同步时，会撞上残留的 60s 冷却而长时间没画面
+            ScreenPlayerManager.remove(packet.screenPos());
             if (mc.level.getBlockEntity(packet.screenPos()) instanceof VideoScreenBlockEntity screen) {
                 // 清空播放 URL，防止客户端 tick 循环立即重开播放
                 screen.clearPlayback();

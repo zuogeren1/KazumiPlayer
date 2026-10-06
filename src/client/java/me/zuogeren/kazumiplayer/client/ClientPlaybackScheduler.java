@@ -36,12 +36,34 @@ public class ClientPlaybackScheduler {
 
     /** 清晰度无缝切换的预热超时：超时未出画则丢弃预热播放器并退到停旧重播 */
     private static final long PREWARM_SWITCH_TIMEOUT_MS = 15_000L;
+    /** 起播看门狗：起播后此时限内没有任何视频帧即视作起播失败（时钟进入 PLAYING 只代表音频可播） */
+    private static final long STARTUP_FRAME_TIMEOUT_MS = 25_000L;
+    /** CACHE 档位的看门狗时限：引擎先把整个媒体文件写入磁盘缓存再解码，首帧前的等待天然很长（实测 116MB ≈ 42s） */
+    private static final long STARTUP_FRAME_TIMEOUT_CACHE_MS = 120_000L;
+    /** 每集最多自动尝试的起播次数（首次 + 一次重试） */
+    private static final int STARTUP_MAX_ATTEMPTS = 2;
+    /** 起播彻底失败后的自动重试冷却：留出时间让人看到原因并手动处理，避免静默死循环 */
+    private static final long STARTUP_RETRY_COOLDOWN_MS = 60_000L;
     // ---- 调度节奏常量 ----
     private static final int TICKS_PER_SECOND = 20;                 // 播放调度每秒一轮
     private static final long PLAYBACK_START_COOLDOWN_MS = 3000;    // 开播冷却，防同步风暴期反复起播
     private static final long END_DETECT_MARGIN_MS = 300;           // 播完判定提前量（live 型 HLS 无 EOF 兜底）
 
     private static int tickCounter;
+
+    /** 每集自动起播的最大尝试次数（加载期提示展示"第 N/M 次尝试"） */
+    public static int startupMaxAttempts() { return STARTUP_MAX_ATTEMPTS; }
+
+    /**
+     * 起播看门狗时限：CACHE 档位是"先下完整文件再解码"，首帧前的等待属正常，时限放宽；
+     * 直播（bypassSync，缓存被强制关闭）与 STREAM 档位一律用短时限。
+     */
+    private static long startupFrameTimeoutMs(ScreenPlayerManager.ScreenPlayer sp) {
+        boolean cached = !sp.bypassSync
+            && me.zuogeren.kazumiplayer.ClientConfig.CONFIG.videoCacheMode.get()
+                == me.zuogeren.kazumiplayer.ClientConfig.VideoCacheMode.CACHE;
+        return cached ? STARTUP_FRAME_TIMEOUT_CACHE_MS : STARTUP_FRAME_TIMEOUT_MS;
+    }
 
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
@@ -138,10 +160,13 @@ public class ClientPlaybackScheduler {
         var sp = ScreenPlayerManager.get(screen.getBlockPos());
         // 僵尸播放器自愈：解析失败/租约放弃/嗅探超时耗尽后，播放器已登记但永不进入播放态，
         // 而重试条件是 player == null——不回收就永远卡死（只能离开重新加入才能恢复）。
-        // 阈值覆盖两次嗅探超时重试（默认 30s×2）+ 起播缓冲；暂停中的屏幕不算僵尸
-        if (sp.player != null && !sp.everPlayed && !screen.isPlaybackPaused()
-                && System.currentTimeMillis() - sp.playbackStartedAt > zombieTimeoutMs) {
-            KazumiLog.playback.warn("Zombie playback (never started) at {}, recycling",
+        // 判据与看门狗同源（firstFrameAt == 0 = 本次起播还没出过任何一帧）；阈值取
+        // max(僵尸阈值, 看门狗时限 + 5s)：CACHE 档位首帧可以晚到 75s 之后，若仍按 75s 先回收，
+        // 就会在出画前反复重启——看门狗永远轮不到，也就永远不会如实报 FAILED
+        if (sp.player != null && sp.firstFrameAt == 0 && !screen.isPlaybackPaused()
+                && System.currentTimeMillis() - sp.playbackStartedAt
+                    > Math.max(zombieTimeoutMs, startupFrameTimeoutMs(sp) + 5_000L)) {
+            KazumiLog.playback.warn("Zombie playback (no frames) at {}, recycling",
                     screen.getBlockPos());
             sp.player.stop();
             sp.player = null;
@@ -199,13 +224,28 @@ public class ClientPlaybackScheduler {
         // 新播放：启动播放器并预置 seek
         // 只有 WatchingPlayers 中的玩家才自动播放（手动 join 后才能播）
         if (sp.player == null && !url.isEmpty() && isWatching(screen, mc)
-                && System.currentTimeMillis() - sp.playbackStartedAt > PLAYBACK_START_COOLDOWN_MS) {
+                && System.currentTimeMillis() - sp.playbackStartedAt > PLAYBACK_START_COOLDOWN_MS
+                && System.currentTimeMillis() >= sp.nextStartupRetryAt) {
             // 客户端最大同时播放屏数：达上限不再为新屏起播（N 屏 = N 路 FFmpeg 全速运行，必须有资源闸）
             if (!withinConcurrentPlayBudget()) {
                 notifyPlayLimitThrottled(screen.getBlockPos());
                 return;
             }
-            sp.playbackStartedAt = System.currentTimeMillis();
+            long startedAt = System.currentTimeMillis();
+            sp.playbackStartedAt = startedAt;
+            // 一轮起播的界定：首次进入、冷却到期重来、以及"已出画之后的同集重启"
+            //（清晰度预热回退、播完后再播等）都算新一轮——次数与总计时一起重新起算；
+            // 看门狗的重试仍在同一轮内累加，供"第 N/M 次尝试"展示
+            if (sp.startupAttempts >= STARTUP_MAX_ATTEMPTS || sp.firstFrameAt != 0) {
+                sp.startupAttempts = 0;
+                sp.startupStartedAt = 0;
+            }
+            if (sp.startupAttempts == 0) sp.startupStartedAt = startedAt;
+            sp.startupAttempts++;
+            sp.firstFrameAt = 0;
+            sp.startupExtra = "";
+            sp.failReasonKey = "";
+            sp.enterPhase(ScreenPlayerManager.StartupPhase.RESOLVING);
             sp.bypassSync = false; // 先复位上一集的直播直连标记（beginPlayback 检测到直播直链会重新置位）
             sp.player = me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver
                     .getInstance().beginPlayback(screen, url);
@@ -240,6 +280,41 @@ public class ClientPlaybackScheduler {
             if (time != sp.lastTimeMs) {
                 sp.lastTimeMs = time;
                 sp.lastTimeAdvancedAt = System.currentTimeMillis();
+            }
+        }
+        // 起播阶段推进 + 出画上报 + 起播看门狗。顺序在音量段之后、播完判定之前：
+        // 本段可能停掉播放器并置空 sp.player，后续段落都以 player != null 为前提
+        if (sp.player != null) {
+            updateStartupPhase(sp, screen);
+            if (sp.firstFrameAt == 0 && sp.player.hasVideoOutput()) {
+                sp.firstFrameAt = System.currentTimeMillis();
+                sp.enterPhase(ScreenPlayerManager.StartupPhase.PLAYING);
+                KazumiLog.playback.info("First frame at {} (attempt {}, startup {}ms, status {})",
+                    screen.getBlockPos(), sp.startupAttempts,
+                    sp.startupStartedAt > 0 ? sp.firstFrameAt - sp.startupStartedAt : -1,
+                    sp.player.statusToken());
+                me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.reportMediaReady(screen);
+            }
+            // 暂停期不计入起播等待：恢复播放后重新计时，避免"暂停很久"被当成起播失败
+            if (sp.firstFrameAt == 0 && screen.isPlaybackPaused()) {
+                sp.playbackStartedAt = System.currentTimeMillis();
+            }
+            // 看门狗：到期仍无任何视频帧 → 先重试一次（不换拉流模式），再失败则如实报错收尾
+            long frameTimeout = startupFrameTimeoutMs(sp);
+            if (sp.firstFrameAt == 0 && !screen.isPlaybackPaused()
+                    && System.currentTimeMillis() - sp.playbackStartedAt > frameTimeout) {
+                if (sp.startupAttempts < STARTUP_MAX_ATTEMPTS) {
+                    KazumiLog.playback.warn("Startup stalled at {} ({}ms, mrlPoll={}, status={}), retry {}/{}",
+                        screen.getBlockPos(), System.currentTimeMillis() - sp.playbackStartedAt,
+                        sp.player.getLoaderPolls(), sp.player.statusToken(),
+                        sp.startupAttempts + 1, STARTUP_MAX_ATTEMPTS);
+                    sp.enterPhase(ScreenPlayerManager.StartupPhase.RETRYING);
+                    sp.player.stop();
+                    sp.player = null;
+                    sp.playbackStartedAt = 0; // 立即进入下一次尝试（次数在起播段自增）
+                } else {
+                    failStartup(screen, sp, mc);
+                }
             }
         }
         // 检测播放完毕 → 自动下一集
@@ -306,6 +381,9 @@ public class ClientPlaybackScheduler {
             }
             sp.lastEpisodeUrl = url;
             sp.endedNotified = false;
+            sp.resetStartup(); // 新集：阶段、尝试次数与失败状态全部复位
+            // 档位表只对产生它的那次解析有效：换源后先清掉，避免阶段行显示上一个源的档位名
+            me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.clearInfo(screen.getBlockPos());
             me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 换集断开旧弹幕源（在途结果随代次作废）
             // 换集清屏：上一集的在途/驻留弹幕作废（对即时项幂等双保险）
             me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.clear(screen.getBlockPos());
@@ -346,8 +424,8 @@ public class ClientPlaybackScheduler {
     private static long lastSkipSentAt;
 
     /**
-     * 给本次起播的播放器挂失败回调：MRL 拒绝/加载超时/播放器创建失败时
-     * 请求服务端移除正在播放的队列项并切播下一个（queue_skip_current）。
+     * 给本次起播的播放器挂失败回调：MRL 拒绝/加载超时/播放器创建失败时，
+     * 状态转 FAILED（否则界面会永远停在"加载中"）、记录失败快照、并请求服务端跳过该项。
      * 回调可能来自 MRL-Loader 线程，统一投递主线程；会话不符（URL 已变更/已停止）则忽略。
      */
     private static void attachFailureSkip(VideoScreenBlockEntity screen,
@@ -360,17 +438,98 @@ public class ClientPlaybackScheduler {
             // 记录失败快照：GUI/全屏据此在窗口期内展示失败横幅与指引
             current.lastFailedUrl = screen.getEpisodeUrl();
             current.lastFailedAt = System.currentTimeMillis();
-            long now = System.currentTimeMillis();
-            if (now - lastSkipSentAt < SKIP_RESEND_COOLDOWN_MS) return;
-            lastSkipSentAt = now;
-            KazumiLog.playback.info("Playback failed at {}, requesting queue skip",
-                screen.getBlockPos());
-            mc.getConnection().send(new ServerboundCustomPayloadPacket(
-                new me.zuogeren.kazumiplayer.network.packet.GuiActionPacket(
-                    screen.getBlockPos(),
-                    me.zuogeren.kazumiplayer.network.gui.GuiProtocol.ACTION_QUEUE_SKIP_CURRENT,
-                    "{}")));
+            current.enterPhase(ScreenPlayerManager.StartupPhase.FAILED);
+            current.failReasonKey = "kazumiplayer.gui.main.fail_reason_media";
+            current.startupExtra = player.getFailureDetail();
+            current.startupFailedAt = current.lastFailedAt;
+            current.nextStartupRetryAt = current.lastFailedAt + STARTUP_RETRY_COOLDOWN_MS;
+            me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.reportMediaFailure(screen);
+            requestFailureSkip(screen, current, mc);
         }));
+    }
+
+    /**
+     * 起播看门狗判定为彻底失败：如实上报 FAILED、留下可读原因、进入冷却，并交给队列容错收尾
+     * （多项目队列切播下一个，无队列上下文只让本端退出同步）。
+     */
+    private static void failStartup(VideoScreenBlockEntity screen, ScreenPlayerManager.ScreenPlayer sp, Minecraft mc) {
+        var player = sp.player;
+        KazumiLog.playback.warn("Startup failed at {} after {} attempt(s) (mrlPoll={}, status={}, detail={})",
+            screen.getBlockPos(), sp.startupAttempts,
+            player == null ? -1 : player.getLoaderPolls(),
+            player == null ? "NONE" : player.statusToken(),
+            player == null ? "" : player.getFailureDetail());
+        sp.enterPhase(ScreenPlayerManager.StartupPhase.FAILED);
+        sp.failReasonKey = "kazumiplayer.gui.main.fail_reason_no_frames";
+        sp.startupExtra = player == null ? "" : player.getFailureDetail();
+        sp.startupFailedAt = System.currentTimeMillis();
+        sp.nextStartupRetryAt = sp.startupFailedAt + STARTUP_RETRY_COOLDOWN_MS;
+        sp.lastFailedUrl = screen.getEpisodeUrl();
+        sp.lastFailedAt = sp.startupFailedAt;
+        if (player != null) {
+            player.stop();
+            sp.player = null;
+        }
+        me.zuogeren.kazumiplayer.playback.source.VideoSourceResolver.reportMediaFailure(screen);
+        KazumiClientMessages.chatError(net.minecraft.network.chat.Component
+            .translatable("kazumiplayer.msg.playback_no_frames", String.valueOf(sp.startupAttempts)).getString());
+        requestFailureSkip(screen, sp, mc);
+    }
+
+    /**
+     * 请求服务端移除当前队列项并切播下一个（多项目队列）或让本端退出同步（无队列上下文）。
+     * 重发冷却为全局值：紧邻的多屏失败只会发出一次请求，避免服务端被连续跳过刷爆。
+     */
+    private static void requestFailureSkip(VideoScreenBlockEntity screen,
+            ScreenPlayerManager.ScreenPlayer sp, Minecraft mc) {
+        if (mc.getConnection() == null) return;
+        long now = System.currentTimeMillis();
+        if (now - lastSkipSentAt < SKIP_RESEND_COOLDOWN_MS) return;
+        lastSkipSentAt = now;
+        KazumiLog.playback.info("Playback failed at {}, requesting queue skip", screen.getBlockPos());
+        mc.getConnection().send(new ServerboundCustomPayloadPacket(
+            new me.zuogeren.kazumiplayer.network.packet.GuiActionPacket(
+                screen.getBlockPos(),
+                me.zuogeren.kazumiplayer.network.gui.GuiProtocol.ACTION_QUEUE_SKIP_CURRENT,
+                "{}")));
+    }
+
+    /**
+     * 起播阶段推进（本地瞬态）：出画后固定 PLAYING；未出画时按"播放器是否已创建 + WaterMedia
+     * 时钟状态"分档，供加载期提示如实说明在等什么。调用前提：sp.player != null（调用点已守卫）。
+     */
+    private static void updateStartupPhase(ScreenPlayerManager.ScreenPlayer sp, VideoScreenBlockEntity screen) {
+        // 失败冷却期内固定 FAILED：失败回调置 FAILED 后包装播放器仍在册（MediaPlayer 为 null），
+        // 下一秒的判定会把它覆盖成 PREPARING——冷却倒计时与失败原因随之从界面消失
+        if (sp.nextStartupRetryAt > System.currentTimeMillis()) {
+            sp.enterPhase(ScreenPlayerManager.StartupPhase.FAILED);
+            return;
+        }
+        if (sp.firstFrameAt != 0) {
+            sp.enterPhase(ScreenPlayerManager.StartupPhase.PLAYING);
+            return;
+        }
+        if (screen.isPlaybackPaused()) {
+            sp.enterPhase(ScreenPlayerManager.StartupPhase.PAUSED);
+            return;
+        }
+        var player = sp.player;
+        if (player.getPlayer() == null) {
+            // 包装播放器尚未拿到媒体：区分"异步解析中"（嗅探/服务端代理，可能数十秒）
+            // 与"MRL 取源中"（解析已返回、正在装载，轮询次数由加载期提示展示）
+            sp.enterPhase(player.isResolving()
+                ? ScreenPlayerManager.StartupPhase.RESOLVING
+                : ScreenPlayerManager.StartupPhase.PREPARING);
+            return;
+        }
+        switch (player.statusToken()) {
+            case "WAITING", "LOADING" -> sp.enterPhase(ScreenPlayerManager.StartupPhase.OPENING);
+            case "BUFFERING" -> sp.enterPhase(ScreenPlayerManager.StartupPhase.BUFFERING);
+            case "PLAYING" -> sp.enterPhase(ScreenPlayerManager.StartupPhase.AUDIO_ONLY);
+            case "PAUSED" -> sp.enterPhase(ScreenPlayerManager.StartupPhase.PAUSED);
+            case "ERROR", "STOPPED", "ENDED" -> sp.enterPhase(ScreenPlayerManager.StartupPhase.FAILED);
+            default -> sp.enterPhase(ScreenPlayerManager.StartupPhase.OPENING);
+        }
     }
 
     /** 单机世界退出：集成服务端停止时兜底停止所有播放（客户端连远程服时由 LoggingOut 兜底） */

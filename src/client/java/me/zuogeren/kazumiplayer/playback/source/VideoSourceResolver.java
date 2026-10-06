@@ -73,6 +73,7 @@ public final class VideoSourceResolver {
         // 嗅探浏览器对 B 站播放页拿不到可用直链，故在此提前分流、不进嗅探链路
         if (BilibiliUrls.isBilibiliUrl(episodeUrl)) {
             KazumiLog.sniff.info("[source] bilibili URL, routing to server-side resolver");
+            player.markResolving(); // 加载期提示据此区分"正在解析"与"正在取源"
             resolveBilibili(screen, episodeUrl, player, session);
             return player;
         }
@@ -90,12 +91,14 @@ public final class VideoSourceResolver {
             me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 直链/直播无片内弹幕源，关掉上一段的
             player.play(episodeUrl);
             screen.setVideoState(VideoState.PLAYING);
-            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
+            // 直链无解析阶段，但媒体仍要加载：先报"加载中"，首帧出画后由调度器补报"已出画"
+            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_LOADING);
             return player;
         }
 
         // 路 3：其余网页 URL —— Rinku 嗅探（租约池按屏互斥，失败重试一次）
         me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 嗅探路径拿不到 cid/房间号，旧弹幕源作废
+        player.markResolving(); // 嗅探同样是异步的（可能数十秒）：加载期提示按"正在解析"展示
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         resolveWithRetry(screen, episodeUrl, player, session, 0);
         return player;
@@ -511,7 +514,8 @@ public final class VideoSourceResolver {
             KazumiLog.sniff.warn("[source] resolver pool exhausted, giving up screen {}", key);
             Minecraft.getInstance().execute(() -> {
                 screen.setVideoState(VideoState.STOPPED);
-                KazumiClientMessages.chatWarn("已达最大同时嗅探数，无法解析该屏幕视频");
+                KazumiClientMessages.chatWarn(net.minecraft.network.chat.Component
+                    .translatable("kazumiplayer.msg.sniff_pool_exhausted").getString());
             });
             return;
         }
@@ -569,29 +573,49 @@ public final class VideoSourceResolver {
             }
             player.play(resolvedUrl);
             screen.setVideoState(VideoState.PLAYING);
-            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
+            // 解析完成 ≠ 能看：此时只报"加载中"，首帧上屏才是"已出画"（见 ClientPlaybackScheduler 的出画上报）
+            reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_LOADING);
         });
     }
 
     private void failPlayback(VideoScreenBlockEntity screen, Throwable cause) {
-        String reason;
+        // 用户可见原因走语言文件（技术原文只进日志）：超时/未找到各有专门文案，其余直接用异常消息
+        String reasonKey = null;
+        String reasonArg = null;
         if (cause instanceof VideoSourceResolveException.Timeout t) {
-            reason = "超时（" + t.getMessage() + "）";
+            reasonKey = "kazumiplayer.err.resolve_timeout";
+            reasonArg = String.valueOf(t.getMessage());
         } else if (cause instanceof VideoSourceResolveException.NotFound) {
-            reason = "未能从页面中找到视频源";
+            reasonKey = "kazumiplayer.err.resolve_not_found";
         } else {
-            reason = String.valueOf(cause.getMessage());
+            reasonArg = String.valueOf(cause.getMessage());
         }
-        KazumiLog.sniff.warn("[source] resolution failed: {}", reason);
+        String techReason = reasonKey == null ? reasonArg
+            : reasonKey + "(" + (reasonArg == null ? "" : reasonArg) + ")";
+        KazumiLog.sniff.warn("[source] resolution failed: {}", techReason);
+        String userReason = reasonKey == null
+            ? String.valueOf(reasonArg) : net.minecraft.network.chat.Component
+                .translatable(reasonKey, reasonArg == null ? "" : reasonArg).getString();
         Minecraft.getInstance().execute(() -> {
             if (Minecraft.getInstance().level == null) return; // 已离开世界，聊天提示无意义
             screen.setVideoState(VideoState.STOPPED);
             reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_FAILED);
-            KazumiClientMessages.chatError("视频源解析失败：" + reason);
+            KazumiClientMessages.chatError(net.minecraft.network.chat.Component
+                .translatable("kazumiplayer.msg.resolve_failed", userReason).getString());
         });
     }
 
-    /** 解析状态上报：经服务端聚合进 BE NBT 同步全组（GUI 观看者列表展示谁未就绪） */
+    /** 已出画：首帧解码上屏后由调度器上报（组内进度与观看者列表据此区分"加载中"与"能看了"） */
+    public static void reportMediaReady(VideoScreenBlockEntity screen) {
+        reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_READY);
+    }
+
+    /** 媒体加载/起播失败：与解析失败同样上报 FAILED——否则状态会永远停在"加载中" */
+    public static void reportMediaFailure(VideoScreenBlockEntity screen) {
+        reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_FAILED);
+    }
+
+    /** 解析状态上报：经服务端聚合进 BE NBT 同步全组（GUI 观看者列表展示谁还没出画） */
     private static void reportResolveStatus(VideoScreenBlockEntity screen, int status) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.getConnection() == null) return;

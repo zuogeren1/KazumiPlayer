@@ -21,6 +21,13 @@
 - [ ] **顺手：用上 `start()` 的返回值**【S】: 预热播放器起播失败时可记日志/回退（现在忽略返回值）。
 - [ ] **机会（暂缓，需单独立项）：用内置同步子系统替换自研同步层**【L】: .23 把联机同步做进了 `MediaPlayer`——`sync.Bridge`（单方法 `send(ByteBuffer)`，可承载任意字节通道，能挂在我们现有包上）、`Config.Capability`（LOCKSTEP / CONTROLS / VOLUME）、`role()/authority()/drift()/tolerance(ms)`、`ServerMediaPlayer`（权威：注册观众 + 变更广播 + 约 5s 心跳 + 处理控制请求 + 清理失联）、revision 单调计数与乱序丢弃、`syncDuration` 首胜、ENDED 态 seek 落 PAUSED。它与我们的 `SyncGroupManager` + `SyncStatePacket` + `ClientClockSync` + 漂移兜底属同一层能力，收益：①LOCKSTEP（有人缓冲时全体冻结、失败者忽略、中途加入不打断他人）正对我们「缓冲饥饿期反复戳播放器」「集间过渡」两个老痛点；②CONTROLS 让控制请求走上行、两侧 API 对称；③省掉自研协议与节流数学。风险：权威侧只有 `ServerMediaPlayer`（无真实媒体）与真实媒体播放器两类，与「每屏一个权威 + 每人本地播放器跟随」的映射需实测；**VOLUME 能力会覆盖我们每屏本端音量 → 不能启用**；`sync()` 解码发生在任意线程、内部 50ms ticker；还要与「线路/清晰度双播放器交接」「直链队列」重新对齐。结论：先记录，等其他批次稳定后再评估。
 
+## B 站解析健壮性（2026-10-06 生产日志核对后登记）
+
+- [ ] **未开播直播间把 JsonNull 当对象强转，异常名直接甩给用户**【S】: `BilibiliApi:430` 的 `data.has("playurl_info") ? data.getAsJsonObject("playurl_info")…` —— Gson 的 `has()` 对 JSON null 也返回 true，未开播/无流时返回 `"playurl_info": null` 即抛 `ClassCastException: com.google.gson.JsonNull cannot be cast to class com.google.gson.JsonObject`；`dataOf` 的 `root.getAsJsonObject("data")`（其后那句 `data == null` 检查永远走不到）与 `dash`/`wbi_img` 两处同写法。生产日志实测：房间 1921300321 未开播期间连续 10 次（17:59–18:10）服务端代理与本端回落双双抛同一 CCE，聊天栏显示整串 Java 异常名，且僵尸回收每 75 秒重试一次。做法：加 null 安全的取值器（缺字段与 JSON null 一律当缺席），未开播归为可读原因「直播间未开播或未返回播放流」。
+- [ ] **DASH 有效期减 10 分钟余量可能落到过去**【S】: `VideoSourceResolver.expiresAtOf` 返回 `deadline - 600`，若 CDN 给的 deadline 距现在不足 10 分钟就会早于当前时刻，而 `KazumiBiliPlatform.getData` 对「已过期」是**直接抛异常拒绝服务**（不是触发重新解析）→ 表现为「视频加载失败：Bili DASH link expired at …」。做法：扣完余量仍早于「现在 + 最小宽限」时按未知有效期处理（传 null，让 FFmpeg 自己撞 403 走既有失败路径），或改为发起一次重新解析。
+- [ ] **服务端代理解析在「请求者不在组里」时静默丢弃**【S】: `ServerPacketHandlers.handleBilibiliResolve` 的三查都在日志行之前，组校验失败即 return，客户端只能干等 20 秒超时才回落（dev 日志 01:07:27 实例：请求发出后服务端一行日志都没有）。做法：组校验失败记一条 WARN 并回一个明确失败，让客户端立刻走本端回落。
+- [ ] **失败跳跃的 3 秒冷却为全局值**【S】: `ClientPlaybackScheduler.lastSkipSentAt` 跨屏共享，多块屏同时失败时后到的那次跳过请求会被静默丢弃（该屏只能等 60s 冷却到期）。做法：改为按屏的 Map。
+
 ## 待裁决（拍板后才动）
 
 - [ ] **扫码登录成功后立即同步屏蔽词**: `BilibiliLoginScreen` 登录成功处加一行拉取 `x/dm/filter/user`（一行改动，取舍在「登录即联网」的体验）【S】
@@ -30,7 +37,7 @@
 ## 体验与功能待办（2026-08-24 使用体验分析筛选，任务看板同名卡片）
 
 ### GUI 体验
-- [ ] **B2 等待与失败可视化包**: 起播阶段文案（解析中→加载流→缓冲）+等待秒数+取消按钮；连续失败冷却+可点击「重试/换来源」；错误文案 i18n【M】——已落地：起播等待文案+秒数+取消按钮、解析状态上报三处等待可视化（ResolveHint）、失败横幅 20s 窗口与错误文案 i18n；剩余：连续失败冷却与可点击「重试/换来源」入口
+- [ ] **B2 等待与失败可视化包**: 起播阶段文案（解析中→加载流→缓冲）+等待秒数+取消按钮；连续失败冷却+可点击「重试/换来源」；错误文案 i18n【M】——已落地：**八档起播阶段 + 已等秒数 + 量化细节（第 N/M 次尝试 · 档位 · 直播或点播 · 位置 · 取址轮询次数 · 失败原因）**、组内进度「已出画 x/y · 加载中 n · 失败 m」、观看者列表四态后缀、**起播看门狗与 60s 失败冷却（阶段行显示倒计时）**、取消按钮（可见期＝尚未出画）、失败横幅 20s 窗口、错误文案 i18n；剩余：可点击的「重试/换来源」入口（当前重新加入同步/重新提交直链会清掉冷却并立刻重试，但界面里没有专门的按钮）
 - [ ] **B7 破坏性操作防误触**: 停止二次确认/撤销窗、队列删格首次点变"确认？"【S】
 - [ ] **B16 bgm 搜索结果列表可滚动**（替代翻页方案）【S-M】
 

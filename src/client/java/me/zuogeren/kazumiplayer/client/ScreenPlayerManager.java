@@ -16,6 +16,13 @@ public final class ScreenPlayerManager {
     /** 播放位置停滞判定为重缓冲的阈值 */
     public static final long BUFFER_FREEZE_MS = 1500L;
 
+    /**
+     * 起播阶段（本地瞬态，仅供加载期可视化与看门狗判定）：
+     * 解析 → 取媒体地址 → 打开媒体流 → 缓冲等待视频帧 → 出画；
+     * 另有暂停（出画前被暂停）、重试（起播超时后重来）与失败三态。
+     */
+    public enum StartupPhase { RESOLVING, PREPARING, OPENING, BUFFERING, AUDIO_ONLY, PAUSED, PLAYING, RETRYING, FAILED }
+
     /** 单个屏幕的客户端播放状态 */
     public static class ScreenPlayer {
         public WaterMediaPlayer player;
@@ -65,6 +72,54 @@ public final class ScreenPlayerManager {
         public boolean pendingSeeked;
         /** 重启后要恢复的播放位置（毫秒，0 表示不续播，回落同步位置） */
         public long resumePositionMs;
+        /** 起播阶段（加载期提示与看门狗的判定依据） */
+        public StartupPhase startupPhase = StartupPhase.RESOLVING;
+        /** 本阶段起点（毫秒）：用于"已等 N 秒"展示 */
+        public long startupPhaseAt;
+        /** 本集已发起的起播尝试次数（首次=1，看门狗重试后=2） */
+        public int startupAttempts;
+        /** 本轮起播的起始时刻（毫秒，0=尚未开始）：加载期提示展示的是总耗时而非单阶段耗时 */
+        public long startupStartedAt;
+        /** 首次取得视频帧的时刻（0=尚未出画）——"已出画"上报与看门狗的唯一判据 */
+        public long firstFrameAt;
+        /** 阶段附加信息（技术细节，可为空；作为语言键的参数展示） */
+        public String startupExtra = "";
+        /** 起播失败原因的语言键（空串时改用 startupExtra 原文） */
+        public String failReasonKey = "";
+        /** 上次起播彻底失败的时刻与下次允许自动重试的时刻（0=无失败） */
+        public long startupFailedAt;
+        public long nextStartupRetryAt;
+
+        /** 进入新阶段：仅状态变化时刷新计时起点 */
+        public void enterPhase(StartupPhase phase) {
+            if (this.startupPhase == phase) return;
+            this.startupPhase = phase;
+            this.startupPhaseAt = System.currentTimeMillis();
+        }
+
+        /** 本阶段已耗时（秒） */
+        public long startupElapsedSec() {
+            return Math.max(0, (System.currentTimeMillis() - this.startupPhaseAt) / 1000);
+        }
+
+        /** 用户主动重试（重新加入/重新起播）：清掉失败冷却，让下一次起播立刻进行 */
+        public void clearFailureCooldown() {
+            this.nextStartupRetryAt = 0;
+            this.startupFailedAt = 0;
+        }
+
+        /** 重新起播（新集/换源/重新加入）：清空阶段、尝试次数、出画时刻与失败状态 */
+        public void resetStartup() {
+            this.startupPhase = StartupPhase.RESOLVING;
+            this.startupPhaseAt = System.currentTimeMillis();
+            this.startupAttempts = 0;
+            this.startupStartedAt = 0;
+            this.firstFrameAt = 0;
+            this.startupExtra = "";
+            this.failReasonKey = "";
+            this.startupFailedAt = 0;
+            this.nextStartupRetryAt = 0;
+        }
 
         /**
          * 重缓冲冻结判定：已出画、播放中，但播放位置停滞超过阈值。
@@ -87,6 +142,11 @@ public final class ScreenPlayerManager {
     public static WaterMediaPlayer getPlayer(BlockPos pos) {
         ScreenPlayer sp = players.get(pos);
         return sp == null ? null : sp.player;
+    }
+
+    /** 只读访问（不创建条目）：渲染层与提示装配器据此取瞬态阶段 */
+    public static ScreenPlayer peek(BlockPos pos) {
+        return players.get(pos);
     }
 
     /** 切换某屏静音并即时应用到其播放器（无播放器时仅翻状态）；@return 切换后是否静音 */

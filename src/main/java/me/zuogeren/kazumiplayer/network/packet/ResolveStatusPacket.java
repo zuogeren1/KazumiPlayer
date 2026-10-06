@@ -17,12 +17,14 @@ import java.util.UUID;
  */
 public record ResolveStatusPacket(BlockPos screenPos, UUID screenId, int status) implements CustomPacketPayload {
 
-    /** 解析中（已发起嗅探，尚未得到直链结果） */
+    /** 解析中（已发起嗅探/代理解析，尚未得到可播放地址） */
     public static final int STATUS_RESOLVING = 0;
-    /** 解析完成（已取得可播放地址并起播；直链无嗅探阶段直接上报此值） */
+    /** 已出画（媒体首帧解码并上屏；出画前的加载期一律是 {@link #STATUS_LOADING}） */
     public static final int STATUS_READY = 1;
-    /** 解析失败（重试耗尽） */
+    /** 解析失败（重试耗尽，或媒体加载/起播失败） */
     public static final int STATUS_FAILED = 2;
+    /** 媒体加载中（已拿到可播放地址、播放器已起播，但尚未出画） */
+    public static final int STATUS_LOADING = 3;
 
     public static final Type<ResolveStatusPacket> TYPE =
         new Type<>(Identifier.fromNamespaceAndPath(KazumiPlayer.MODID, "resolve_status"));

@@ -188,7 +188,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
             }
             // 观察者视角等待提示：屏幕已绑定播放但本端无播放器——居中显示组内解析进度
             if (!state.episodeUrl.isEmpty() && localWatching) {
-                drawWaitingHint(collector, poseStack, halfW, halfH, state.resolveStates);
+                drawWaitingHint(collector, poseStack, halfW, halfH, state.resolveStates, state.blockPos);
             }
             poseStack.popPose();
             return;
@@ -210,7 +210,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         // 起播等待文字提示：屏幕已绑定播放、本端为观看者且尚未取得任何真实帧（解析/加载期）——
         // 居中显示组内解析进度（ResolveStates NBT 聚合），出画后自动消失
         if (!state.episodeUrl.isEmpty() && localWatching && !tex.hasValidFrame()) {
-            drawWaitingHint(collector, poseStack, halfW, halfH, state.resolveStates);
+            drawWaitingHint(collector, poseStack, halfW, halfH, state.resolveStates, state.blockPos);
         }
 
         RenderType renderType = RenderTypes.entityCutout(tex.getTextureId());
@@ -355,14 +355,30 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
     }
 
     /**
-     * 等待提示文字：屏幕面居中单行——组内解析进度聚合（ResolveHint），本端参与该屏且无人上报时
-     * 兜底「正在解析视频源…」。行高按屏幕面高度固定占比，超宽文案按宽度收缩不溢出屏幕面。
+     * 等待提示文字：屏幕面居中最多两行——第一行本端起播阶段（在等什么＋已等多久＋量化细节），
+     * 第二行组内进度（已出画/加载中/失败；本端参与该屏且无人上报时兜底「正在解析视频源…」）。
+     * 行高按屏幕面高度固定占比，超宽文案按宽度收缩不溢出屏幕面。
      * 坐标系处理与弹幕层一致：scale 后 Z180 真旋转对消视频面的 XY 双反坐标系。
      */
     private static void drawWaitingHint(SubmitNodeCollector collector, PoseStack poseStack,
-                                        float halfW, float halfH, String resolveStates) {
-        var text = me.zuogeren.kazumiplayer.client.ResolveHint.line(
+                                        float halfW, float halfH, String resolveStates,
+                                        net.minecraft.core.BlockPos pos) {
+        var phase = me.zuogeren.kazumiplayer.client.ResolveHint.phaseLine(
+            me.zuogeren.kazumiplayer.client.ScreenPlayerManager.peek(pos), pos);
+        var group = me.zuogeren.kazumiplayer.client.ResolveHint.line(
             me.zuogeren.kazumiplayer.client.ResolveHint.ofStates(resolveStates));
+        if (phase != null) {
+            drawHintLine(collector, poseStack, halfW, halfH, phase, group != null ? -1.5f : 3.5f);
+        }
+        if (group != null) {
+            drawHintLine(collector, poseStack, halfW, halfH, group, phase != null ? 8.5f : 3.5f);
+        }
+    }
+
+    /** 单行等待提示：按屏幕面宽度收缩后绘制在给定纵向偏移处 */
+    private static void drawHintLine(SubmitNodeCollector collector, PoseStack poseStack,
+                                     float halfW, float halfH, net.minecraft.network.chat.Component text,
+                                     float yOffset) {
         var font = Minecraft.getInstance().font;
         float scale = Math.max(0.12f, halfH * 2 * 0.14f) / 9.0f;
         float maxWPx = (halfW * 2 * 0.92f) / scale;
@@ -371,7 +387,7 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
         poseStack.pushPose();
         poseStack.scale(scale, scale, scale);
         poseStack.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(180.0F));
-        collector.submitText(poseStack, -tw / 2.0f, 3.5f, text.getVisualOrderText(),
+        collector.submitText(poseStack, -tw / 2.0f, yOffset, text.getVisualOrderText(),
             false, net.minecraft.client.gui.Font.DisplayMode.POLYGON_OFFSET,
             LightCoordsUtil.FULL_BRIGHT, 0xFFFFFFFF, 0, 0);
         poseStack.popPose();
