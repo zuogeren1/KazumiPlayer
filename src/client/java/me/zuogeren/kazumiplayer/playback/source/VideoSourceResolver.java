@@ -281,11 +281,15 @@ public final class VideoSourceResolver {
             boolean vipTarget = target != null && target.vip();
             String want = qualityLabel(qualities, requested);
             String got = qualityLabel(qualities, currentQn);
+            // 未生效原因按解析来源分流：服务端代理解析用的是服务端配置的账号（玩家侧改不了），
+            // 只有本端回落才是本机账号——两种情形都不能笼统归因成"需要更高的账号权限"
+            String reasonKey = vipTarget ? "kazumiplayer.msg.bili_quality_vip_required"
+                : ("server".equals(origin) ? "kazumiplayer.msg.bili_quality_fallback_server"
+                    : "kazumiplayer.msg.bili_quality_fallback_local");
             Minecraft.getInstance().execute(() -> KazumiClientMessages.chatWarn(
-                net.minecraft.network.chat.Component.translatable(vipTarget
-                    ? "kazumiplayer.msg.bili_quality_vip_required"
-                    : "kazumiplayer.msg.bili_quality_fallback", want, got).getString()));
-            KazumiLog.sniff.warn("[source] requested quality {} not granted (vip={}), got {} ({})",
+                net.minecraft.network.chat.Component.translatable(reasonKey, want, got).getString()));
+            KazumiLog.sniff.warn("[source] requested quality {} not granted (vip={}), got {} ({});"
+                    + " server-proxied resolves use the server-side credential (kazumiplayer-common.toml)",
                 requested, vipTarget, currentQn, origin);
         }
         String playUri = mediaUriOf(url, audioUrl, pending.live());
