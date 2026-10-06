@@ -1,5 +1,6 @@
 package me.zuogeren.kazumiplayer.bilibili;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -56,6 +57,74 @@ final class BilibiliDanmakuCodec {
             if (entry != null) entries.add(entry);
         }
         return entries;
+    }
+
+    /**
+     * 老弹幕文件解析（{@code <d p="出现秒,模式,字号,颜色,发送时刻,弹幕池,midHash,dmid,权重">文本</d>}）。
+     * 时间字段是秒（5 位小数）换算成毫秒；弹幕池 2 与 protobuf 分段同规则过滤；dmid 与分段的
+     * idStr 同源，可直接作为跨通道去重键。文本只做五个实体的反转义。
+     */
+    static List<RawEntry> parseLegacyXml(byte[] bytes) {
+        String xml = new String(bytes, StandardCharsets.UTF_8);
+        List<RawEntry> entries = new ArrayList<>();
+        int cursor = 0;
+        while (true) {
+            int open = xml.indexOf("<d p=\"", cursor);
+            if (open < 0) break;
+            int attrStart = open + 6;
+            int attrEnd = xml.indexOf('"', attrStart);
+            if (attrEnd < 0) break;
+            int textStart = xml.indexOf('>', attrEnd);
+            if (textStart < 0) break;
+            int textEnd = xml.indexOf("</d>", textStart);
+            if (textEnd < 0) break;
+            cursor = textEnd + 4;
+            RawEntry entry = parseLegacyRow(xml.substring(attrStart, attrEnd),
+                xml.substring(textStart + 1, textEnd));
+            if (entry != null) entries.add(entry);
+        }
+        return entries;
+    }
+
+    private static RawEntry parseLegacyRow(String attrs, String rawText) {
+        String[] parts = attrs.split(",");
+        if (parts.length < 8) return null;
+        if (intOf(parts[5], 0) == POOL_SPECIAL) return null;
+        String text = unescapeXml(rawText);
+        if (text.isBlank()) return null;
+        long timeMs = millisOf(parts[0]);
+        String id = parts[7].trim();
+        String key = id.isEmpty() ? "xml:" + timeMs + ":" + text.hashCode() : id;
+        BilibiliDanmaku danmaku = new BilibiliDanmaku(text, timeMs, BilibiliDanmaku.modeOf(intOf(parts[1], 0)),
+            intOf(parts[3], 0xFFFFFF) & 0xFFFFFF, BilibiliDanmaku.fontSizePercentOf(intOf(parts[2], 0)));
+        return new RawEntry(key, danmaku);
+    }
+
+    /** 只处理弹幕文件实际使用的五个实体；{@code &amp;} 必须最后替换 */
+    private static String unescapeXml(String text) {
+        if (text.indexOf('&') < 0) return text;
+        return text.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&#39;", "'")
+            .replace("&amp;", "&");
+    }
+
+    private static int intOf(String value, int fallback) {
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static long millisOf(String seconds) {
+        try {
+            return Math.round(Double.parseDouble(seconds.trim()) * 1000d);
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
     }
 
     private static RawEntry parseElem(BilibiliProtobuf reader) {

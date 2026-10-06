@@ -93,7 +93,7 @@ public final class BilibiliDanmakuService {
         long fetchId = fetchSeq.incrementAndGet();
         attachments.put(pos, new VideoAttachment(cid, fetchId, STAGE_LOADING));
         String cookie = BilibiliCredentials.get();
-        // 凭据状态只记匿名/已登录（匿名只能拿高权重子集），不打印凭据值
+        // 凭据状态只记匿名/已登录（匿名的 protobuf 分段只回高权重子集，取数侧会再合并老弹幕文件补量），不打印凭据值
         KazumiLog.danmaku.debug("Video danmaku attach at {} (cid={}, credentials={})",
             pos, cid, cookie.isEmpty() ? "anonymous" : "logged-in");
 

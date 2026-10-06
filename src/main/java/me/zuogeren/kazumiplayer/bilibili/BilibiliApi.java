@@ -45,6 +45,7 @@ public final class BilibiliApi {
             "https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room";
     private static final String DM_VIEW_API = "https://api.bilibili.com/x/v2/dm/web/view";
     private static final String DM_SEG_API = "https://api.bilibili.com/x/v2/dm/web/seg.so";
+    private static final String DM_XML_API = "https://comment.bilibili.com/";
     private static final String LIVE_DANMU_INFO_API =
             "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo";
     private static final String REFERER = "https://www.bilibili.com";
@@ -493,28 +494,73 @@ public final class BilibiliApi {
      * （窗口内并发 {@link #DM_SEGMENT_WINDOW} 个请求，整窗无数据即认为已到末尾——越界分段返回 304）。
      * 响应按 Content-Encoding 解包后手写 protobuf 解析，按弹幕 id 去重、过滤特殊弹幕池、
      * 按出现时间升序返回。任何失败都只记 DEBUG 日志并返回已取到的部分（空列表），不抛给调用方。
+     *
+     * <p>匿名时额外合并老弹幕文件：protobuf 分段对匿名只回高权重子集（实测同一分 P 匿名 3772 条
+     * vs 带凭据 9100 条），而 {@code comment.bilibili.com/<cid>.xml} 不看登录态——实测匿名与带凭据
+     * 的响应逐字节相同，两个池按 dmid 去重后并集 7781 条，接近带凭据的量级。带凭据时不请求该文件：
+     * 实测其内容基本被登录态的分段结果包含（新视频超出 10 条以内）。
      */
     public static CompletableFuture<List<BilibiliDanmaku>> fetchVideoDanmaku(long cid, String cookie) {
         if (cid <= 0) {
             KazumiLog.danmaku.debug("[bilibili] video danmaku skipped: invalid cid {}", cid);
             return CompletableFuture.completedFuture(List.of());
         }
-        if (cookie == null || cookie.isBlank()) {
+        boolean anonymous = cookie == null || cookie.isBlank();
+        if (anonymous) {
             KazumiLog.danmaku.debug("[bilibili] video danmaku cid={} anonymous: only high-weight subset available", cid);
         }
         Map<String, String> headers = apiHeaders(REFERER, cookie);
         Map<String, BilibiliDanmaku> byId = new LinkedHashMap<>();
+        CompletableFuture<List<BilibiliDanmakuCodec.RawEntry>> legacy = anonymous
+            ? fetchLegacyDanmaku(cid, headers)
+            : CompletableFuture.completedFuture(List.of());
         return fetchDmSegmentCap(cid, headers)
             .thenCompose(cap -> fetchSegmentWindow(cid, headers, cap, 1, byId, 0, 0))
             .handle((ignored, error) -> {
                 if (error != null) {
                     KazumiLog.danmaku.debug("[bilibili] video danmaku aborted cid={}: {}", cid, describe(error));
                 }
+                return null;
+            })
+            .thenCompose(ignored -> legacy)
+            .handle((entries, error) -> {
+                if (error != null) {
+                    KazumiLog.danmaku.debug("[bilibili] legacy danmaku aborted cid={}: {}", cid, describe(error));
+                } else {
+                    for (BilibiliDanmakuCodec.RawEntry entry : entries) {
+                        byId.putIfAbsent(entry.id(), entry.danmaku());
+                    }
+                }
                 List<BilibiliDanmaku> list = new ArrayList<>(byId.values());
                 list.sort(Comparator.comparingLong(BilibiliDanmaku::timeMs));
                 KazumiLog.danmaku.debug("[bilibili] video danmaku cid={} -> {} entries", cid, list.size());
                 return list;
             });
+    }
+
+    /**
+     * 老弹幕文件（{@code comment.bilibili.com/<cid>.xml}）：不看登录态，与 protobuf 分段是两个
+     * 部分重叠的池；响应是裸 deflate（{@link BilibiliHttp} 按 Content-Encoding 解包）。
+     */
+    private static CompletableFuture<List<BilibiliDanmakuCodec.RawEntry>> fetchLegacyDanmaku(
+            long cid, Map<String, String> headers) {
+        String url = DM_XML_API + cid + ".xml";
+        return BilibiliHttp.get(url, headers, DM_HTTP_TIMEOUT_MS).handle((response, error) -> {
+            if (error != null || response == null || !response.ok()) {
+                KazumiLog.danmaku.debug("[bilibili] legacy danmaku unavailable cid={}: {}", cid,
+                    error != null ? describe(error) : "HTTP " + (response == null ? 0 : response.status()));
+                return List.of();
+            }
+            try {
+                List<BilibiliDanmakuCodec.RawEntry> entries = BilibiliDanmakuCodec.parseLegacyXml(response.body());
+                KazumiLog.danmaku.debug("[bilibili] legacy danmaku cid={} -> {} bytes, {} entries",
+                    cid, response.body().length, entries.size());
+                return entries;
+            } catch (RuntimeException e) {
+                KazumiLog.danmaku.debug("[bilibili] legacy danmaku parse failed cid={}: {}", cid, e.getMessage());
+                return List.of();
+            }
+        });
     }
 
     /**
