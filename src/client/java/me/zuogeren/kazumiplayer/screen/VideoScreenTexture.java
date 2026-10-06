@@ -33,6 +33,7 @@ public class VideoScreenTexture implements AutoCloseable {
     private boolean registered;
     private boolean hasValidFrame;
     private WaterMediaPlayer boundPlayer; // 上次写入帧的播放器实例，用于识别换片
+    private boolean glErrorLogged; // GL 读回异常只报一次，避免每帧刷日志
 
     public VideoScreenTexture(String uniqueKey) {
         this.textureId = Identifier.fromNamespaceAndPath(KazumiPlayer.MODID, PREFIX + uniqueKey);
@@ -94,6 +95,16 @@ public class VideoScreenTexture implements AutoCloseable {
         if (img == null) return false;
 
         try {
+            // 像素打包状态必须自持：glGetTexImage 的落点是我们自己的 NativeImage 缓冲区，行距由
+            // GL_PACK_ROW_LENGTH 等客户端状态决定。MC 的截图/纹理下载（GlCommandEncoder.copyTextureToBuffer）
+            // 会把 GL_PACK_ROW_LENGTH 设为帧缓冲宽度且读完不复位——残留时驱动按 height×行距×4 写入，
+            // 远超本缓冲区容量，直接表现为驱动内访问违例（nvoglv64 EXCEPTION_ACCESS_VIOLATION）。
+            // 读完复位为 GL 默认值，不给同上下文的其它读回（含截图自身）留非默认状态。
+            GL11.glPixelStorei(GL11.GL_PACK_ROW_LENGTH, 0);
+            GL11.glPixelStorei(GL11.GL_PACK_SKIP_ROWS, 0);
+            GL11.glPixelStorei(GL11.GL_PACK_SKIP_PIXELS, 0);
+            GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
+
             // 保存当前纹理绑定，随后恢复
             int prevTex = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, (int) texId);
@@ -105,6 +116,15 @@ public class VideoScreenTexture implements AutoCloseable {
             GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
 
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, prevTex);
+            GL11.glPixelStorei(GL11.GL_PACK_ROW_LENGTH, 0);
+            GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 4);
+
+            int glError = GL11.glGetError();
+            if (glError != 0 && !glErrorLogged) {
+                glErrorLogged = true;
+                KazumiLog.render.warn("Video frame readback reported GL error {} at {}x{}",
+                    glError, img.getWidth(), img.getHeight());
+            }
 
             dt.upload();
             hasValidFrame = true;

@@ -56,7 +56,7 @@ B6 多人误触观感风险｜B9 规则/线路数量通常不多｜B11 失败有
 
 ## 功能增强
 
-- [ ] **渲染性能优化**: 多屏幕同时播放时帧率优化
+- [ ] **渲染性能优化**: 多屏幕同时播放时帧率优化——每屏每帧一次全量 GPU→CPU→GPU 往返（`VideoScreenTexture.updateFrame`：`glGetTexImage` 读回 `NativeImage` 再 `DynamicTexture.upload`，1080p 即 8 MB×2），且读回会强制同步等待 GPU，是最大成本项；免读回需要把 WaterMedia 的 GL 纹理包成 blaze3d `GpuTexture`（26.1 未暴露"接管既有纹理 id"的入口，需评估）
 
 ## BUG
 
