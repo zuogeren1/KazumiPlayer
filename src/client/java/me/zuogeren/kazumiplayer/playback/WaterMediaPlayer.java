@@ -244,7 +244,13 @@ public class WaterMediaPlayer {
         float vol = Minecraft.getInstance().options.getSoundSourceVolume(
             net.minecraft.sounds.SoundSource.RECORDS);
         float configured = me.zuogeren.kazumiplayer.ClientConfig.CONFIG.videoVolume.get().floatValue();
-        player.volume((int) (vol * configured * extraScale * 100));
+        try {
+            player.volume((int) (vol * configured * extraScale * 100));
+        } catch (Throwable t) {
+            // volume 走 ALEngine.gain() → requireContext()：MC 关闭期 OpenAL 上下文已销毁会抛 wm_err:1004，
+            // 此时音量已无意义，吞掉即可（否则每帧刷一条 WARN）
+            KazumiLog.playback.debug("Volume apply skipped: {}", String.valueOf(t.getMessage()));
+        }
     }
 
     public boolean isPlaying() {
@@ -327,6 +333,9 @@ public class WaterMediaPlayer {
         final MediaPlayer dying = player;
         player = null; // 先摘引用：主线程不再等待 FFmpeg
         if (dying != null) {
+            // 立即静音必须在调用线程做（不能挪进后台）：STOP_EXECUTOR 是单线程，CACHE 模式下前一个
+            // release() 可能阻塞数十秒，音频会一直响到它跑完。mute 走 ALEngine.gain() → requireContext()，
+            // 非主线程或 MC 关闭期会抛 wm_err:1004，故吞掉（此时静音已无意义）
             try {
                 dying.mute(true); // 释放期间不得残留声音
             } catch (Throwable ignored) {}
@@ -338,12 +347,18 @@ public class WaterMediaPlayer {
                 try {
                     dying.stop();
                 } catch (Throwable t) {
-                    KazumiLog.playback.warn("Failed to stop media player cleanly: {}", t.getMessage());
+                    KazumiLog.playback.debug("Media player stop skipped: {}", String.valueOf(t.getMessage()));
                 }
                 try {
                     dying.release();
                 } catch (Throwable t) {
-                    KazumiLog.playback.warn("Failed to release media player: {}", t.getMessage());
+                    // 唯一实测触发场景是 MC 关闭：SoundEngine.destroy() → Library.cleanup() → alcDestroyContext
+                    // 已销毁 OpenAL 上下文，而 ALEngine.destroy() 首行就 requireContext() → wm_err:1004。
+                    // 此时 SFXEngine.release 因 source != 0 把 released 回滚为 false（引擎仍持原生资源），
+                    // 但进程即将退出、上下文已不存在，重试与清理都无意义——只记 DEBUG，不刷 WARN。
+                    // 正常运行期不会命中：MC 的 OpenAL 上下文是进程级全局的（alcMakeContextCurrent 一次，
+                    // 不用 ALC_EXT_thread_local_context），后台线程同样能拿到。
+                    KazumiLog.playback.debug("Media player release skipped: {}", String.valueOf(t.getMessage()));
                 }
                 KazumiLog.playback.debug("Media player released in background");
             });

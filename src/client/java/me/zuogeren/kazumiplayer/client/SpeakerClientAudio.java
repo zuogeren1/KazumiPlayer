@@ -60,9 +60,12 @@ public class SpeakerClientAudio implements PlayStateListener {
     private void clientTick(SpeakerBlockEntity speaker) {
         // 检查屏幕 BE 是否存在（双向判断：存在→取消静音，不存在→静音）
         VideoScreenBlockEntity screen = speaker.getLinkedScreen();
-        // getPlayer() 在 MRL 装载完成前为 null（异步加载），此处必须判空
+        // getPlayer() 在 MRL 装载完成前为 null（异步加载），此处必须判空；
+        // mute 走 ALEngine.gain() → requireContext()，MC 关闭期上下文已销毁会抛 wm_err:1004，故吞掉
         if (audioPlayer != null && audioPlayer.getPlayer() != null) {
-            audioPlayer.getPlayer().mute(screen == null);
+            try {
+                audioPlayer.getPlayer().mute(screen == null);
+            } catch (Throwable ignored) {}
         }
         if (screen == null) {
             // 屏幕已不存在：停止音频（声音无法继续跟随）
