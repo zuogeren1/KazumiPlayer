@@ -7,9 +7,9 @@ import me.zuogeren.kazumiplayer.client.ClientDisconnectHandler;
 
 import me.zuogeren.kazumiplayer.client.PlayStateListener;
 import net.minecraft.client.Minecraft;
-import org.watermedia.api.media.MRL;
-import org.watermedia.api.media.MediaAPI;
-import org.watermedia.api.media.players.MediaPlayer;
+import org.watermedia.api.player.MRL;
+import org.watermedia.api.player.MediaPlayer;
+import org.watermedia.api.player.PlayerAPI;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -127,7 +127,7 @@ public class WaterMediaPlayer {
             for (int retry = 0; retry < 30; retry++) {
                 if (closed) return; // 加载期间被 stop：放弃起播（防孤儿播放器）
                 loaderPolls++;
-                MRL mrl = MediaAPI.mrl(url);
+                MRL mrl = PlayerAPI.mrl(url);
                 if (mrl.source(0) != null) {
                     mc.execute(() -> {
                         if (closed) return; // 与 stop 同在主线程排队，此处检查无竞态
@@ -175,14 +175,16 @@ public class WaterMediaPlayer {
     }
 
     private void createAndStart(MRL mrl, Minecraft mc) {
+        MediaPlayer created = null;
         try {
             KazumiLog.playback.debug("createAndStart creating player");
-            // v3 API: 使用 ALEngine (OpenAL) 替代 JSEngine (JavaSound) 以获得空间音频
-            player = MediaAPI.createPlayer(mrl,
-                () -> MediaAPI.glEngine(Thread.currentThread(), mc),
-                () -> MediaAPI.alEngine());
-            if (player == null) {
-                KazumiLog.playback.error("Failed to create player for: {}", mrl.uri);
+            // v3 API: 使用 ALEngine (OpenAL) 替代 JSEngine (JavaSound) 以获得空间音频。
+            // 引擎必须以 supplier 形式传入且不得跨播放器共享——每次起播各自新建，由播放器持有并随 release() 释放
+            created = PlayerAPI.player(mrl,
+                () -> PlayerAPI.glEngine(Thread.currentThread(), mc),
+                () -> PlayerAPI.alEngine());
+            if (created == null) {
+                KazumiLog.playback.error("Failed to create player for: {}", mrl.uri());
                 failureDetail = "player creation returned null";
                 mc.execute(() -> KazumiClientMessages.chatError(
                     net.minecraft.network.chat.Component
@@ -190,7 +192,18 @@ public class WaterMediaPlayer {
                 firePlayFailure();
                 return;
             }
-            player.start();
+            // start() 返回 boolean：被拒绝（已释放/无法执行）时必须当作起播失败，否则会静默停在无画面状态
+            if (!created.start()) {
+                KazumiLog.playback.error("Player refused to start: {}", mrl.uri());
+                failureDetail = "player refused to start";
+                releaseQuietly(created);
+                mc.execute(() -> KazumiClientMessages.chatError(
+                    net.minecraft.network.chat.Component
+                        .translatable("kazumiplayer.msg.playback_create_failed").getString()));
+                firePlayFailure();
+                return;
+            }
+            player = created;
             if (silentStart) {
                 player.volume(0); // 预热期静音：不得与仍在出画的旧播放器同时出声
             } else {
@@ -202,7 +215,18 @@ public class WaterMediaPlayer {
         } catch (Exception e) {
             KazumiLog.playback.error("Playback failed: {}", e.getMessage());
             failureDetail = String.valueOf(e.getMessage());
+            // 构造/起播抛异常时引擎可能已创建：必须释放，否则原生资源泄漏
+            if (created != null && created != player) releaseQuietly(created);
             firePlayFailure();
+        }
+    }
+
+    /** 释放一个尚未登记为当前播放器的实例（起播被拒/构造异常路径）：异常只记日志，不打断失败上报 */
+    private static void releaseQuietly(MediaPlayer dying) {
+        try {
+            dying.release();
+        } catch (Throwable t) {
+            KazumiLog.playback.warn("Failed to release rejected media player: {}", String.valueOf(t.getMessage()));
         }
     }
 
@@ -253,28 +277,38 @@ public class WaterMediaPlayer {
         return player != null ? player.duration() : 0;
     }
 
+    /**
+     * 暂停。{@code pause()} 在已暂停/已结束/已停止/失败时返回 false（加载期则挂起到管线打开），
+     * 故只在真正生效时通知监听器——否则音响会跟着"暂停"一个仍在出声的屏幕。
+     */
     public void pause() {
-        if (player != null) {
-            player.pause();
-            for (var l : listeners) l.onPause();
-        } else {
+        if (player == null) {
             pendingPause = true;
+            return;
+        }
+        if (player.pause()) {
+            for (var l : listeners) l.onPause();
         }
     }
 
+    /** 恢复播放；{@code resume()} 仅在暂停态返回 true，其余情形不通知监听器 */
     public void resume() {
-        if (player != null) {
-            player.resume();
-            for (var l : listeners) l.onResume();
-        } else {
+        if (player == null) {
             pendingPause = false;
+            return;
+        }
+        if (player.resume()) {
+            for (var l : listeners) l.onResume();
         }
     }
 
+    /**
+     * 跳转。{@code seek()} 在源未打开/直播/已释放时返回 false——此时不能当作已生效，
+     * 否则同步锚点会以为位置已对齐而不再重试；转存为待应用 seek 交给 tick 重试。
+     */
     public void seek(long ms) {
         lastSeekMs = System.currentTimeMillis();
-        if (player != null && player.playing()) {
-            player.seek(ms);
+        if (player != null && player.playing() && player.seek(ms)) {
             for (var l : listeners) l.onSeek(ms);
         } else {
             pendingSeekMs = ms;
@@ -331,7 +365,8 @@ public class WaterMediaPlayer {
             // 播放器已自然播放到目标附近（如缓冲期间时间推进）→ 跳过重复 seek，避免打断
             if (Math.abs(now - pendingSeekMs) > 500) {
                 lastSeekMs = System.currentTimeMillis();
-                player.seek(pendingSeekMs);
+                // seek 被拒（源未打开/直播/已释放）时保留意图，下一 tick 再试——否则同步锚点会永久错位
+                if (!player.seek(pendingSeekMs)) return;
                 KazumiLog.playback.info("Delayed seek: {}ms (time={})", pendingSeekMs, now);
             }
             pendingSeekMs = -1;

@@ -60,7 +60,8 @@ public class SpeakerClientAudio implements PlayStateListener {
     private void clientTick(SpeakerBlockEntity speaker) {
         // 检查屏幕 BE 是否存在（双向判断：存在→取消静音，不存在→静音）
         VideoScreenBlockEntity screen = speaker.getLinkedScreen();
-        if (audioPlayer != null) {
+        // getPlayer() 在 MRL 装载完成前为 null（异步加载），此处必须判空
+        if (audioPlayer != null && audioPlayer.getPlayer() != null) {
             audioPlayer.getPlayer().mute(screen == null);
         }
         if (screen == null) {

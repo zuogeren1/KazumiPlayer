@@ -123,13 +123,19 @@ public class KazumiPlayerClient {
     private static final long PROBE_ANALYZE_MS = 2000L;
     private static final int PROBE_SIZE_MB = 2;
 
+    /**
+     * CACHE 档位下单条网络响应的缓存上限（MB）：B 站 720P 长视频约 116MB、DASH m4s 约 49MB，
+     * 默认 10MB 会让它们全部走 bypass（实测 bypass 路径下大文件卡在 Starvation 无法起播）。
+     */
+    private static final int CACHE_MAX_RESPONSE_MB = 512;
+
     /** 直播播放器在屏：由调度器每秒对账 + 解析发起时即时置位 */
     private static volatile boolean liveStreamActive;
 
     public static void applyWaterMediaStreamMode() {
         try {
-            var ffmpeg = org.watermedia.WaterMediaConfig.media.ffmpeg;
-            // 直播强制流式：FFMediaPlayer#shouldUseFFmpegCache 只放过 .m3u8/.mpd，FLV 直播（无限流）
+            var ffmpeg = org.watermedia.WaterMediaConfig.codecs.ffmpeg;
+            // 直播强制流式：FFMediaPlayer 的缓存回调只放过 .m3u8/.mpd，FLV 直播（无限流）
             // 一旦走磁盘缓存就变成「先下完整文件再解码」＝永远起播不了
             boolean cache = ClientConfig.CONFIG.videoCacheMode.get() == ClientConfig.VideoCacheMode.CACHE
                 && !liveStreamActive;
@@ -137,12 +143,12 @@ public class KazumiPlayerClient {
             ffmpeg.analyzeDuration = PROBE_ANALYZE_MS;
             ffmpeg.probeSize = PROBE_SIZE_MB;
             if (cache) {
-                int target = 512 * 1024 * 1024;
-                if (ffmpeg.cacheMaxSize < target) ffmpeg.cacheMaxSize = target;
+                // 单响应上限（MB）：B 站 720P 长视频约 116MB，默认 10MB 会直接走 bypass
+                if (ffmpeg.cacheMaxResponse < CACHE_MAX_RESPONSE_MB) ffmpeg.cacheMaxResponse = CACHE_MAX_RESPONSE_MB;
             }
             KazumiLog.playback.info(
-                "WaterMedia stream mode={} (ffmpeg.cache={}, cacheMaxSize={}MB, analyze={}ms, probe={}MB, liveActive={})",
-                ClientConfig.CONFIG.videoCacheMode.get(), ffmpeg.cache, ffmpeg.cacheMaxSize / (1024 * 1024),
+                "WaterMedia stream mode={} (ffmpeg.cache={}, cacheMaxResponse={}MB, analyze={}ms, probe={}MB, liveActive={})",
+                ClientConfig.CONFIG.videoCacheMode.get(), ffmpeg.cache, ffmpeg.cacheMaxResponse,
                 ffmpeg.analyzeDuration, ffmpeg.probeSize, liveStreamActive);
         } catch (Throwable t) {
             KazumiLog.playback.warn("Apply WaterMedia stream mode failed: {}", String.valueOf(t.getMessage()));

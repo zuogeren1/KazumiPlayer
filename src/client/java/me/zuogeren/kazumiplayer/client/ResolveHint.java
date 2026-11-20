@@ -154,7 +154,7 @@ public final class ResolveHint {
         if (player != null) {
             var media = player.getPlayer();
             if (media != null) {
-                parts.add(Component.translatable(media.liveSource()
+                parts.add(Component.translatable(media.live()
                     ? "kazumiplayer.gui.main.detail_live"
                     : "kazumiplayer.gui.main.detail_vod").getString());
                 long timeMs = player.getTimeMs();

@@ -67,7 +67,7 @@ WaterMedia (FFmpeg) 和 Rinku (Chromium) 实现多人同步观影。
 | 前置                                                                                                                                                                         | 用途                |
 |----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------|
 | [Rinku](https://modrinth.com/mod/rinku) 3.0.4（原 MCEF，作者改名）                                                                                                                 | Chromium 视频嗅探     |
-| [WaterMedia](https://modrinth.com/mod/watermedia/version/3.0.0.23) 3.0.0.23（[含 WaterMedia Binaries](https://modrinth.com/mod/watermedia-binaries/version/3.0.0.6) 3.0.0.6） | FFmpeg 解码 + GL 纹理 |
+| [WaterMedia](https://modrinth.com/mod/watermedia/version/3.0.2) 3.0.2（[含 WaterMedia Binaries](https://modrinth.com/mod/watermedia-binaries/version/3.0.2) 3.0.2） | FFmpeg 解码 + GL 纹理 |
 | Cloth Config 26.1.154（可选）                                                                                                                                                  | 游戏内配置界面，不装不影响功能   |
 
 ## 配置
@@ -165,7 +165,7 @@ WaterMedia (FFmpeg) 和 Rinku (Chromium) 实现多人同步观影。
 ```
 
 **服务端**安装 `kazumiplayer-server-0.1-alpha.jar`（无需 MCEF/WaterMedia 前置）；
-**客户端**安装 `kazumiplayer-client-0.1-alpha.jar`（需 Rinku 3.0.4 + WaterMedia 3.0.0.23 前置，WaterMedia 低于 3.0.0.23
+**客户端**安装 `kazumiplayer-client-0.1-alpha.jar`（需 Rinku 3.0.4 + WaterMedia 3.0.2 前置，WaterMedia 低于 3.0.2
 会因二进制不兼容在起播时报错）。
 
 ## 免责声明

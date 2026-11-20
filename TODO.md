@@ -14,12 +14,15 @@
 - [ ] **UA 诊断：JS 侧 UA 的 Chrome 记号被换成了 `Rinku/2`**【S】: `CefUtil.java:136-142` 在无自定义 UA 时设 `user_agent_product = "Rinku/2"`，而按 `CefSettings.java:159-165` 该字段**替换 UA 的产品记号**（即 `Chrome/151.x` 的位置）→ `navigator.userAgent` 缺 Chrome 版本号，站点播放器却常靠 UA 判浏览器能力；同时我们在资源层把 HTTP 头改写成 `UserAgents` 池的随机 Chrome UA（`RinkuSniffBrowser.java:232-237`）→ 两侧不一致且可被侦测。先加一行诊断（注入一段打印 `navigator.userAgent` 的脚本，走已有 `KAZUMI_LOG:` console 桥）确认实际值；确认后再定是否在 Rinku 初始化前 `Rinku.getSettings().setUserAgent(...)`（代价：写 Rinku 全局配置、需重启游戏、影响其他用 Rinku 的 mod、且不能再每实例随机 UA）。
 - [ ] **`setWindowVisibility(false)` 省电实测**【S-M】: 注释明说 windowless 浏览器隐藏后**停止渲染与 paint 回调**（`org/cef/browser/CefBrowser.java:432-438`），配合静音通常还能让 Chromium 挂起后台视频解码 → 收益最大。风险：页面 visibility 转 hidden 会节流站点自身定时器（hls.js 类分片加载可能变慢）。做法：加开关，实测命中率与解析耗时后再定默认值。
 
-### WaterMedia 3.0.0.23：影响评估（对照 3.0.0.22 反编译签名逐项核过）
+### WaterMedia 3.0.2：影响评估（2026-11-21 升级，对照 3.0.0.23 反编译签名逐项核过）
 
-现状（2026-10-06 已升级）：`build.gradle` 钉 **API `FdCZ5Rxq`（= 3.0.0.23）** + **binaries `fYWsOuBz`（= 3.0.0.6）**，两者互为 required 依赖且同支持 MC 26.1.2。升级动因：`start()`/`startPaused()` 由 `void` 改 `boolean` 属二进制不兼容（编译于 .22 的字节码在 .23 上会 `NoSuchMethodError`）；binaries 3.0.0.6 的 changelog 为「Fixed jar crashes the game asking for multirelease folder」。
+现状：`build.gradle` 钉 **API `maven.modrinth:G922NeHS:3.0.2`** + **binaries `maven.modrinth:4997XcoK:3.0.2`**，两者互为 required 依赖（binaries 3.0.2 要求 API `[3.0.1],[3.0.2,3.1)`）。升级动因：旧钉版 `FdCZ5Rxq`（3.0.0.23）与 `fYWsOuBz`（binaries 3.0.0.6）**已从 Modrinth Maven 下架**（404，CDN 文件仍在但 Maven 端点没了）→ 构建直接失败；且 3.0.1 起 API 包结构大改，**不是 Z 级兼容升级**（wiki 的「Z 升级绝不破坏」承诺与实际字节码不符）。完整破坏性变更清单见 `CLAUDE.md`「WaterMedia v3 关键」；参考源码 `reference/watermedia-src/302`、官方中文 wiki `reference/watermedia-wiki/zh-CN`。
 
-- [ ] **顺手：用上 `start()` 的返回值**【S】: 预热播放器起播失败时可记日志/回退（现在忽略返回值）。
-- [ ] **机会（暂缓，需单独立项）：用内置同步子系统替换自研同步层**【L】: .23 把联机同步做进了 `MediaPlayer`——`sync.Bridge`（单方法 `send(ByteBuffer)`，可承载任意字节通道，能挂在我们现有包上）、`Config.Capability`（LOCKSTEP / CONTROLS / VOLUME）、`role()/authority()/drift()/tolerance(ms)`、`ServerMediaPlayer`（权威：注册观众 + 变更广播 + 约 5s 心跳 + 处理控制请求 + 清理失联）、revision 单调计数与乱序丢弃、`syncDuration` 首胜、ENDED 态 seek 落 PAUSED。它与我们的 `SyncGroupManager` + `SyncStatePacket` + `ClientClockSync` + 漂移兜底属同一层能力，收益：①LOCKSTEP（有人缓冲时全体冻结、失败者忽略、中途加入不打断他人）正对我们「缓冲饥饿期反复戳播放器」「集间过渡」两个老痛点；②CONTROLS 让控制请求走上行、两侧 API 对称；③省掉自研协议与节流数学。风险：权威侧只有 `ServerMediaPlayer`（无真实媒体）与真实媒体播放器两类，与「每屏一个权威 + 每人本地播放器跟随」的映射需实测；**VOLUME 能力会覆盖我们每屏本端音量 → 不能启用**；`sync()` 解码发生在任意线程、内部 50ms ticker；还要与「线路/清晰度双播放器交接」「直链队列」重新对齐。结论：先记录，等其他批次稳定后再评估。
+- [x] **迁移到 3.0.2 API**【M】（2026-11-21 完成）: `MediaAPI`→`PlayerAPI`、`api.media.*`→`api.player.*`、`IPlatform`→`Platform`（`getData`→`resolve`，`PlatformData`→`Platform.Resolution`）、`DataSource`→`Platform.Source`、`DataQuality`→`Platform.Quality`、`Slave`→`Track`、`RequestHeaders`→`HttpHeaders`、`WaterMediaConfig.media.ffmpeg`→`codecs.ffmpeg`、`cacheMaxSize`→`cacheMaxResponse`、`liveSource()`→`live()`、`MRL.uri` 字段→`uri()`。同时按 wiki「AI 智能体」硬性要求补齐返回值检查：`start()` 被拒即当起播失败并释放引擎、`pause()/resume()/seek()` 被拒时不再误通知监听器（音响会跟着"暂停"一个仍在出声的屏幕）、`applyPendingSeek` 被拒时保留意图下 tick 重试（否则同步锚点永久错位）、构造/起播抛异常时释放已创建的引擎（防原生资源泄漏）、`SpeakerClientAudio` 补 `getPlayer()` 判空。产物校验：`gradlew clean build` BUILD SUCCESSFUL，jar 内 `mods.toml` 依赖范围已改 `[3.0.2,)`。
+- [ ] **机会（暂缓，需单独立项）：用内置同步子系统替换自研同步层**【L】: 3.0.2 把联机同步做进了 `MediaPlayer`——`sync(PlayerState)`/`sync(ByteBuffer)`（27 字节大端快照，可承载任意字节通道，能挂在我们现有包上）、`following()/authority()/authorityTime()/drift()/tolerance(ms)`、`PlayerAPI.serverPlayer()`（`ServerMediaPlayer` 权威时钟：`syncDuration`/`revision()`/`snapshot()`，无真实媒体）、revision 单调计数与乱序丢弃、ENDED 态 seek 落 PAUSED、跟随者每 50ms 校正（`seekQuick` 限频、加载/缓冲时跳过、重复播放走短路径）。它与我们的 `SyncGroupManager` + `SyncStatePacket` + `ClientClockSync` + 漂移兜底属同一层能力，收益：①跟随者自动校正省掉自研漂移数学；②控制请求走上行、两侧 API 对称；③快照格式固定 27 字节，比我们的 JSON 包更省。风险：权威侧只有 `ServerMediaPlayer`（无真实媒体）与真实媒体播放器两类，与「每屏一个权威 + 每人本地播放器跟随」的映射需实测；**音量/静音/缩放/空间音频恒为本地生效**（正好符合我们每屏独立音量，但 `sync` 的 VOLUME 能力若启用会覆盖 → 不启用）；`sync()` 解码发生在任意线程、内部 50ms ticker；还要与「线路/清晰度双播放器交接」「直链队列」重新对齐。结论：先记录，等其他批次稳定后再评估。
+- [ ] **站点白/黑名单（3.0.2 新增）**【S】: `WaterMediaConfig.player.whitelist`/`blacklist`（`enable`/`sites`/`trustLocal`），默认全关。我们自己的嗅探链路不走 WaterMedia 平台层，但**直链播放会经过** `MediaPlayer.checkSite`——若用户开了白名单而没把 B 站/CDN 域名列进去，直链会被判 `BLOCKED`。做法：评估是否需要在配置界面暴露这两个开关，或在文档里说明「开了白名单要自己加域名」。
+- [ ] **`NetworkAPI.serverEnabled()`（3.0.2 新增）**【S】: 文件服务器是否就绪的即时查询（本机立刻返回，远端等 `remoteUrl` 应答）。我们没用文件服务器，仅记录。
+- [ ] **错误码 `(wm_err:NNNN)`（3.0.2 新增）**【S】: 每条异常消息与错误日志都带 `WaterMedia.ERR_*` 常量码，官方 Upload Logs 会列出找到的码。做法：排查用户日志时按码定位比按文本快，可考虑在 `KazumiLog` 侧做一次提取。
 
 ## B 站解析健壮性（2026-10-06 生产日志核对后登记）
 
@@ -54,7 +57,7 @@ B6 多人误触观感风险｜B9 规则/线路数量通常不多｜B11 失败有
 
 ## 音响系统（⛔ 整体挂起——先决条件：前置 mod WaterMedia v3 完善 audio 能力（video/audio 独立开关）；就绪前不动此区）
 
-- [ ] **音响发声**: WaterMedia v3 当前 `MediaAPI.createPlayer(mrl, gfx, sfx)` 不支持 video/audio 独立开关。`SpeakerBlockEntity.startAudio()` 为占位
+- [ ] **音响发声**: WaterMedia v3 当前 `PlayerAPI.player(mrl, gfx, sfx)` 不支持 video/audio 独立开关（3.0.2 仍未提供；`MediaPlayer` 有 `video()`/`audio()` 只读查询与 `sinks()/addSink()` 多输出端，但引擎 supplier 决定一切）。`SpeakerBlockEntity.startAudio()` 为占位
 - [ ] **连接时屏幕静音**: 有音响连接时屏幕 `player.mute(true)`，断开最后一个音响后恢复
 - [ ] **漂移校正测试**: `SpeakerBlockEntity.clientTick()` 中的周期校正逻辑未经实测
 - [ ] **音响自定义纹理**: 当前用 `minecraft:block/note_block` 占位
