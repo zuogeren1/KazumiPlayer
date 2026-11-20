@@ -26,6 +26,8 @@
 
 ## B 站解析健壮性（2026-10-06 生产日志核对后登记）
 
+- [ ] **旧 `kazumiplayer-server.toml` 里的凭据只 WARN 不自动迁移**【S】: `KazumiPlayer.warnLegacyServerCookie()` 只打一条 WARN 提示「move it to kazumiplayer-common.toml」，不搬值。实测用户按提示手动搬时漏了 → 服务端代理一直匿名 → 视频只有 480P、直播恒 250（见 `DONE.md`「B 站清晰度与凭据优先级」）。做法：检测到旧文件有非空凭据且新键为空时，直接读出来写入 COMMON 配置并 `Config.SPEC.save()`，同时把旧键清空（旧文件本身已弃用，可再提示一次「已自动迁移」）。注意旧文件是 SERVER 类型残留，读取时不要走 `ModConfigSpec`（该 spec 已不注册），按文本解析即可（现有 `LEGACY_COOKIE` 正则已够）。
+
 - [ ] **未开播直播间把 JsonNull 当对象强转，异常名直接甩给用户**【S】: `BilibiliApi:430` 的 `data.has("playurl_info") ? data.getAsJsonObject("playurl_info")…` —— Gson 的 `has()` 对 JSON null 也返回 true，未开播/无流时返回 `"playurl_info": null` 即抛 `ClassCastException: com.google.gson.JsonNull cannot be cast to class com.google.gson.JsonObject`；`dataOf` 的 `root.getAsJsonObject("data")`（其后那句 `data == null` 检查永远走不到）与 `dash`/`wbi_img` 两处同写法。生产日志实测：房间 1921300321 未开播期间连续 10 次（17:59–18:10）服务端代理与本端回落双双抛同一 CCE，聊天栏显示整串 Java 异常名，且僵尸回收每 75 秒重试一次。做法：加 null 安全的取值器（缺字段与 JSON null 一律当缺席），未开播归为可读原因「直播间未开播或未返回播放流」。
 - [ ] **DASH 有效期减 10 分钟余量可能落到过去**【S】: `VideoSourceResolver.expiresAtOf` 返回 `deadline - 600`，若 CDN 给的 deadline 距现在不足 10 分钟就会早于当前时刻，而 `KazumiBiliPlatform.getData` 对「已过期」是**直接抛异常拒绝服务**（不是触发重新解析）→ 表现为「视频加载失败：Bili DASH link expired at …」。做法：扣完余量仍早于「现在 + 最小宽限」时按未知有效期处理（传 null，让 FFmpeg 自己撞 403 走既有失败路径），或改为发起一次重新解析。
 - [ ] **服务端代理解析在「请求者不在组里」时静默丢弃**【S】: `ServerPacketHandlers.handleBilibiliResolve` 的三查都在日志行之前，组校验失败即 return，客户端只能干等 20 秒超时才回落（dev 日志 01:07:27 实例：请求发出后服务端一行日志都没有）。做法：组校验失败记一条 WARN 并回一个明确失败，让客户端立刻走本端回落。

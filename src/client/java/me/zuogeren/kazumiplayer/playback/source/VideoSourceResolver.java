@@ -105,15 +105,14 @@ public final class VideoSourceResolver {
     }
 
     /**
-     * B 站链接起播：向服务端请求代理解析（凭据只留在服务端，一次解析全组可复用），
-     * 服务端失败/超时/未连接时用本地凭据回落自解析。短链先跟随重定向展开。
+     * B 站链接起播：按凭据来源选择解析通道（见 {@link #dispatchResolve}）。短链先跟随重定向展开。
      * 直播间置 bypassSync：直播无稳定时间轴，时钟同步与时间轴控制不适用。
      */
     private void resolveBilibili(VideoScreenBlockEntity screen, String episodeUrl,
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
         reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
         if (!BilibiliUrls.isShortLink(episodeUrl)) {
-            requestServerResolve(screen, episodeUrl, player, session, false, 0);
+            dispatchResolve(screen, episodeUrl, player, session, false, 0);
             return;
         }
         KazumiLog.sniff.info("[source] expanding bilibili short link: {}", episodeUrl);
@@ -123,13 +122,33 @@ public final class VideoSourceResolver {
                 // 展开回调晚于调度器登记，可继续走解析流程
                 Minecraft.getInstance().execute(() -> {
                     if (session.player != player || screen.isRemoved()) return;
-                    requestServerResolve(screen, finalUrl, player, session, false, 0);
+                    dispatchResolve(screen, finalUrl, player, session, false, 0);
                 });
             })
             .exceptionally(t -> {
                 failPlayback(screen, unwrap(t));
                 return null;
             });
+    }
+
+    /**
+     * 按凭据来源选择解析通道：
+     * <ul>
+     *   <li><b>本机已配置凭据</b> → 本端解析优先（档位按本机账号；服务端代理用的是服务端账号，
+     *       与本机账号权益无关，先走代理会让本机凭据形同未配置）；本端失败且在线时再回落服务端代理。</li>
+     *   <li><b>本机未配置</b> → 服务端代理优先（一次解析全组可复用），失败/超时/未连接再回落本端匿名解析。</li>
+     * </ul>
+     */
+    private void dispatchResolve(VideoScreenBlockEntity screen, String pageUrl,
+            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session,
+            boolean prewarm, long resumeMs) {
+        if (BilibiliCredentials.present()) {
+            PendingResolve pending = registerPending(screen, pageUrl, player, session, prewarm, resumeMs);
+            KazumiLog.sniff.info("[source] local bilibili resolve (local credential preferred)");
+            runLocalResolve(pending, true);
+            return;
+        }
+        requestServerResolve(screen, pageUrl, player, session, prewarm, resumeMs);
     }
 
     /**
@@ -171,11 +190,11 @@ public final class VideoSourceResolver {
             session.pendingPlayer = null;
         }
         BilibiliQualityPrefs.setPreferredQn(pos, qn);
-        requestServerResolve(screen, pageUrl, session.player, session, true, Math.max(0, resumeMs));
+        dispatchResolve(screen, pageUrl, session.player, session, true, Math.max(0, resumeMs));
     }
 
-    /** 发起服务端代理解析；直播链接在此置 bypassSync（早于起播生效） */
-    private void requestServerResolve(VideoScreenBlockEntity screen, String pageUrl,
+    /** 登记在途解析（每屏唯一：新请求顶替旧请求，迟到结果按 requestId 丢弃）；直播链接在此置 bypassSync */
+    private PendingResolve registerPending(VideoScreenBlockEntity screen, String pageUrl,
             WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session,
             boolean prewarm, long resumeMs) {
         net.minecraft.core.BlockPos pos = screen.getBlockPos();
@@ -186,18 +205,28 @@ public final class VideoSourceResolver {
             me.zuogeren.kazumiplayer.KazumiPlayerClient.setLiveStreamActive(true);
             KazumiLog.sniff.info("[source] bilibili live room, sync bypassed");
         }
-        int qn = BilibiliQualityPrefs.preferredQn(pos);
         long requestId = resolveSeq.incrementAndGet();
         PendingResolve pending = new PendingResolve(requestId, pageUrl, screen, player, session, live,
             prewarm, resumeMs);
         pendingResolves.put(pos.toString(), pending);
+        return pending;
+    }
+
+    /** 发起服务端代理解析（本机未配置凭据时的首选通道） */
+    private void requestServerResolve(VideoScreenBlockEntity screen, String pageUrl,
+            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session,
+            boolean prewarm, long resumeMs) {
+        net.minecraft.core.BlockPos pos = screen.getBlockPos();
+        PendingResolve pending = registerPending(screen, pageUrl, player, session, prewarm, resumeMs);
+        int qn = BilibiliQualityPrefs.preferredQn(pos);
+        long requestId = pending.requestId();
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.getConnection() == null) {
             pendingResolves.remove(pos.toString());
             if (prewarm) {
                 // 无缝切换不报错打断画面：直接转本端回落解析
-                fallbackLocalResolve(pending, "未连接服务端");
+                runLocalResolve(pending, false);
             } else {
                 failPlayback(screen, new IllegalStateException("未连接服务端"));
             }
@@ -207,14 +236,14 @@ public final class VideoSourceResolver {
             new me.zuogeren.kazumiplayer.network.packet.BilibiliResolveRequestPacket(
                 pos, screen.getScreenId(), requestId, pageUrl, qn)));
         KazumiLog.sniff.info("[source] server-side bilibili resolve requested: {} (qn={}, live={})",
-            pageUrl, qn, live);
+            pageUrl, qn, pending.live());
         RESOLVE_TIMEOUT.schedule(() -> Minecraft.getInstance().execute(() -> {
             PendingResolve current = pendingResolves.get(pos.toString());
             if (current == null || current.requestId() != requestId) return;
             pendingResolves.remove(pos.toString());
             KazumiLog.sniff.warn("[source] server-side bilibili resolve timed out ({}ms), falling back",
                 SERVER_RESOLVE_TIMEOUT_MS);
-            fallbackLocalResolve(pending, "服务端解析超时");
+            runLocalResolve(pending, false);
         }), SERVER_RESOLVE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 
@@ -231,25 +260,44 @@ public final class VideoSourceResolver {
         } else {
             KazumiLog.sniff.warn("[source] server-side bilibili resolve failed ({}), falling back",
                 packet.error());
-            fallbackLocalResolve(pending, packet.error());
+            runLocalResolve(pending, false);
         }
     }
 
-    /** 本端回落解析：用本地凭据（可能为空 = 匿名，清晰度上限 720P）直接调 B 站接口 */
-    private void fallbackLocalResolve(PendingResolve pending, String reason) {
+    /**
+     * 本端解析：用本地凭据（可能为空 = 匿名，实测清晰度上限 480P）直接调 B 站接口。
+     *
+     * @param fallbackToServer 本端失败且在线时是否再回落服务端代理。本机已配置凭据时本端是首选通道，
+     *                         失败后仍值得让服务端账号试一次；本端本就是回落通道时不再反向回落（会成环）
+     */
+    private void runLocalResolve(PendingResolve pending, boolean fallbackToServer) {
         net.minecraft.core.BlockPos pos = pending.screen().getBlockPos();
         int qn = BilibiliQualityPrefs.preferredQn(pos);
         String cookie = BilibiliCredentials.get();
-        KazumiLog.sniff.warn("[source] local bilibili fallback ({}), credentials={}",
-            reason, cookie.isEmpty() ? "anonymous" : "local");
+        KazumiLog.sniff.info("[source] local bilibili resolve (qn={}, live={}, credentials={})",
+            qn, pending.live(), cookie.isEmpty() ? "anonymous" : "local");
         var future = pending.live()
             ? BilibiliApi.resolveLive(pending.pageUrl(), qn, cookie)
             : BilibiliApi.resolveVideo(pending.pageUrl(), qn, cookie);
         future.whenComplete((stream, t) -> {
             if (t != null) {
-                failPlayback(pending.screen(), unwrap(t));
+                Throwable cause = unwrap(t);
+                if (fallbackToServer && Minecraft.getInstance().getConnection() != null) {
+                    KazumiLog.sniff.warn("[source] local bilibili resolve failed ({}), falling back to server",
+                        String.valueOf(cause.getMessage()));
+                    Minecraft.getInstance().execute(() -> {
+                        if (pending.screen().isRemoved()) return;
+                        requestServerResolve(pending.screen(), pending.pageUrl(), pending.player(),
+                            pending.session(), pending.prewarm(), pending.resumeMs());
+                    });
+                    return;
+                }
+                pendingResolves.remove(pos.toString());
+                failPlayback(pending.screen(), cause);
                 return;
             }
+            // 本端解析成功：摘掉在途登记，否则服务端代理的 20s 超时任务会误判为「仍在等代理」
+            pendingResolves.remove(pos.toString());
             applyStream(pending, stream.url(), stream.audioUrl(),
                 BilibiliApi.encodeQualities(stream.qualities()), stream.currentQn(), "local",
                 stream.cid(), stream.liveRoomId());

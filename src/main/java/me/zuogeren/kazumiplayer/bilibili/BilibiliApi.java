@@ -222,7 +222,7 @@ public final class BilibiliApi {
                     long cid = cidOf(dataOf(body, "视频信息"), finalPage);
                     return HttpUtil.fetch(playUrlApi(finalBvid, finalAid, cid, key, preferredQn, true),
                             "GET", headers, Map.of())
-                        .thenCompose(dashBody -> buildDashStream(dashBody, cookie, cid)
+                        .thenCompose(dashBody -> buildDashStream(dashBody, cookie, cid, preferredQn)
                             .thenCompose(stream -> stream != null
                                 ? CompletableFuture.completedFuture(stream)
                                 : HttpUtil.fetch(playUrlApi(finalBvid, finalAid, cid, key, preferredQn, false),
@@ -235,7 +235,8 @@ public final class BilibiliApi {
      * 两边各自的候选节点并行探测后取第一个可达的。
      * 空结果表示该响应没有可用 DASH，调用方回落单流。
      */
-    private static CompletableFuture<Stream> buildDashStream(String body, String cookie, long cid) {
+    private static CompletableFuture<Stream> buildDashStream(String body, String cookie, long cid,
+            int preferredQn) {
         JsonObject data;
         JsonObject dash;
         java.util.NavigableMap<Integer, JsonObject> videoByQn;
@@ -250,7 +251,11 @@ public final class BilibiliApi {
         }
         if (videoByQn.isEmpty()) return CompletableFuture.completedFuture(null);
 
-        int requested = data.has("quality") ? data.get("quality").getAsInt() : 0;
+        // 选档：优先按调用方请求的档位（preferredQn），取不超过它的最高可用档；
+        // 未指定时退回接口自选的 data.quality。只认 data.quality 会让"请求 1080P 却拿到 480P"——
+        // 它是服务端替你选的档，匿名响应里恒为低档，与请求参数无关
+        int requested = preferredQn > 0 ? preferredQn
+            : (data.has("quality") ? data.get("quality").getAsInt() : 0);
         java.util.Map.Entry<Integer, JsonObject> chosen = videoByQn.floorEntry(requested);
         if (chosen == null) chosen = videoByQn.firstEntry();
         int actualQn = chosen.getKey();

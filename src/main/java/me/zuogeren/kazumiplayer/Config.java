@@ -83,8 +83,9 @@ public class Config {
 
         bilibiliCookie = builder
                 .comment("B 站登录 Cookie（浏览器开发者工具复制完整 Cookie，至少含 SESSDATA）",
-                         "留空 = 未登录：视频清晰度上限 720P、直播取默认码率",
+                         "留空 = 未登录：视频清晰度上限 480P、直播取默认码率",
                          "填入后可请求 1080P/原画（能否真正播放取决于接口返回的流形态）",
+                         "本项只服务「服务端代理解析」：客户端本机未配置凭据时才走代理，本机配了则本端优先",
                          "凭据只在本端配置文件里：解析在服务端执行，只有有时效的直链/直播流地址下发给客户端",
                          "放在 COMMON 而非 SERVER 类型：SERVER 配置会被 NeoForge 明文同步给每个连入的客户端")
                 .define("bilibiliCookie", "");

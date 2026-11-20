@@ -272,7 +272,9 @@ public class ClientConfig {
 
         bilibiliCookie = builder
                 .comment("B 站登录 Cookie：可用配置界面「扫码登录」自动获取，或从浏览器开发者工具复制粘贴",
-                         "本地填写后优先于服务端下发的凭据；留空时回落到服务端配置（未登录清晰度上限 720P）")
+                         "填写后本端解析优先（档位按本机账号，服务端代理仅在本端失败时兜底）",
+                         "留空则走服务端代理解析（用服务端账号，见 kazumiplayer-common.toml），失败时回落本端匿名",
+                         "未登录清晰度上限 480P，登录后 1080P（大会员档位另需权益）")
                 .define("bilibiliCookie", "");
 
         builder.pop();
