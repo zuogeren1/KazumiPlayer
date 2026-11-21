@@ -332,8 +332,14 @@ public class ClientFullscreenState {
         // 与 GUI 横幅同一 URL 守卫：换集后 player 短暂为空的间隙不闪现上一集的失败横幅
         boolean failed = sp.player == null && sp.lastFailedAt > 0 && now - sp.lastFailedAt < 20000
             && (be == null || be.getEpisodeUrl().equals(sp.lastFailedUrl));
-        var phase = me.zuogeren.kazumiplayer.client.ResolveHint.phaseLine(sp, screenPos);
-        var others = me.zuogeren.kazumiplayer.client.ResolveHint.of(be);
+        // 本端已出画后不再显示任何等待/进度文字：ResolveStates 只在换集/停播时清空，
+        // 出画后它仍留在 NBT 里，无条件绘制会让「已出画 1/1」永久卡在画面中央
+        // （GUI 预览区与世界屏幕面都有「本端无有效帧」守卫，全屏此前漏了）
+        var tex = VideoScreenRenderer.getScreenTexture(screenPos);
+        boolean localHasFrame = tex != null && tex.hasValidFrame();
+        var phase = localHasFrame ? null
+            : me.zuogeren.kazumiplayer.client.ResolveHint.phaseLine(sp, screenPos);
+        var others = localHasFrame ? null : me.zuogeren.kazumiplayer.client.ResolveHint.of(be);
         if (phase == null && others == null && !failed) return;
         int centerX = a[0] + a[2] / 2;
         int lineY = a[1] + a[3] / 2 - 16;
