@@ -36,6 +36,10 @@ import java.util.List;
 public class KazumiPlayerScreen extends Screen implements GuiClientState.Listener {
 
     private static final int ROW_HEIGHT = 18;
+    /** 清晰度下拉的最大可见高度：档位可能多达二十余个（抖音实测 23 档），不设上限会超出屏幕 */
+    private static final int QUALITY_DROPDOWN_MAX_H = 180;
+    /** 清晰度下拉的滚动条宽度 */
+    private static final int QUALITY_SCROLLBAR_W = 4;
     /** seek 提交后滑块反向同步的豁免窗口（等播放器真正完成跳转） */
     private static final long SEEK_SYNC_GRACE_MS = 5000;
     /** 操作提示条自动隐藏时长 */
@@ -96,8 +100,10 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
     private Button summaryTab;
     private Button roadButton;
     private boolean roadDropdownOpen;
-    private Button qualityButton;      // B 站清晰度下拉（仅 B 站视频解析有档位表时可用）
+    private Button qualityButton;      // 清晰度下拉（B 站/抖音解析出档位表时可用）
     private boolean qualityDropdownOpen;
+    /** 清晰度下拉的滚动偏移（像素，0 = 顶部）；档位多时靠它翻页 */
+    private int qualityScrollOffset;
     private Button playUrlButton;      // 直链提交：空闲时"播放"、播放中变"排队"
     private SimpleList queueList;      // 直链播放队列
     private SimpleList watchList;      // 当前正在观看的玩家
@@ -226,7 +232,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         int roadW = Math.min(72, L.rightW() - 112);
         int qualityW = Math.max(36, Math.min(120, L.rightW() - 112 - roadW - 4));
         this.qualityButton = Button.builder(Component.translatable("kazumiplayer.gui.main.tab_quality"),
-                b -> this.qualityDropdownOpen = !this.qualityDropdownOpen)
+                b -> this.toggleQualityDropdown())
             .bounds(L.rightX() + 112 + roadW + 4, L.splitY(), qualityW, 16).build();
         this.qualityButton.active = false;
         this.addRenderableWidget(this.qualityButton);
@@ -360,7 +366,10 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             var qualityInfo = this.qualityInfo();
             boolean qualityAvailable = qualityInfo != null && !qualityInfo.qualities().isEmpty();
             this.qualityButton.active = qualityAvailable;
-            if (!qualityAvailable) this.qualityDropdownOpen = false;
+            if (!qualityAvailable) {
+                this.qualityDropdownOpen = false;
+                this.qualityScrollOffset = 0;
+            }
             this.updateQualityButtonLabel(qualityInfo);
         }
         // 起播等待可视化：取消按钮在"还没出画"的整个期间都可点（时钟进入播放态但视频没出帧也算等待）
@@ -407,23 +416,44 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             }
         }
 
-        // 清晰度下拉展开层（档位来自 B 站播放接口的 accept_quality/accept_description）
+        // 清晰度下拉展开层（档位来自 B 站 accept_quality / 抖音 bit_rate；档位可能二十余个，需滚动）
         if (this.qualityDropdownOpen && this.qualityButton != null) {
             var qInfo = this.qualityInfo();
             if (qInfo != null && !qInfo.qualities().isEmpty()) {
+                int count = qInfo.qualities().size();
+                this.clampQualityScroll(count);
                 int dx = this.qualityButton.getX();
                 int dw = Math.max(this.qualityButton.getWidth(), 110);
                 int dy = this.qualityButton.getY() + 16;
-                for (int i = 0; i < qInfo.qualities().size(); i++) {
-                    int y0 = dy + i * ROW_HEIGHT;
-                    boolean hovered = mouseX >= dx && mouseX < dx + dw && mouseY >= y0 && mouseY < y0 + ROW_HEIGHT;
-                    var option = qInfo.qualities().get(i);
-                    boolean selected = option.qn() == qInfo.currentQn();
-                    graphics.fill(dx, y0, dx + dw, y0 + ROW_HEIGHT,
-                        hovered ? 0xFF3C3C52 : (selected ? 0xF0252545 : 0xE0000000));
-                    String label = (selected ? "> " : "") + option.label() + qualityTag(option);
-                    graphics.text(this.font, Component.literal(label)
-                        .withStyle(option.available() ? ChatFormatting.GRAY : ChatFormatting.DARK_GRAY), dx + 4, y0 + 4, -1);
+                int visibleH = qualityDropdownHeight(count);
+                int maxScroll = qualityMaxScroll(count);
+                // 裁剪到可见区域：否则超出的行会画到屏幕外、盖住下方控件。
+                // try/finally 保证出栈：裁剪栈是 push/pop 配对的，漏 pop 会让后续所有绘制都被裁掉
+                graphics.enableScissor(dx, dy, dx + dw, dy + visibleH);
+                try {
+                    for (int i = 0; i < count; i++) {
+                        int y0 = dy + i * ROW_HEIGHT - this.qualityScrollOffset;
+                        if (y0 + ROW_HEIGHT <= dy || y0 >= dy + visibleH) continue; // 完全在可见区外，跳过
+                        boolean hovered = mouseX >= dx && mouseX < dx + dw && mouseY >= y0 && mouseY < y0 + ROW_HEIGHT;
+                        var option = qInfo.qualities().get(i);
+                        boolean selected = option.qn() == qInfo.currentQn();
+                        graphics.fill(dx, y0, dx + dw, y0 + ROW_HEIGHT,
+                            hovered ? 0xFF3C3C52 : (selected ? 0xF0252545 : 0xE0000000));
+                        String label = (selected ? "> " : "") + option.label() + qualityTag(option);
+                        graphics.text(this.font, Component.literal(label)
+                            .withStyle(option.available() ? ChatFormatting.GRAY : ChatFormatting.DARK_GRAY), dx + 4, y0 + 4, -1);
+                    }
+                } finally {
+                    graphics.disableScissor();
+                }
+                // 滚动条：内容超出可见高度时才画，滑块位置/长度按比例
+                if (maxScroll > 0) {
+                    int barX = dx + dw - QUALITY_SCROLLBAR_W - 1;
+                    int trackH = visibleH;
+                    int thumbH = Math.max(12, trackH * visibleH / (count * ROW_HEIGHT));
+                    int thumbY = dy + (trackH - thumbH) * this.qualityScrollOffset / maxScroll;
+                    graphics.fill(barX, dy, barX + QUALITY_SCROLLBAR_W, dy + trackH, 0x40FFFFFF);
+                    graphics.fill(barX, thumbY, barX + QUALITY_SCROLLBAR_W, thumbY + thumbH, 0xC0FFFFFF);
                 }
             }
         }
@@ -1020,6 +1050,60 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         return null;
     }
 
+    /**
+     * 展开/收起清晰度下拉。展开时把当前生效档位滚进可见区——
+     * 档位多时（抖音实测 23 档）当前档常在列表下方，不预先滚动会看不到自己选的是哪一档。
+     */
+    private void toggleQualityDropdown() {
+        this.qualityDropdownOpen = !this.qualityDropdownOpen;
+        if (!this.qualityDropdownOpen) {
+            this.qualityScrollOffset = 0;
+            return;
+        }
+        var info = this.qualityInfo();
+        if (info == null || info.qualities().isEmpty()) {
+            this.qualityScrollOffset = 0;
+            return;
+        }
+        int count = info.qualities().size();
+        int currentIdx = 0;
+        for (int i = 0; i < count; i++) {
+            if (info.qualities().get(i).qn() == info.currentQn()) {
+                currentIdx = i;
+                break;
+            }
+        }
+        // 让当前档位落在可见区中部：偏移 = 当前行顶 - 可见高度的一半（再夹进合法区间）
+        int visibleH = qualityDropdownHeight(count);
+        this.qualityScrollOffset = currentIdx * ROW_HEIGHT - visibleH / 2 + ROW_HEIGHT / 2;
+        this.clampQualityScroll(count);
+    }
+
+    /**
+     * 清晰度下拉的可见高度：档位少时按实际行数，多时封顶 QUALITY_DROPDOWN_MAX_H，
+     * 且**不得超出窗口底部**（小窗口下按钮位置靠下，固定上限仍会溢出屏幕）。
+     */
+    private int qualityDropdownHeight(int count) {
+        int desired = Math.min(count * ROW_HEIGHT, QUALITY_DROPDOWN_MAX_H);
+        if (this.qualityButton == null) return desired;
+        int top = this.qualityButton.getY() + 16;
+        int roomBelow = this.height - top - 4; // 底部留 4px 边距
+        // 至少给一行：窗口极矮时宁可溢出一点也不能变成 0 高度（否则完全点不到）
+        return Math.max(ROW_HEIGHT, Math.min(desired, roomBelow));
+    }
+
+    /** 清晰度下拉的最大滚动偏移（内容高度 - 可见高度），0 表示无需滚动 */
+    private int qualityMaxScroll(int count) {
+        return Math.max(0, count * ROW_HEIGHT - qualityDropdownHeight(count));
+    }
+
+    /** 把滚动偏移夹进合法区间（档位表变化后旧偏移可能越界） */
+    private void clampQualityScroll(int count) {
+        int max = qualityMaxScroll(count);
+        if (this.qualityScrollOffset > max) this.qualityScrollOffset = max;
+        if (this.qualityScrollOffset < 0) this.qualityScrollOffset = 0;
+    }
+
     /** 本屏是否抖音源（决定切档走哪条重启路径） */
     private boolean isDouyinSource() {
         var screen = this.boundScreen();
@@ -1097,6 +1181,28 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         this.roadButton.setMessage(Component.literal(label));
     }
 
+    /**
+     * 滚轮：清晰度下拉展开时滚动档位列表（档位可能二十余个，超出可见高度）。
+     * 其余情形交给父类（列表控件自己处理滚动）。
+     */
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (this.qualityDropdownOpen && this.qualityButton != null && scrollY != 0) {
+            var qInfo = this.qualityInfo();
+            if (qInfo != null && !qInfo.qualities().isEmpty()) {
+                int count = qInfo.qualities().size();
+                int maxScroll = qualityMaxScroll(count);
+                if (maxScroll > 0) {
+                    // 每格滚轮滚一行；向上滚（scrollY > 0）偏移减小
+                    this.qualityScrollOffset -= (int) Math.signum(scrollY) * ROW_HEIGHT;
+                    this.clampQualityScroll(count);
+                    return true;
+                }
+            }
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
         // 来源下拉展开时优先处理：点中选项则切换限定源；点击区域外则收起
@@ -1116,13 +1222,20 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         if (this.qualityDropdownOpen && this.qualityButton != null) {
             var qInfo = this.qualityInfo();
             if (qInfo != null && !qInfo.qualities().isEmpty()) {
+                int count = qInfo.qualities().size();
+                this.clampQualityScroll(count);
                 int dx = this.qualityButton.getX();
                 int dw = Math.max(this.qualityButton.getWidth(), 110);
                 int dy = this.qualityButton.getY() + 16;
+                int visibleH = qualityDropdownHeight(count);
                 int mx = (int) event.x(), my = (int) event.y();
-                if (mx >= dx && mx < dx + dw && my >= dy && my < dy + qInfo.qualities().size() * ROW_HEIGHT) {
-                    selectQuality((my - dy) / ROW_HEIGHT);
-                    return true;
+                if (mx >= dx && mx < dx + dw && my >= dy && my < dy + visibleH) {
+                    // 命中行 = (鼠标 y - 列表顶 + 滚动偏移) / 行高；越界（点在空白处）不切档
+                    int idx = (my - dy + this.qualityScrollOffset) / ROW_HEIGHT;
+                    if (idx >= 0 && idx < count) {
+                        selectQuality(idx);
+                        return true;
+                    }
                 }
             }
             this.qualityDropdownOpen = false;

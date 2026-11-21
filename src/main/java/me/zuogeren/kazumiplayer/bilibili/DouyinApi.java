@@ -174,8 +174,8 @@ public final class DouyinApi {
             coverUrl, durationMs, awemeId);
     }
 
-    /** 一个档位条目：展示名 + 原始 gear + 码率 + 直链 */
-    private record RateEntry(int qn, String gear, long bitRate, String url) {}
+    /** 一个档位条目：原始 gear + 码率 + 直链 + 是否 H.265（部分环境无解码器，展示时标注） */
+    private record RateEntry(int qn, String gear, long bitRate, String url, boolean h265) {}
 
     /** 收集 bit_rate 数组里的全部档位（含 play_addr.url_list 的首个可用地址） */
     private static List<RateEntry> collectRates(JsonObject video) {
@@ -189,7 +189,7 @@ public final class DouyinApi {
                 String url = playAddr == null ? "" : firstUrl(playAddr);
                 if (url.isEmpty()) continue;
                 out.add(new RateEntry(0, optString(rate, "gear_name"),
-                    optLong(rate, "bit_rate", 0), url));
+                    optLong(rate, "bit_rate", 0), url, optInt(rate, "is_h265", 0) == 1));
             }
         }
         if (out.isEmpty()) {
@@ -197,16 +197,23 @@ public final class DouyinApi {
             JsonObject playAddr = optObject(video, "play_addr");
             String url = playAddr == null ? "" : firstUrl(playAddr);
             if (!url.isEmpty()) {
-                out.add(new RateEntry(0, "default", 0, url));
+                out.add(new RateEntry(0, "default", 0, url, false));
             }
         }
         return out;
     }
 
-    /** 由 gear_name 与分辨率生成展示名 */
+    /**
+    /**
+     * 由 gear_name 生成展示名。
+     *
+     * <p>gear_name 形如 {@code normal_1080_0} / {@code 1080_1_1} / {@code low_720_0}：
+     * 中间段是短边分辨率，末段是同一分辨率下的码率档序号。**同一分辨率常有多个码率档**
+     * （实测 1080P 有 4 档、540P 有 6 档），故必须带码率才能区分，否则下拉里会出现多个同名项。
+     * 编码信息也带上：h265 档在部分环境无解码器，用户需要能看出来。
+     */
     private static String labelOf(RateEntry r) {
         String gear = r.gear();
-        // gear_name 形如 normal_1080_0 / 1080_1_1 / normal_540_0：中间段是短边分辨率
         String height = "";
         if (gear != null && !gear.isEmpty()) {
             for (String seg : gear.split("_")) {
@@ -214,6 +221,7 @@ public final class DouyinApi {
             }
         }
         String base = height.isEmpty() ? "原画" : height + "P";
+        if (r.h265()) base += " H.265";
         if (r.bitRate() > 0) {
             return base + " · " + (r.bitRate() / 1000) + " kbps";
         }
