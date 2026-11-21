@@ -507,6 +507,12 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         long now = System.currentTimeMillis();
         boolean failed = player == null && sp.lastFailedAt > 0 && now - sp.lastFailedAt < 20000
             && sp.lastFailedUrl.equals(this.boundScreen() != null ? this.boundScreen().getEpisodeUrl() : "");
+        // 纹理尺寸必须在本帧 extract 阶段定好：GUI 打开时玩家可能背对屏幕方块，BE 被视锥剔除后
+        // extractRenderState 不会调用，纹理就永远停在旧尺寸（切档后预览卡住/错乱）
+        if (tex != null) {
+            if (player != null) tex.prepareFor(player);
+            else tex.preparePlaceholder();
+        }
         if (tex == null || !tex.hasValidFrame() || player == null
                 || player.getWidth() <= 0 || player.getHeight() <= 0) {
             // 加载期两行：第一行本端起播阶段（在等什么＋已等多久＋量化细节），第二行组内进度

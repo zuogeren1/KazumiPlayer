@@ -125,6 +125,14 @@ public class VideoScreenRenderer implements BlockEntityRenderer<VideoScreenBlock
                 t.ensureRegistered();
                 return t;
             });
+        // 纹理尺寸必须在此（extract 阶段）定好：extractLevel 早于 extractGui，GUI 抓取 GpuTextureView
+        // 存进 BlitRenderState 后帧末才绘制；若留到 render 阶段的 submit 里重建，覆盖注册会关闭
+        // GUI 手里那份视图 → "Texture view has been closed" 崩溃（实测 1080P→4K 切档后 64ms 崩）
+        if (state.player != null) {
+            state.videoTexture.prepareFor(state.player);
+        } else {
+            state.videoTexture.preparePlaceholder();
+        }
         state.skinBlock = be.getSkinBlock();
         state.episodeUrl = be.getEpisodeUrl();
         state.resolveStates = be.getResolveStates();

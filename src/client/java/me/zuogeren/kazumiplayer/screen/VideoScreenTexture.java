@@ -52,10 +52,11 @@ public class VideoScreenTexture implements AutoCloseable {
      * 按目标尺寸创建/重建纹理。
      * 视频分辨率变化时自动调整，避免固定尺寸读回导致画面错乱（上半部分/重复画面/摩尔纹）。
      *
-     * 重建必须采用「先建新、后覆盖注册」顺序：旧纹理由 TextureManager.register 替换时
-     * 统一 safeClose，保证 textureId 在 manager 中任何时刻都指向完好的纹理——
-     * GUI 预览在 extract 阶段抓取 GpuTextureView 引用、帧末才实际绘制，
-     * 若 textureId 一度指向已关闭视图会导致 "Texture view has been closed" 崩溃。
+     * **只允许在 extract 阶段调用**（{@link #prepareFor} 与 {@link #ensureRegistered}）：
+     * 重建走 TextureManager.register 覆盖注册，旧纹理由其 safeClose 关闭。而 GUI 元素在
+     * extractGui 阶段就已抓取 GpuTextureView 存进 BlitRenderState、帧末才实际绘制——
+     * 若在 render 阶段（submit/updateFrame）重建，GUI 手里那份视图已被关闭，
+     * 绘制时抛 "Texture view Sampler0 (N) has been closed!" 崩溃（实测 1080P→4K 无缝切档后 64ms 崩）。
      * （注意 DynamicTexture.close() 会连带关闭传入的 NativeImage，禁止再手动关闭）
      */
     private DynamicTexture getOrCreateDynamicTexture(int width, int height) {
@@ -78,7 +79,25 @@ public class VideoScreenTexture implements AutoCloseable {
     }
 
     /**
-     * 从 WaterMedia 的 GL 纹理读回最新帧，上传到 DynamicTexture
+     * extract 阶段预建纹理：分辨率变化时在此重建，绝不留到 render 阶段。
+     * 世界 BE 的 extractRenderState 早于 extractGui，故 GUI 抓取视图时拿到的已是最终尺寸的纹理。
+     *
+     * @return true 表示纹理尺寸已就绪（可安全绘制）
+     */
+    public boolean prepareFor(WaterMediaPlayer wmPlayer) {
+        if (wmPlayer == null) return false;
+        int width = wmPlayer.getWidth();
+        int height = wmPlayer.getHeight();
+        if (width <= 0 || height <= 0) return false; // 解码器尚未就绪
+        getOrCreateDynamicTexture(width, height);
+        return true;
+    }
+
+    /**
+     * 从 WaterMedia 的 GL 纹理读回最新帧，上传到 DynamicTexture。
+     * **只在 render 阶段调用**：此时纹理尺寸必须已由 {@link #prepareFor} 在 extract 阶段定好，
+     * 这里若发现尺寸不符只跳过本帧（重建会关闭 GUI 已抓取的视图）。
+     *
      * @return true 表示成功拷贝了一帧
      */
     public boolean updateFrame(WaterMediaPlayer wmPlayer) {
@@ -90,9 +109,10 @@ public class VideoScreenTexture implements AutoCloseable {
         int height = wmPlayer.getHeight();
         if (width <= 0 || height <= 0) return false; // 解码器尚未就绪
 
-        DynamicTexture dt = getOrCreateDynamicTexture(width, height);
+        DynamicTexture dt = dynamicTexture;
         NativeImage img = nativeImage;
-        if (img == null) return false;
+        if (dt == null || img == null) return false;
+        if (img.getWidth() != width || img.getHeight() != height) return false; // 尺寸未在 extract 阶段同步
 
         try {
             // 像素打包状态必须自持：glGetTexImage 的落点是我们自己的 NativeImage 缓冲区，行距由
@@ -135,13 +155,21 @@ public class VideoScreenTexture implements AutoCloseable {
         }
     }
 
-    /** 用纯色填充纹理（IDLE/LOADING/ERROR 等非播放状态用） */
+    /**
+     * 用纯色填充纹理（IDLE/LOADING/ERROR 等非播放状态用）。
+     * 占位尺寸固定，故重建只可能发生在首次调用——由 {@link #preparePlaceholder()} 在 extract 阶段完成。
+     */
     public void fillPlaceholder(int colorABGR) {
-        DynamicTexture dt = getOrCreateDynamicTexture(PLACEHOLDER_WIDTH, PLACEHOLDER_HEIGHT);
+        DynamicTexture dt = dynamicTexture;
         NativeImage img = nativeImage;
-        if (img == null) return;
+        if (dt == null || img == null) return;
         img.fillRect(0, 0, img.getWidth(), img.getHeight(), colorABGR);
         dt.upload();
+    }
+
+    /** extract 阶段预建占位纹理（尺寸固定，仅首次生效） */
+    public void preparePlaceholder() {
+        getOrCreateDynamicTexture(PLACEHOLDER_WIDTH, PLACEHOLDER_HEIGHT);
     }
 
     /** 是否已有至少一帧有效视频画面（无帧时用于决定是保留旧帧还是填充占位色） */

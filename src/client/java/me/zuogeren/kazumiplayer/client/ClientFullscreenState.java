@@ -262,6 +262,12 @@ public class ClientFullscreenState {
 
         var player = ScreenPlayerManager.getPlayer(screenPos);
         var tex = VideoScreenRenderer.getScreenTexture(screenPos);
+        // 纹理尺寸必须在本帧 extract 阶段定好：观影时玩家可能背对屏幕方块，BE 被视锥剔除后
+        // extractRenderState 不会调用，纹理就永远停在旧尺寸（切档后画面卡住/错乱）
+        if (tex != null) {
+            if (player != null) tex.prepareFor(player);
+            else tex.preparePlaceholder();
+        }
         boolean hasValidFrame = tex != null && tex.hasValidFrame();
         boolean hasSignal = hasValidFrame && player != null
                 && player.getWidth() > 0 && player.getHeight() > 0;
