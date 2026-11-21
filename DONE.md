@@ -24,6 +24,15 @@
   修复（A+B 同批）：**A** 把凭据复制进 `kazumiplayer-common.toml`（服务端代理从此不再匿名）；**B** 改实现为「本机有凭据则本端优先」——新增 `dispatchResolve` 分流：`BilibiliCredentials.present()` 为真时走 `runLocalResolve(pending, fallbackToServer=true)`（本端失败且在线再回落服务端代理），为假时走 `requestServerResolve`（服务端优先，失败/超时/未连接回落本端匿名）；抽出 `registerPending`（每屏唯一在途请求 + 直播置 bypassSync）供两条通道共用，`fallbackLocalResolve` 更名 `runLocalResolve` 并加 `fallbackToServer` 参数（回落通道不再反向回落，避免成环）；`beginQualitySwitch` 也改走 `dispatchResolve`（切档同样按凭据来源选通道）。顺带修 `BilibiliApi.buildDashStream` 的选档 bug：原先 `requested` 取自 `data.quality`（服务端替你选的档，匿名时恒为低档），**与请求参数无关** → 即使传了 `preferredQn=80` 也只取到 64 档；现改为 `preferredQn > 0 ? preferredQn : data.quality`，`preferredQn` 一路透传进 `buildDashStream`。两处配置注释同步改为与实现一致（`ClientConfig` 说明「本端优先，服务端仅兜底」，`Config` 说明「本项只服务服务端代理，本机配了则本端优先」），并把「未登录上限 720P」纠正为实测的 **480P**。
   产物校验：`gradlew build` BUILD SUCCESSFUL（`clean` 因游戏占用 build 目录失败，改用增量）。**实机复测待用户确认**（需重启游戏让新配置与新 jar 生效）。
 
+## 播放结束保留观看者（2026-11-21）
+
+- [x] **播放结束后不自动踢出已加入的玩家**：`PlaybackController.stopScreen` 无条件 `screen.setWatchingPlayers("")`，而它是「自动播完/GUI 停止屏/命令 screen stop/队列耗尽」四路径共用的唯一实现——于是**停止播放也会清空观看者名单**，所有已加入玩家被踢出，换片/重播必须重新加入。
+  修复：**名单一律保留**（主动停止与自动播完同此）——停止只结束这一轮播放，玩家仍留在该屏观影名单里。保留是安全的：客户端自动起播还要求 `episodeUrl` 非空，而 `clearPlayback()` 已清空它，故不会误触发起播。名单只在两种情况下减少：玩家主动「离开」（`leaveOwn` 摘掉本人）与退服（`onPlayerLeave`）。
+  配套三处（否则保留的名单会被后续路径覆盖掉）：
+  ① `SyncGroupManager.inheritWatchers`（新增）：`onPlayStart` 与 `joinStandby` 两处 `computeIfAbsent` 建组时继承 BE 里已有的名单——否则重新起播只有发起者在组内、第一个点「加入」的人会把其他人覆盖掉。
+  ② `PlaybackController.leaveOwn`：组已删（播放结束后）时只摘掉离开者本人（新增 `withoutPlayer`），不再整串清空——否则一人离开会把名单里其他人一起踢掉。
+  ③ `onPlayerLeave`（退服）无需改动：它只在玩家**在组内**时才收集受影响屏幕，组已删不会进循环，不会误清。
+
 ## 暂停失效修复（2026-11-21）
 
 - [x] **视频无法正常暂停**：两个独立缺陷叠加。

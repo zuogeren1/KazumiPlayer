@@ -41,8 +41,13 @@ public class SyncGroupManager {
      * 当有玩家开始播放时调用
      */
     public void onPlayStart(ServerPlayer player, UUID screenId, BlockPos screenPos, String videoUrl) {
-        SyncGroup group = groups.computeIfAbsent(screenId,
-            k -> new SyncGroup(screenId, screenPos, videoUrl));
+        SyncGroup group = groups.computeIfAbsent(screenId, k -> {
+            SyncGroup created = new SyncGroup(screenId, screenPos, videoUrl);
+            // 播放自然结束后组已删、但 BE 仍保留观看者名单（见 PlaybackController.stopScreen）：
+            // 重新起播时继承它，否则只有发起者留在组里，其他已加入的玩家被静默踢出
+            inheritWatchers(created, player, screenPos);
+            return created;
+        });
         group.players.add(player.getUUID());
         group.videoUrl = videoUrl;
         group.positionMs = 0;
@@ -59,13 +64,36 @@ public class SyncGroupManager {
 
     /** 加入待机（屏幕未在播放时），创建空 URL 组；等播放开始后自动生效 */
     public void joinStandby(ServerPlayer player, UUID screenId, BlockPos screenPos) {
-        SyncGroup group = groups.computeIfAbsent(screenId,
-            k -> new SyncGroup(screenId, screenPos, ""));
+        var be = player.level().getBlockEntity(screenPos);
+        SyncGroup group = groups.computeIfAbsent(screenId, k -> {
+            SyncGroup created = new SyncGroup(screenId, screenPos, "");
+            // 播放自然结束后组已删、但 BE 仍保留观看者名单（见 PlaybackController.stopScreen）：
+            // 新建待机组时继承它，否则第一个点「加入」的人会把其他人的名单覆盖掉
+            inheritWatchers(created, player, screenPos);
+            return created;
+        });
         group.players.add(player.getUUID());
         // 同步 WatchingPlayers
-        var be = player.level().getBlockEntity(screenPos);
         if (be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen) {
             screen.setWatchingPlayers(group.watchingPlayersString());
+        }
+    }
+
+    /**
+     * 新建组时继承 BE 里已有的观看者名单。
+     * 播放自然结束（PlaybackController.stopScreen 的 actor==null 分支）会删组但保留 WatchingPlayers，
+     * 使玩家无需重新加入；此后任何重建组的路径都必须继承这份名单，否则其余玩家被静默踢出。
+     */
+    private void inheritWatchers(SyncGroup group, ServerPlayer player, BlockPos screenPos) {
+        var be = player.level().getBlockEntity(screenPos);
+        if (!(be instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity screen)) return;
+        for (String u : screen.getWatchingPlayers().split(",")) {
+            if (u.isBlank()) continue;
+            try {
+                group.players.add(UUID.fromString(u.trim()));
+            } catch (IllegalArgumentException ignored) {
+                // 名单里的脏数据直接跳过，不让它阻断起播/加入流程
+            }
         }
     }
 

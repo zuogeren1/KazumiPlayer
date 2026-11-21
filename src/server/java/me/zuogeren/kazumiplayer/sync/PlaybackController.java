@@ -251,7 +251,13 @@ public final class PlaybackController {
             new me.zuogeren.kazumiplayer.network.packet.PlayStopPacket(screenPos);
         PacketDistributor.sendToPlayer(actor, pkt);
         var g2 = SyncGroupManager.get().getGroup(sid);
-        screen.setWatchingPlayers(g2 != null ? g2.watchingPlayersString() : "");
+        if (g2 != null) {
+            screen.setWatchingPlayers(g2.watchingPlayersString());
+        } else {
+            // 组已不存在（stopScreen 删组后名单仍保留在 BE 里）：只摘掉离开者本人，
+            // 不能整串清空——那会把其他仍留在名单里的玩家一起踢掉
+            screen.setWatchingPlayers(withoutPlayer(screen.getWatchingPlayers(), actor.getUUID()));
+        }
     }
 
     /** String 便捷重载：按字面量包装后委托组件版（历史签名兼容） */
@@ -264,9 +270,14 @@ public final class PlaybackController {
 
     /**
      * 整屏停止的唯一权威实现（自动播完/GUI 停止屏幕/命令 screen stop/队列耗尽共用）：
-     * 保存实时位置 → 清 NBT（含 WatchingPlayers 与解析状态，防止残留陈旧观看者）→ 删组
+     * 保存实时位置 → 清 NBT（含解析状态）→ 删组
      * → 向全部在线观看者发 PlayStopPacket（含发起者自身，保证其客户端同步停播）
      * → 向除发起者外的观看者发通知。
+     *
+     * <p>**观看者名单一律保留**（主动停止与自动播完同此）：停止只结束这一轮播放，玩家仍留在
+     * 该屏的观影名单里，换片/重新播放无需重新加入。保留是安全的：客户端自动起播还要求
+     * episodeUrl 非空，而 clearPlayback 已清空它，故不会误触发起播。
+     * 名单只在两种情况下减少：玩家主动「离开」（leaveOwn 摘掉本人）与退服（onPlayerLeave）。
      *
      * @param actor      发起者；null 表示无人发起的自动事件（播完/队列耗尽），此时通知发给全组
      * @param actionText 通知动词短语（如"停止了屏幕播放"/"播放已结束"），可本地化组件
@@ -282,7 +293,10 @@ public final class PlaybackController {
 
         screen.clearPlayback();
         screen.clearResolveStates(); // 解析状态只在播放会话内有意义：与 clearPlayback 的清零点保持同一契约（幂等）
-        screen.setWatchingPlayers("");
+        // 观看者名单一律保留（主动停止与自动播完同此）：停止只结束这一轮播放，玩家仍留在该屏的
+        // 观影名单里，换片/重播无需重新加入。保留是安全的——客户端自动起播还要求 episodeUrl 非空，
+        // 而 clearPlayback 已清空它，故不会误触发起播。
+        // 名单只在两种情况下减少：玩家主动「离开」（leaveOwn 摘掉本人）与退服（onPlayerLeave）。
         SyncGroupManager.get().leaveByScreenId(sid);
 
         if (!(screen.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel)) return;
@@ -302,6 +316,20 @@ public final class PlaybackController {
     }
 
     // ---- 内部 ----
+
+    /** 从 WatchingPlayers 串里摘掉一个 UUID（保留其余，顺序不变）；串为空或未命中时原样返回 */
+    private static String withoutPlayer(String watchingPlayers, UUID playerId) {
+        if (watchingPlayers == null || watchingPlayers.isBlank()) return "";
+        String target = playerId.toString();
+        StringBuilder sb = new StringBuilder();
+        for (String u : watchingPlayers.split(",")) {
+            String trimmed = u.trim();
+            if (trimmed.isEmpty() || trimmed.equals(target)) continue;
+            if (sb.length() > 0) sb.append(',');
+            sb.append(trimmed);
+        }
+        return sb.toString();
+    }
 
     private static void syncWatchingPlayers(VideoScreenBlockEntity screen) {
         var g = SyncGroupManager.get().getGroup(screen.getScreenId());
