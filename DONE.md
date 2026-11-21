@@ -24,6 +24,13 @@
   修复（A+B 同批）：**A** 把凭据复制进 `kazumiplayer-common.toml`（服务端代理从此不再匿名）；**B** 改实现为「本机有凭据则本端优先」——新增 `dispatchResolve` 分流：`BilibiliCredentials.present()` 为真时走 `runLocalResolve(pending, fallbackToServer=true)`（本端失败且在线再回落服务端代理），为假时走 `requestServerResolve`（服务端优先，失败/超时/未连接回落本端匿名）；抽出 `registerPending`（每屏唯一在途请求 + 直播置 bypassSync）供两条通道共用，`fallbackLocalResolve` 更名 `runLocalResolve` 并加 `fallbackToServer` 参数（回落通道不再反向回落，避免成环）；`beginQualitySwitch` 也改走 `dispatchResolve`（切档同样按凭据来源选通道）。顺带修 `BilibiliApi.buildDashStream` 的选档 bug：原先 `requested` 取自 `data.quality`（服务端替你选的档，匿名时恒为低档），**与请求参数无关** → 即使传了 `preferredQn=80` 也只取到 64 档；现改为 `preferredQn > 0 ? preferredQn : data.quality`，`preferredQn` 一路透传进 `buildDashStream`。两处配置注释同步改为与实现一致（`ClientConfig` 说明「本端优先，服务端仅兜底」，`Config` 说明「本项只服务服务端代理，本机配了则本端优先」），并把「未登录上限 720P」纠正为实测的 **480P**。
   产物校验：`gradlew build` BUILD SUCCESSFUL（`clean` 因游戏占用 build 目录失败，改用增量）。**实机复测待用户确认**（需重启游戏让新配置与新 jar 生效）。
 
+## 暂停失效修复（2026-11-21）
+
+- [x] **视频无法正常暂停**：两个独立缺陷叠加。
+  ① **切换判据用错数据源**：GUI 的 `togglePause()` 与全屏的 `ClientFullscreenState.togglePause()` 都用 `player.isPlaying()`（= `player.playing()` = 时钟状态 == PLAYING）决定发 PAUSE 还是 RESUME。缓冲期（BUFFERING）时钟不是 PLAYING → 点「暂停」反而发出 RESUME；暂停未生效时时钟仍 PLAYING → 点「暂停」反复发 PAUSE 而永远切不回来。修复：判据改取**服务端权威暂停态**（BE NBT 的 `PlaybackPaused`，`boundScreen().isPlaybackPaused()` / `level.getBlockEntity(pos).isPlaybackPaused()`）。
+  ② **状态基线在生效前就更新**：`ClientPacketHandlers.handleSyncState` 先写 `sp.lastAppliedPaused = packet.paused()` 再调 `player.pause()`。而 WaterMedia 的 `MasterClock.paused()` 在 `Status.WAITING`（尚无 run 可 latch）时**直接 return false**，`pause()` 因此未生效——但基线已被置成目标值，后续周期广播认为「已应用」而永不重试 → 表现为点了暂停没反应。修复：`WaterMediaPlayer.pause()/resume()` 改为返回 `boolean`（是否真正生效），`handleSyncState` 只在返回 true 时才更新基线；未生效时保持旧基线，下一次周期广播（每 5 秒）会再试。
+  附带：`ClientPlaybackScheduler` 起播时的暂停快照同样可能落在 WAITING，改为记录 DEBUG 日志后交给周期广播兜底（不在此重试）。
+
 ## 崩溃修复（2026-11-21）
 
 - [x] **停播/关闭期 `(wm_err:1004) Failed to use the ALEngine, its original OpenAL context is not current on this thread`**：崩溃收尾日志里出现两条（`FFThread-6-lifecycle` 的 `drainAudio` 与 `KazumiPlayer-Stop` 的 `release`）。查 WaterMedia 3.0.2 源码确认机制：`ALEngine` 在**创建时**捕获当前线程的 OpenAL 上下文（`this.context = localContext != 0 ? localContext : ALC10.alcGetCurrentContext()`），之后所有非查询方法（`push`/`flush`/`pause`/`play`/`gain`/`speed`/`destroy`）首行都 `requireContext()`，不匹配即抛 `wm_err:1004`。而 MC 的上下文由 `Library.init()` 在**主线程** `alcMakeContextCurrent` 创建、`Library.cleanup()` 在关闭时 `alcDestroyContext` 销毁，且**不使用** `ALC_EXT_thread_local_context`（全 MC 无该扩展引用）→ 上下文是**进程级全局**的，任何线程都能拿到。

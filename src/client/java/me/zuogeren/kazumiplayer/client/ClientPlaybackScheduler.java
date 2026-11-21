@@ -259,9 +259,12 @@ public class ClientPlaybackScheduler {
             long seekMs = sp.resumePositionMs > 0 ? sp.resumePositionMs : screen.getSyncPositionMs();
             sp.resumePositionMs = 0;
             if (sp.player != null && seekMs > 0) sp.player.seek(seekMs);
-            // 启动快照：屏幕处于暂停时立即暂停（不再依赖每秒轮询）
-            if (screen.isPlaybackPaused()) {
-                sp.player.pause();
+            // 启动快照：屏幕处于暂停时立即暂停（不再依赖每秒轮询）。
+            // 此刻播放器可能还在 WAITING（尚无 run 可 latch），pause() 会返回 false——
+            // 不在此重试，交给 handleSyncState 的周期广播（基线未生效就不更新，会再试）
+            if (screen.isPlaybackPaused() && !sp.player.pause()) {
+                KazumiLog.playback.debug("Startup pause deferred at {} (status={})",
+                    screen.getBlockPos(), sp.player.statusToken());
             }
             if (sp.player != null) {
                 attachFailureSkip(screen, sp, mc);

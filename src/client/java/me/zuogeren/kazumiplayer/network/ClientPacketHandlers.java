@@ -194,10 +194,18 @@ public class ClientPacketHandlers implements IClientPacketHandler {
                     // 暂停态变化才应用：周期广播携带相同状态时反复 resume/pause，
                     // 会在 FFmpeg 缓冲饥饿期反复戳播放器内部状态机（日志可见 Pause -> false 刷屏）
                     if (!sp.hasPausedState || sp.lastAppliedPaused != packet.paused()) {
-                        sp.hasPausedState = true;
-                        sp.lastAppliedPaused = packet.paused();
-                        if (packet.paused()) player.pause();
-                        else player.resume();
+                        // 基线只在真正生效后才更新：WaterMedia 的 pause()/resume() 在
+                        // Status.WAITING（尚无 run 可 latch）时返回 false，若此时就把基线置成目标值，
+                        // 后续广播会认为「已应用」而永不重试 → 表现为点了暂停没反应。
+                        // 未生效时保持旧基线，下一次周期广播（每 5 秒）会再试一次。
+                        boolean applied = packet.paused() ? player.pause() : player.resume();
+                        if (applied) {
+                            sp.hasPausedState = true;
+                            sp.lastAppliedPaused = packet.paused();
+                        } else {
+                            KazumiLog.sync.debug("Pause state {} not applied yet at {} (status={})",
+                                packet.paused(), screen.getBlockPos(), player.statusToken());
+                        }
                     }
                 }
             }

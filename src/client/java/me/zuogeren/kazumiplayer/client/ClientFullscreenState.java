@@ -186,14 +186,21 @@ public class ClientFullscreenState {
             && ClientConfig.CONFIG.danmakuBilibiliLive.get();
     }
 
-    /** 空格：暂停/继续（按键重复防抖；直播直连屏忽略） */
+    /**
+     * 空格：暂停/继续（按键重复防抖；直播直连屏忽略）。
+     * 判据取**服务端权威暂停态**（BE NBT 的 PlaybackPaused），不是本地播放器时钟。
+     * 用 {@code player.isPlaying()} 判断会在缓冲期（BUFFERING）与暂停未生效时误判：
+     * 前者让「点暂停」发出 RESUME，后者让「点暂停」反复发 PAUSE 而永远切不回来。
+     */
     public static void togglePause() {
         if (isLiveStream()) return;
         long now = System.currentTimeMillis();
         if (now - lastPauseToggleAt < 250) return;
         lastPauseToggleAt = now;
-        var player = ScreenPlayerManager.getPlayer(screenPos);
-        sendControl(player != null && player.isPlaying() ? PlaybackAction.PAUSE : PlaybackAction.RESUME, 0);
+        var mc = Minecraft.getInstance();
+        boolean paused = mc.level != null && mc.level.getBlockEntity(screenPos)
+            instanceof me.zuogeren.kazumiplayer.screen.VideoScreenBlockEntity be && be.isPlaybackPaused();
+        sendControl(paused ? PlaybackAction.RESUME : PlaybackAction.PAUSE, 0);
     }
 
     /** ←/→ 或 ±10s 按钮：相对 seek，经服务端 forceSeek 定向指令全组即时生效 */

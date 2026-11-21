@@ -284,28 +284,33 @@ public class WaterMediaPlayer {
     }
 
     /**
-     * 暂停。{@code pause()} 在已暂停/已结束/已停止/失败时返回 false（加载期则挂起到管线打开），
-     * 故只在真正生效时通知监听器——否则音响会跟着"暂停"一个仍在出声的屏幕。
+     * 暂停。返回是否真正生效：{@code pause()} 在 Status.WAITING（尚无 run 可 latch）、
+     * 已暂停/已结束/已停止/失败时返回 false（加载期则挂起 intent，管线打开时应用）。
+     * 调用方必须据此决定是否更新自己的状态基线——否则会误以为已应用而永不重试。
      */
-    public void pause() {
+    public boolean pause() {
         if (player == null) {
             pendingPause = true;
-            return;
+            return false;
         }
         if (player.pause()) {
             for (var l : listeners) l.onPause();
+            return true;
         }
+        return false;
     }
 
-    /** 恢复播放；{@code resume()} 仅在暂停态返回 true，其余情形不通知监听器 */
-    public void resume() {
+    /** 恢复播放；返回是否真正生效（{@code resume()} 仅在暂停态返回 true） */
+    public boolean resume() {
         if (player == null) {
             pendingPause = false;
-            return;
+            return false;
         }
         if (player.resume()) {
             for (var l : listeners) l.onResume();
+            return true;
         }
+        return false;
     }
 
     /**

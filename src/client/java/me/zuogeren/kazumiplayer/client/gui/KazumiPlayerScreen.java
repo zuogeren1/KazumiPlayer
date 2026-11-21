@@ -1115,9 +1115,15 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         }
     }
 
+    /**
+     * 暂停/恢复切换：判据取**服务端权威暂停态**（BE NBT 的 PlaybackPaused），不是本地播放器时钟。
+     * 用 {@code player.isPlaying()} 判断会在缓冲期（BUFFERING）与暂停未生效时误判：
+     * 前者让「点暂停」发出 RESUME，后者让「点暂停」反复发 PAUSE 而永远切不回来。
+     */
     private void togglePause() {
-        var player = this.getPlayer();
-        this.sendControl(player != null && player.isPlaying() ? PlaybackAction.PAUSE : PlaybackAction.RESUME, 0);
+        var bound = this.boundScreen();
+        boolean paused = bound != null && bound.isPlaybackPaused();
+        this.sendControl(paused ? PlaybackAction.RESUME : PlaybackAction.PAUSE, 0);
     }
 
     private void sendAction(String action, Object payloadJson) {
