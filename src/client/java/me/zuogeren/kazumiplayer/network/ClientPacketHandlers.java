@@ -86,8 +86,9 @@ public class ClientPacketHandlers implements IClientPacketHandler {
     }
 
     private static void handlePlayStop(PlayStopPacket packet, IPayloadContext context) {
-        // 停播即清本端 B 站档位偏好与档位表（下次起播重新解析）——放在最前，避免提前 return 的路径漏清
+        // 停播即清本端 B 站/抖音档位偏好与档位表（下次起播重新解析）——放在最前，避免提前 return 的路径漏清
         me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.clear(packet.screenPos());
+        me.zuogeren.kazumiplayer.client.DouyinQualityPrefs.clear(packet.screenPos());
         context.enqueueWork(() -> {
             var mc = Minecraft.getInstance();
             if (mc.level == null) return;

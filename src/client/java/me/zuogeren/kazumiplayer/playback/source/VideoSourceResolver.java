@@ -5,10 +5,13 @@ import me.zuogeren.kazumiplayer.client.KazumiClientMessages;
 import me.zuogeren.kazumiplayer.ClientConfig;
 import me.zuogeren.kazumiplayer.client.ScreenPlayerManager;
 import me.zuogeren.kazumiplayer.bilibili.BilibiliApi;
+import me.zuogeren.kazumiplayer.bilibili.DouyinApi;
 import me.zuogeren.kazumiplayer.client.BilibiliCredentials;
 import me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs;
+import me.zuogeren.kazumiplayer.client.DouyinQualityPrefs;
 import me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService;
 import me.zuogeren.kazumiplayer.util.BilibiliUrls;
+import me.zuogeren.kazumiplayer.util.DouyinUrls;
 import me.zuogeren.kazumiplayer.util.HttpUtil;
 import me.zuogeren.kazumiplayer.util.KazumiLog;
 import me.zuogeren.kazumiplayer.util.KazumiMessages;
@@ -78,6 +81,16 @@ public final class VideoSourceResolver {
             return player;
         }
 
+        // 路 1b：抖音链接 —— 本端解析（点播接口无需凭据，纯 JDK HttpClient）。
+        // 抖音网页是 JS VM 保护的壳（分享页 72KB 无数据、aweme/v1/web/ 直接 403），
+        // 嗅探浏览器拿不到可用直链，故与 B 站一样提前分流、不进嗅探链路
+        if (DouyinUrls.isDouyinUrl(episodeUrl) || DouyinUrls.isDouyinUrl(DouyinUrls.extractUrl(episodeUrl))) {
+            KazumiLog.sniff.info("[source] douyin URL, routing to local resolver");
+            player.markResolving();
+            resolveDouyin(screen, episodeUrl, player, session);
+            return player;
+        }
+
         // 路 2：直链 —— 交给播放器，不需要解析
         if (looksLikeDirectVideo(episodeUrl)) {
             KazumiLog.sniff.info("[source] direct video URL, playing without sniffing");
@@ -125,6 +138,71 @@ public final class VideoSourceResolver {
                     dispatchResolve(screen, finalUrl, player, session, false, 0);
                 });
             })
+            .exceptionally(t -> {
+                failPlayback(screen, unwrap(t));
+                return null;
+            });
+    }
+
+    /**
+     * 抖音链接起播：本端解析（点播接口无需凭据）。短链先跟随重定向展开。
+     *
+     * <p>抖音直链必须带 {@code Referer: https://www.douyin.com/}（实测缺它一律 403，带上即 206），
+     * 而普通 MRL 表达不了请求头，故与 B 站直播同路：登记进 {@code BiliStreamRegistry} 换一个
+     * {@code kazumibili://} 自定义 URI，由 {@code KazumiBiliPlatform} 把 Referer 带进播放器。
+     */
+    private void resolveDouyin(VideoScreenBlockEntity screen, String episodeUrl,
+            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
+        reportResolveStatus(screen, me.zuogeren.kazumiplayer.network.packet.ResolveStatusPacket.STATUS_RESOLVING);
+        // 分享口令里链接是嵌在文本中的，先摘出来；摘不到就用原文（可能本身就是纯链接）
+        String url = DouyinUrls.extractUrl(episodeUrl);
+        if (url == null) url = episodeUrl.trim();
+        final String pageUrl = url;
+        if (!DouyinUrls.isShortLink(pageUrl)) {
+            runDouyinResolve(screen, pageUrl, player, session);
+            return;
+        }
+        KazumiLog.sniff.info("[source] expanding douyin short link: {}", pageUrl);
+        DouyinApi.expandShortLink(pageUrl)
+            .thenAccept(finalUrl -> {
+                KazumiLog.sniff.info("[source] douyin short link resolved to {}", finalUrl);
+                Minecraft.getInstance().execute(() -> {
+                    if (session.player != player || screen.isRemoved()) return;
+                    runDouyinResolve(screen, finalUrl, player, session);
+                });
+            })
+            .exceptionally(t -> {
+                failPlayback(screen, unwrap(t));
+                return null;
+            });
+    }
+
+    /** 抖音解析主体：按本屏偏好档位请求，成功后登记带 Referer 的自定义 URI 并起播 */
+    private void runDouyinResolve(VideoScreenBlockEntity screen, String pageUrl,
+            WaterMediaPlayer player, ScreenPlayerManager.ScreenPlayer session) {
+        var pos = screen.getBlockPos();
+        int preferredQn = DouyinQualityPrefs.preferredQn(pos);
+        DouyinApi.resolveVideo(pageUrl, preferredQn)
+            .thenAccept(stream -> Minecraft.getInstance().execute(() -> {
+                if (Minecraft.getInstance().level == null || screen.isRemoved() || session.player != player) {
+                    KazumiLog.sniff.debug("[source] discard stale douyin resolution for {}", pos);
+                    player.stop();
+                    return;
+                }
+                DouyinQualityPrefs.setInfo(pos, new DouyinQualityPrefs.Info(
+                    stream.qualities().stream().map(DouyinApi.Quality::toGuiQuality).toList(),
+                    stream.currentQn()));
+                // 直链带签名时效：登记时把过期时刻一并交给平台层，过期后起播会给出可读原因
+                String mediaUri = me.zuogeren.kazumiplayer.client.bilibili.BiliStreamRegistry
+                    .registerSingle(stream.videoUrl(), linkDeadlineOf(stream.videoUrl()), DouyinApi.REFERER);
+                String playUri = mediaUri != null ? mediaUri : stream.videoUrl();
+                KazumiLog.sniff.info("[source] douyin stream resolved (qn={}, {} qualities, host={}): {}",
+                    stream.currentQn(), stream.qualities().size(), hostOf(stream.videoUrl()),
+                    stream.title().isEmpty() ? stream.awemeId() : stream.title());
+                // 抖音无片内弹幕源：关掉上一段 B 站弹幕的附件
+                me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(pos);
+                startWhenValid(screen, session, player, playUri);
+            }))
             .exceptionally(t -> {
                 failPlayback(screen, unwrap(t));
                 return null;

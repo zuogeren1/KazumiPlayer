@@ -354,14 +354,11 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         boolean selfWatching = this.isSelfWatching();
         this.joinButton.active = !selfWatching;
         this.leaveButton.active = selfWatching;
-        // B 站清晰度：绑定屏幕正在播 B 站链接（视频页或直播间）且已解析出档位表时可用
-        // （其余解析链路无档位概念；直播档位来自 getRoomPlayInfo 的 accept_qn）
+        // 清晰度：绑定屏幕正在播 B 站/抖音链接且已解析出档位表时可用
+        // （其余解析链路无档位概念；B 站直播档位来自 getRoomPlayInfo 的 accept_qn，抖音按码率自编 1..N）
         if (this.qualityButton != null) {
-            var qualityScreen = this.boundScreen();
-            var qualityInfo = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
-            boolean qualityAvailable = qualityScreen != null && qualityInfo != null
-                && !qualityInfo.qualities().isEmpty()
-                && me.zuogeren.kazumiplayer.util.BilibiliUrls.isBilibiliUrl(qualityScreen.getEpisodeUrl());
+            var qualityInfo = this.qualityInfo();
+            boolean qualityAvailable = qualityInfo != null && !qualityInfo.qualities().isEmpty();
             this.qualityButton.active = qualityAvailable;
             if (!qualityAvailable) this.qualityDropdownOpen = false;
             this.updateQualityButtonLabel(qualityInfo);
@@ -412,7 +409,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
 
         // 清晰度下拉展开层（档位来自 B 站播放接口的 accept_quality/accept_description）
         if (this.qualityDropdownOpen && this.qualityButton != null) {
-            var qInfo = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
+            var qInfo = this.qualityInfo();
             if (qInfo != null && !qInfo.qualities().isEmpty()) {
                 int dx = this.qualityButton.getX();
                 int dw = Math.max(this.qualityButton.getWidth(), 110);
@@ -1000,7 +997,35 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             new GuiPayloads.QueryChaptersPayload(this.selectedRule, this.selectedResultId, this.selectedRoad));
     }
 
-    // ---- B 站清晰度下拉（仅本端生效，不影响其他观看者） ----
+    // ---- 清晰度下拉（B 站 / 抖音，仅本端生效，不影响其他观看者） ----
+
+    /**
+     * 本屏当前可用的档位表：按屏幕正在播的链接来源选 B 站或抖音的偏好表。
+     * 两者档位编号体系不同（B 站官方 qn 越大越清晰；抖音按码率自编 1..N，1 最高），
+     * 故不能合并成一张表，但对外都适配成 {@code BilibiliApi.Quality} 供下拉复用。
+     * 非 B 站/抖音源或尚未解析出档位时返回 null（下拉禁用）。
+     */
+    private me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.Info qualityInfo() {
+        var screen = this.boundScreen();
+        if (screen == null) return null;
+        String url = screen.getEpisodeUrl();
+        if (me.zuogeren.kazumiplayer.util.BilibiliUrls.isBilibiliUrl(url)) {
+            return me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
+        }
+        if (me.zuogeren.kazumiplayer.util.DouyinUrls.isDouyinUrl(url)) {
+            var dy = me.zuogeren.kazumiplayer.client.DouyinQualityPrefs.info(this.screenPos);
+            return dy == null ? null
+                : new me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.Info(dy.qualities(), dy.currentQn());
+        }
+        return null;
+    }
+
+    /** 本屏是否抖音源（决定切档走哪条重启路径） */
+    private boolean isDouyinSource() {
+        var screen = this.boundScreen();
+        return screen != null
+            && me.zuogeren.kazumiplayer.util.DouyinUrls.isDouyinUrl(screen.getEpisodeUrl());
+    }
 
     /**
      * 切换本屏清晰度：记录偏好与重启前位置，由调度器停旧播放器按新档位重新解析起播，
@@ -1008,7 +1033,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
      */
     private void selectQuality(int idx) {
         this.qualityDropdownOpen = false;
-        var info = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
+        var info = this.qualityInfo();
         if (info == null || idx < 0 || idx >= info.qualities().size()) return;
         var quality = info.qualities().get(idx);
         // 本账号拿不到的档位（多为大会员专属）：点选不会生效，直接说明原因而不是静默降级
@@ -1019,8 +1044,18 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
             return;
         }
         var sp = ScreenPlayerManager.get(this.screenPos);
-        // 直播无稳定时间轴：切档后重新拉流即可，不续播位置（对 m3u8 直播 seek 无意义）
         var bound = this.boundScreen();
+        if (this.isDouyinSource()) {
+            // 抖音：记偏好后走「重启本屏播放」路径（调度器停旧播放器 → 按新 qn 重新解析 → 续播原进度）。
+            // 抖音直链是带签名的单流 mp4，没有 B 站那种双播放器预热交接的必要（解析本身很快）
+            me.zuogeren.kazumiplayer.client.DouyinQualityPrefs.setPreferredQn(this.screenPos, quality.qn());
+            long keepMs = sp.player != null ? Math.max(0, sp.player.getTimeMs()) : 0;
+            sp.restartRequested = true;
+            sp.resumePositionMs = keepMs;
+            setStatus(Component.translatable("kazumiplayer.gui.main.status_quality_switched", quality.label()));
+            return;
+        }
+        // 直播无稳定时间轴：切档后重新拉流即可，不续播位置（对 m3u8 直播 seek 无意义）
         boolean live = bound != null
             && me.zuogeren.kazumiplayer.util.BilibiliUrls.isLiveRoom(bound.getEpisodeUrl());
         long keepMs = (!live && sp.player != null) ? Math.max(0, sp.player.getTimeMs()) : 0;
@@ -1079,7 +1114,7 @@ public class KazumiPlayerScreen extends Screen implements GuiClientState.Listene
         }
         // 清晰度下拉展开时优先处理：点中档位则切清晰度（本端重启播放并续播）
         if (this.qualityDropdownOpen && this.qualityButton != null) {
-            var qInfo = me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.info(this.screenPos);
+            var qInfo = this.qualityInfo();
             if (qInfo != null && !qInfo.qualities().isEmpty()) {
                 int dx = this.qualityButton.getX();
                 int dw = Math.max(this.qualityButton.getWidth(), 110);

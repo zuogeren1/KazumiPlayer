@@ -27,10 +27,10 @@ public final class KazumiBiliPlatform implements Platform {
     /** 自定义 URI 的 scheme，与 {@link BiliStreamRegistry#SCHEME} 保持一致 */
     public static final String SCHEME = "kazumibili";
 
-    /** B 站 CDN 会对非浏览器 UA 与缺失 Referer 的请求做防盗链拒绝 */
+    /** CDN 会对非浏览器 UA 与缺失 Referer 的请求做防盗链拒绝（B 站与抖音同此） */
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-    /** 防盗链 Referer（点播：视频页/DASH 流） */
+    /** 防盗链 Referer 兜底（点播：B 站视频页/DASH 流）；注册时给了 referer 就用注册的那个 */
     private static final String REFERER = "https://www.bilibili.com/";
 
     /** 直播防盗链 Referer：直播 CDN（FLV 节点）只认直播站来源 */

@@ -387,6 +387,7 @@ public class ClientPlaybackScheduler {
             sp.resetStartup(); // 新集：阶段、尝试次数与失败状态全部复位
             // 档位表只对产生它的那次解析有效：换源后先清掉，避免阶段行显示上一个源的档位名
             me.zuogeren.kazumiplayer.client.BilibiliQualityPrefs.clearInfo(screen.getBlockPos());
+            me.zuogeren.kazumiplayer.client.DouyinQualityPrefs.clearInfo(screen.getBlockPos());
             me.zuogeren.kazumiplayer.client.danmaku.source.BilibiliDanmakuService.getInstance().detach(screen.getBlockPos()); // 换集断开旧弹幕源（在途结果随代次作废）
             // 换集清屏：上一集的在途/驻留弹幕作废（对即时项幂等双保险）
             me.zuogeren.kazumiplayer.client.danmaku.ClientDanmakuStore.clear(screen.getBlockPos());

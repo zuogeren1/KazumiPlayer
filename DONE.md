@@ -1,5 +1,21 @@
 # 已完成（TODO 归档）
 
+## 抖音点播解析（2026-11-21）
+
+- [x] **新增抖音链接解析与播放（点播，本端解析）**：调研 GitHub 现有实现后选定方案——[xingmihai/short-video-parser](https://github.com/xingmihai/short-video-parser)（纯 Kotlin、MIT、零 JS bundle）的解析思路 + [yangyanlu06/douyin-api-bypass](https://github.com/yangyanlu06/douyin-api-bypass) 的 2026-11 实测记录。
+  **实测结论（2026-11-21，本机复现）**：
+  · `www.douyin.com/aweme/v1/web/aweme/detail/` → **403 `Blocked by ArgusSecurityPlugin Uifid Not Found`**
+  · `iesdouyin.com/web/api/v2/aweme/iteminfo/` → 200 但 **body 0 字节**
+  · 分享页 `_ROUTER_DATA` → 72KB 空壳（`_$jsvmprt` JS VM 保护，无 `videoInfoRes`）
+  · **`api.amemv.com/aweme/v1/aweme/detail/?aweme_id=<id>&aid=6383&device_platform=web` → 200 + 完整 `aweme_detail`（130KB）** ← 唯一可用
+  · 直链 + `Referer: https://www.douyin.com/` → **206 `video/mp4`**（部分 CDN 节点缺 Referer 会 403）
+  · 直播 `live.douyin.com/webcast/room/web/enter/` → 200 但 body 0 字节（需 `ttwid` + `a_bogus` 签名，纯 HTTP 走不通）→ **直播不做**
+  **实现**（零新增第三方依赖，纯 JDK HttpClient）：`util/DouyinUrls`（链接识别 + 分享口令提取 + aweme_id 解析，12 项单元验证全通过）→ `VideoSourceResolver.resolveDouyin`（短链展开 → 解析 → 登记带 Referer 的自定义 URI → 起播）→ `common/bilibili/DouyinApi`（详情接口 + `bit_rate` 档位表，23 档按码率降序自编 qn 1..N，1 最高）→ `client/DouyinQualityPrefs`（档位表存 `BilibiliApi.Quality` 适配类型，复用 GUI 下拉链路）。
+  直链必须带 Referer 而普通 MRL 表达不了请求头 → 复用 B 站直播那条平台通道（`BiliStreamRegistry.registerSingle` + `KazumiBiliPlatform`）。切档走「记偏好 + restartRequested + resumePositionMs」重启本屏播放（抖音是单流 mp4，无需 B 站的双播放器预热交接）。
+  踩坑：`duration` 字段实测是**毫秒**（663434 = 11 分钟），初版按秒处理导致时长错 1000 倍，改为按量级判断。
+  验证：`gradlew build` BUILD SUCCESSFUL；`DouyinUrls` 12 项断言全通过；真实作品端到端解析出 23 档 + 最高档直链可播。**实机复测待用户确认**。
+
+
 > 由 `TODO.md` 归档的已完成项（`[x]`），保留原文与实测证据，按原分区排列；新完成的条目请追加到对应分区。
 > 未完成项与仍在生效的上下文见 [`TODO.md`](TODO.md)。
 
